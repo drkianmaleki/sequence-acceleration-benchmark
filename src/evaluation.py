@@ -26,10 +26,9 @@ import numpy as np
 import pandas as pd
 from typing import List, Dict
 
-import config as CFG_MOD
-from accelerators import METHODS, METHOD_NAMES
-from generators   import GENERATORS, REGIME_NAMES, TRUTH
-
+import src.config as CFG_MOD
+from src.accelerators import METHODS, METHOD_NAMES
+from src.generators   import GENERATORS, REGIME_NAMES, TRUTH
 
 # ── Method metadata ────────────────────────────────────────────────────────────
 

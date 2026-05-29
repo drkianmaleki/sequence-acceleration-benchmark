@@ -19,8 +19,9 @@ Paste phase0_unit_tests.txt into the conversation when done.
 import os, sys
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-if _HERE not in sys.path:
-    sys.path.insert(0, _HERE)
+_ROOT = os.path.dirname(_HERE)
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
 
 from tests.test_accelerators import run_all_tests, write_report
 

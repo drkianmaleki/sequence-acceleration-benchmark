@@ -51,12 +51,12 @@ import os, sys, argparse, math
 import pandas as pd
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-if _HERE not in sys.path:
-    sys.path.insert(0, _HERE)
+_ROOT = os.path.dirname(_HERE)
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
 
-from phase5b import run_all
-import config as CFG_MOD
-
+from phases.phase5b import run_all
+import src.config as CFG_MOD
 
 def parse_args():
     p = argparse.ArgumentParser(
@@ -91,7 +91,7 @@ FULL = dict(
 
 
 def _n_evals(cfg):
-    from accelerators import METHOD_NAMES
+    from src.accelerators import METHOD_NAMES
     n1  = (len(cfg['l_inf_values'])   * len(cfg['noise_list'])
            * cfg['n_seeds'] * 18 * 2 * len(cfg['future_list']))
     n2  = (len(cfg['window_lengths']) * len(cfg['noise_list'])

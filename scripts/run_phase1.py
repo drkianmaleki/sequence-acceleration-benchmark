@@ -41,12 +41,13 @@ import sys
 import argparse
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-if _HERE not in sys.path:
-    sys.path.insert(0, _HERE)
+_ROOT = os.path.dirname(_HERE)   # one level up: the repo root
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
 
-import config as CFG_MOD
-from evaluation import run_phase1
-from plots      import make_all_figures
+import src.config as CFG_MOD
+from src.evaluation import run_phase1
+from src.plots      import make_all_figures
 
 
 # ── Argument parsing ───────────────────────────────────────────────────────────

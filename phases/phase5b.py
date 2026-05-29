@@ -81,9 +81,9 @@ import matplotlib.pyplot as plt
 
 warnings.filterwarnings('ignore')
 
-import config as CFG_MOD
-from accelerators import METHODS, METHOD_NAMES
-from generators   import GENERATORS, REGIME_NAMES, TRUTH
+import src.config as CFG_MOD
+from src.accelerators import METHODS, METHOD_NAMES
+from src.generators   import GENERATORS, REGIME_NAMES, TRUTH
 
 # ── Method sets ────────────────────────────────────────────────────────────────
 CASCADE_METHODS = [

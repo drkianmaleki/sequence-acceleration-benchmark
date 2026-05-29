@@ -26,11 +26,12 @@ What to paste back
 import os, sys, argparse
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-if _HERE not in sys.path:
-    sys.path.insert(0, _HERE)
+_ROOT = os.path.dirname(_HERE)
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
 
-from phase5a import run_all, SELECTORS, DANGEROUS, EPS
-from accelerators import METHOD_NAMES
+from phases.phase5a import run_all, SELECTORS, DANGEROUS, EPS
+from src.accelerators import METHOD_NAMES
 
 def parse_args():
     p = argparse.ArgumentParser()

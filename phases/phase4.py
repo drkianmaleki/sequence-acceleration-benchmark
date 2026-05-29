@@ -56,9 +56,9 @@ import matplotlib.patches as mpatches
 
 warnings.filterwarnings('ignore')
 
-import config as CFG_MOD
-from accelerators import METHODS
-from generators   import GENERATORS, REGIME_NAMES, TRUTH
+import src.config as CFG_MOD
+from src.accelerators import METHODS
+from src.generators   import GENERATORS, REGIME_NAMES, TRUTH
 
 # ── Method set ─────────────────────────────────────────────────────────────────
 PHASE4_METHODS = [

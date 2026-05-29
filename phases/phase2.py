@@ -52,9 +52,9 @@ from matplotlib.gridspec import GridSpec
 
 warnings.filterwarnings('ignore')
 
-import config as CFG_MOD
-from accelerators import METHODS
-from generators   import GENERATORS, REGIME_NAMES, TRUTH
+import src.config as CFG_MOD
+from src.accelerators import METHODS
+from src.generators   import GENERATORS, REGIME_NAMES, TRUTH
 
 # ── Reduced method set ─────────────────────────────────────────────────────────
 PHASE2_METHODS = [

@@ -50,10 +50,11 @@ import os, sys, argparse, math
 import pandas as pd
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-if _HERE not in sys.path:
-    sys.path.insert(0, _HERE)
+_ROOT = os.path.dirname(_HERE)
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
 
-from phase4 import run_all
+from phases.phase4 import run_all
 
 def parse_args():
     p = argparse.ArgumentParser(description='Phase 4 — Stability diagnostics')

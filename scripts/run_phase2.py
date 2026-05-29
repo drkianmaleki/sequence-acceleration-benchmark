@@ -50,15 +50,15 @@ These are the key inputs for the Phase 2 analysis and report.
 import os, sys, argparse
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-if _HERE not in sys.path:
-    sys.path.insert(0, _HERE)
+_ROOT = os.path.dirname(_HERE)
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
 
-from phase2 import (
+from phases.phase2 import (
     run_sweep, build_phase_diagrams,
     run_correlation_analysis, test_simple_rules,
     make_all_figures, PHASE2_METHODS,
 )
-
 # ── Argument parsing ───────────────────────────────────────────────────────────
 
 def parse_args():

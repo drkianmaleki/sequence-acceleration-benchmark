@@ -41,10 +41,11 @@ After running, paste:
 import os, sys
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-if _HERE not in sys.path:
-    sys.path.insert(0, _HERE)
+_ROOT = os.path.dirname(_HERE)
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
 
-from phase3 import run_phase3
+from phases.phase3 import run_phase3
 
 PHASE2_DIR  = os.path.join('results', 'phase2')
 PHASE3_DIR  = os.path.join('results', 'phase3')

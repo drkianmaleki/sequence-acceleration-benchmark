@@ -38,9 +38,9 @@ import matplotlib.patches as mpatches
 
 warnings.filterwarnings('ignore')
 
-import config as CFG_MOD
-from accelerators import METHODS, METHOD_NAMES
-from generators   import GENERATORS, REGIME_NAMES, TRUTH
+import src.config as CFG_MOD
+from src.accelerators import METHODS, METHOD_NAMES
+from src.generators   import GENERATORS, REGIME_NAMES, TRUTH
 
 PHASE2_METHODS = [
     'current_value', 'richardson_1', 'richardson_a10',
