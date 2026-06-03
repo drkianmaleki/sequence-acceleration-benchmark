@@ -142,7 +142,7 @@ def gen_staircase(n: np.ndarray, rng: np.random.RandomState,
     steps = [(0, 0.70), (20, 0.55), (40, 0.42),
              (65, 0.28), (90, 0.18), (130, 0.10), (170, 0.05)]
     s = np.full_like(n, _L, dtype=float)
-    for threshold, value in reversed(steps):
+    for threshold, value in steps:          # forward order: later steps overwrite earlier
         s = np.where(n >= threshold, _L + value, s)
     s = np.maximum(s, _L)
     return _gauss(s, sigma, rng)

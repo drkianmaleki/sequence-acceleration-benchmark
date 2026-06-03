@@ -13,14 +13,6 @@ New in v3
     any single method from dominating)
   * phase5a_by_sigma.csv added — shows whether diagnostic adds value at
     sigma=0.005 and sigma=0.020 vs sigma=0.0
-
-What to paste back
-------------------
-    1. Console summary
-    2. results/phase5a/phase5a_ensemble.csv       (small)
-    3. results/phase5a/phase5a_ablation.csv       (small)
-    4. results/phase5a/phase5a_by_sigma.csv       (medium — key analysis)
-    5. results/phase5a/phase5a_method_weights.csv (medium)
 """
 
 import os, sys, argparse
@@ -172,7 +164,7 @@ def main():
 
     print(f'\n  All files saved to: {out_dir}/')
     print('=' * 72)
-    print('\n  NEXT STEP: paste console + ensemble.csv + ablation.csv + by_sigma.csv')
+
 
 if __name__ == '__main__':
     main()

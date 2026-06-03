@@ -37,14 +37,6 @@ Key output files
     phase2_correlations.csv       Spearman feature–failure correlations.
     phase2_rules.csv              Threshold rule performance table.
     figure_p2_01 ... figure_p2_05 Five publication figures.
-
-What to paste back
-------------------
-After running, paste:
-  1. The console summary printed at the end.
-  2. The contents of phase2_correlations.csv (small).
-  3. The contents of phase2_rules.csv (small).
-These are the key inputs for the Phase 2 analysis and report.
 """
 
 import os, sys, argparse
@@ -174,11 +166,6 @@ def main():
 
     print(f'\n  All files saved to: {out_dir}/')
     print('=' * 72)
-    print('\n  NEXT STEP:')
-    print('  Paste the console output above, plus:')
-    print('    results/phase2/phase2_correlations.csv')
-    print('    results/phase2/phase2_rules.csv')
-    print('  back into the conversation for analysis.\n')
 
 
 if __name__ == '__main__':

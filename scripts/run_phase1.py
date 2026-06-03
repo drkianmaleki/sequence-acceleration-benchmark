@@ -1,17 +1,13 @@
 """
 run_phase1.py
 =============
-Phase 1 entry point.
+Phase 1 entry point — full synthetic benchmark.
 
-Usage (from inside sequence_accel/)
-------------------------------------
-    python run_phase1.py --quick     5 seeds, sigma=0, horizon 5000 only
-                                     ~3 min on a modern laptop
-                                     Run this first to sanity-check results.
-
-    python run_phase1.py --full      30 seeds, 3 noise levels, 3 horizons
-                                     ~20-40 min depending on hardware
-                                     Use for publication results.
+Usage
+-----
+    cd sequence-acceleration-benchmark/
+    python scripts/run_phase1.py --quick     # 5 seeds, sigma=0, horizon 5000 only (~3 min)
+    python scripts/run_phase1.py --full      # 30 seeds, 3 noise, 3 horizons (~20-40 min)
 
 Output directory:  results/phase1/
 
@@ -20,20 +16,11 @@ Key output files
     phase1_aggregated.csv       Per (method, regime, noise, horizon) stats.
                                 Primary data file; ~8 K rows in full mode.
     phase1_global.csv           Pooled across regimes; one row per
-                                (method, horizon). The paper ranking table.
-    phase1_regime_best.csv      Best method per (regime, horizon).
+                                (method, horizon). Source for Table 4 / Table 22.
+    phase1_regime_best.csv      Best method per (regime, horizon). Source for Table 5 / Table 23.
     phase1_heatmap_n{H}.csv     Stability score matrix for horizon H.
     phase1_raw_sample.csv       Full per-seed records, noiseless case only.
     figure_01 ... figure_06     Six publication figures.
-
-What to do with results
------------------------
-After --quick: paste phase1_global.csv (or a summary) back into the
-conversation.  We check whether rankings match expectations before the
-full run.
-
-After --full: paste phase1_global.csv.  We analyse the results and prepare
-the Phase 1 verdict report.
 """
 
 import os
@@ -155,9 +142,6 @@ def main():
 
     print(f'  All files saved to: {out_dir}/')
     print('=' * 72 + '\n')
-    print('  NEXT STEP:')
-    print('  Paste the contents of results/phase1/phase1_global.csv')
-    print('  back into the conversation for analysis.')
 
 
 if __name__ == '__main__':

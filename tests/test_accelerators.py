@@ -44,8 +44,8 @@ for _p in [_PACKAGE_DIR]:
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from accelerators import METHODS, METHOD_NAMES  # noqa: E402
-import config as CFG_MOD                        # noqa: E402
+from src.accelerators import METHODS, METHOD_NAMES  # noqa: E402
+import src.config as CFG_MOD                        # noqa: E402
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 

@@ -36,14 +36,6 @@ Key output files
     phase4_ensemble.csv                  Ensemble vs fixed selectors
     phase4_obs_reliability.csv           Diagnostic r vs obs_idx
     figure_p4_01 ... figure_p4_05        Five publication figures
-
-What to paste back
-------------------
-After running, paste:
-    1. Console summary
-    2. phase4_diagnostic_correlations.csv  (small)
-    3. phase4_rejection_rules.csv          (medium — filter to precision >= 0.3)
-    4. phase4_obs_reliability.csv          (small)
 """
 
 import os, sys, argparse, math
@@ -175,11 +167,7 @@ def main():
 
     print(f'\n  All files saved to: {out_dir}/')
     print('=' * 72)
-    print('\n  NEXT STEP:')
-    print('  Paste the console output above plus:')
-    print('    results/phase4/phase4_diagnostic_correlations.csv')
-    print('    results/phase4/phase4_rejection_rules.csv')
-    print('    results/phase4/phase4_obs_reliability.csv')
+
 
 if __name__ == '__main__':
     main()

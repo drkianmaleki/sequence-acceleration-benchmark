@@ -28,14 +28,6 @@ Key output files
     phase3_cv_results.csv            Leave-one-regime-out CV results
     phase3_regime_classifier.csv     Regime classification accuracy
     figure_p3_01 ... figure_p3_05    Five publication figures
-
-What to paste back
-------------------
-After running, paste:
-  1. The console summary printed below.
-  2. phase3_selector_comparison.csv  (small)
-  3. phase3_cv_results.csv           (small)
-  4. phase3_regime_classifier.csv    (small)
 """
 
 import os, sys
@@ -119,11 +111,6 @@ def main():
 
     print(f'\n  Files saved to: {PHASE3_DIR}/')
     print('=' * 72)
-    print('\n  NEXT STEP:')
-    print('  Paste the console output above plus:')
-    print('    results/phase3/phase3_selector_comparison.csv')
-    print('    results/phase3/phase3_cv_results.csv')
-    print('    results/phase3/phase3_regime_classifier.csv')
 
 
 if __name__ == '__main__':

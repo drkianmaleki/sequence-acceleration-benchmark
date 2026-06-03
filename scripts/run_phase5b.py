@@ -37,14 +37,6 @@ Key output files
     figure_p5b_01_linf.png
     figure_p5b_02_window.png
     figure_p5b_03_catmult.png
-
-What to paste back
-------------------
-After running, paste:
-    1. Console summary
-    2. results/phase5b/phase5b_sweep1_global.csv   (small)
-    3. results/phase5b/phase5b_sweep2_global.csv   (small)
-    4. results/phase5b/phase5b_sweep3_concordance.csv  (tiny)
 """
 
 import os, sys, argparse, math
@@ -193,8 +185,6 @@ def main():
 
     print(f'\n  All files saved to: {out_dir}/')
     print('=' * 72)
-    print('\n  NEXT STEP: paste console + sweep1_global + sweep2_global '
-          '+ sweep3_concordance')
 
 
 if __name__ == '__main__':

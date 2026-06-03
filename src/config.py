@@ -7,8 +7,9 @@ everywhere.  Nothing in this file has side effects.
 
 Reference
 ---------
-Maleki, K. (2026). Regime-Dependent Sequence Acceleration for Adaptive
-Convergence Estimation in Gradient Boosting. Working paper.
+Maleki, K. (2026). Finite-Horizon Learning-Curve Prediction for Gradient
+Boosting: Regime Dependence, Failure Detection, and Conservative
+Extrapolation Rules. Machine Learning (submitted).
 """
 
 # ── Asymptotic target ──────────────────────────────────────────────────────────
