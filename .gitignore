@@ -5,7 +5,7 @@ results/phase2/phase2_sweep_aggregated.csv
 results/phase5a/phase5a_raw.csv
 
 # ── Downloaded datasets (generated at runtime via OpenML) ─────────────────────
-data/
+data/*
 !data/README.md
 
 # ── Python ────────────────────────────────────────────────────────────────────
