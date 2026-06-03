@@ -1,0 +1,11 @@
+obs_idx,future_idx,selector,mean_gap_vs_oracle,n
+60,5000,threshold_ens_010,0.12383,180
+60,5000,threshold_ens_safe,0.123636,180
+60,5000,diag_ensemble_51,0.145681,180
+60,5000,equal_ensemble_51,0.123269,180
+60,5000,fixed_rational,0.071618,180
+90,5000,threshold_ens_010,0.091651,180
+90,5000,threshold_ens_safe,0.091696,180
+90,5000,diag_ensemble_51,0.089418,180
+90,5000,equal_ensemble_51,0.091285,180
+90,5000,fixed_rational,0.06047,180

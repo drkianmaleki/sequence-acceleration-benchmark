@@ -1,0 +1,8 @@
+comparison,future_idx,mean_improvement,n
+threshold_vs_equal_51,5000,-0.000464,360
+threshold_vs_rational,5000,-0.041697,360
+capped_diag_vs_equal,5000,-0.010273,360
+diag_vs_equal_51,5000,-0.010273,360
+weighting_gain_9,5000,-0.000291,360
+filter_benefit,5000,-7.4e-05,360
+pool_expansion_gain,5000,-0.029288,360

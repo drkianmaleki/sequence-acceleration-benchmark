@@ -1,0 +1,318 @@
+========================================================================
+  PHASE 0 UNIT TEST REPORT
+  Sequence Acceleration — Validation on Known Analytic Sequences
+========================================================================
+
+────────────────────────────────────────────────────────────────────────
+  GEOM: Geometric r=0.92 — algebraic methods should be exact
+  Threshold: >= 10x improvement  (or abs_error < 1e-08 = PASS)
+  Pass: 14/51   Valid: 43/51
+────────────────────────────────────────────────────────────────────────
+  Method                       Estimate     AbsError    Improve   Result
+  ──────────────────────── ──────────── ──────────── ────────── ────────
+  geom_avg_diff                0.010000     0.00e+00      exact     PASS
+  shanks_1                     0.010000     0.00e+00      exact     PASS
+  wynn_eps_1                   0.010000     0.00e+00      exact     PASS
+  levin_t1                     0.010000     0.00e+00      exact     PASS
+  best_shanks_wynn             0.010000     0.00e+00      exact     PASS
+  levin_t2                     0.010000     0.00e+00 310843747217.60x     PASS
+  levin_v1                     0.010000     0.00e+00 238235779996.98x     PASS
+  levin_u2                     0.010000     0.00e+00 204971219916.69x     PASS
+  levin_v2                     0.010000     0.00e+00 4957529066.25x     PASS
+  single_exp_fit               0.010000     0.00e+00 1443565959.79x     PASS
+  log_linear                   0.010000     0.00e+00 103763899.12x     PASS
+  double_exp_fit               0.010000     0.00e+00 156965.52x     PASS
+  brezinski_theta2             0.010004     3.94e-06    111.94x     PASS
+  brezinski_theta1             0.009958     4.16e-05     10.58x     PASS
+  levin_u1                     0.009923     7.72e-05      5.70x     fail
+  anderson_3                   0.010439     4.39e-04      1.00x     fail
+  anderson_2                   0.010439     4.39e-04      1.00x     fail
+  anderson_1                   0.010440     4.40e-04      1.00x     fail
+  current_value                0.010441     4.41e-04      1.00x     fail
+  wynn_rho_1                   0.009521     4.79e-04      0.92x     fail
+  wynn_rho_2                   0.010521     5.21e-04      0.85x     fail
+  wynn_rho_3                   0.009434     5.66e-04      0.78x     fail
+  log_fit                      0.011232     1.23e-03      0.36x     fail
+  neville_3                    0.007028     2.97e-03      0.15x     fail
+  stability_weighted           0.005877     4.12e-03      0.11x     fail
+  neville_4                    0.005449     4.55e-03      0.10x     fail
+  neville_2                    0.016282     6.28e-03      0.07x     fail
+  pade_22                      0.016886     6.89e-03      0.06x     fail
+  pade_23                      0.000609     9.39e-03      0.05x     fail
+  rational_fit                 0.000276     9.72e-03      0.05x     fail
+  pade_12                      0.000134     9.87e-03      0.04x     fail
+  median_ensemble              0.000134     9.87e-03      0.04x     fail
+  richardson_1                 0.000057     9.94e-03      0.04x     fail
+  richardson_2                 0.000025     9.98e-03      0.04x     fail
+  richardson_3                 0.000015     9.98e-03      0.04x     fail
+  pade_11                      0.000012     9.99e-03      0.04x     fail
+  pade_13                     -0.000000     1.00e-02      0.04x     fail
+  weniger_d1                  -0.000000     1.00e-02      0.04x     fail
+  weniger_d2                  -0.000000     1.00e-02      0.04x     fail
+  richardson_a20              -0.000781     1.08e-02      0.04x     fail
+  richardson_a10              -0.023612     3.36e-02      0.01x     fail
+  richardson_a05              -0.060851     7.09e-02      0.01x     fail
+  pade_21                      1.567514     1.56e+00      0.00x     fail
+  linear                        INVALID            —          —  INVALID
+  shanks_2                      INVALID            —          —  INVALID
+  shanks_3                      INVALID            —          —  INVALID
+  shanks_4                      INVALID            —          —  INVALID
+  wynn_eps_2                    INVALID            —          —  INVALID
+  wynn_eps_3                    INVALID            —          —  INVALID
+  pade_31                       INVALID            —          —  INVALID
+  pade_32                       INVALID            —          —  INVALID
+
+────────────────────────────────────────────────────────────────────────
+  HARMONIC: Harmonic (power-law alpha=1) — Richardson target
+  Threshold: >= 5x improvement  (or abs_error < 1e-08 = PASS)
+  Pass: 26/51   Valid: 49/51
+────────────────────────────────────────────────────────────────────────
+  Method                       Estimate     AbsError    Improve   Result
+  ──────────────────────── ──────────── ──────────── ────────── ────────
+  wynn_rho_2                   0.010000     0.00e+00 3917584132217.60x     PASS
+  wynn_rho_1                   0.010000     0.00e+00 1919034699120.23x     PASS
+  levin_u2                     0.010000     0.00e+00 5908334919.02x     PASS
+  levin_v2                     0.010000     0.00e+00 47776217.24x     PASS
+  levin_u1                     0.009875     1.25e-04     88.02x     PASS
+  levin_v1                     0.009872     1.28e-04     86.07x     PASS
+  richardson_2                 0.009866     1.34e-04     81.89x     PASS
+  richardson_1                 0.009866     1.34e-04     81.89x     PASS
+  pade_13                      0.010200     2.00e-04     55.00x     PASS
+  rational_fit                 0.010200     2.00e-04     54.97x     PASS
+  pade_31                      0.010200     2.00e-04     54.97x     PASS
+  pade_11                      0.010200     2.00e-04     54.96x     PASS
+  pade_12                      0.010200     2.00e-04     54.96x     PASS
+  pade_21                      0.010200     2.00e-04     54.96x     PASS
+  pade_22                      0.010200     2.00e-04     54.96x     PASS
+  neville_4                    0.010200     2.00e-04     54.96x     PASS
+  pade_32                      0.010200     2.00e-04     54.96x     PASS
+  pade_23                      0.010200     2.00e-04     54.96x     PASS
+  neville_3                    0.010200     2.00e-04     54.95x     PASS
+  neville_2                    0.010201     2.01e-04     54.60x     PASS
+  log_linear                   0.010213     2.13e-04     51.52x     PASS
+  richardson_3                 0.010220     2.20e-04     49.88x     PASS
+  richardson_a10               0.010553     5.53e-04     19.87x     PASS
+  shanks_4                     0.011231     1.23e-03      8.93x     PASS
+  shanks_3                     0.011421     1.42e-03      7.73x     PASS
+  median_ensemble              0.012115     2.11e-03      5.20x     PASS
+  brezinski_theta2             0.012682     2.68e-03      4.10x     fail
+  stability_weighted           0.012760     2.76e-03      3.98x     fail
+  shanks_2                     0.012809     2.81e-03      3.91x     fail
+  wynn_eps_3                   0.012841     2.84e-03      3.87x     fail
+  log_fit                      0.013442     3.44e-03      3.19x     fail
+  levin_t2                     0.013731     3.73e-03      2.95x     fail
+  wynn_eps_2                   0.013745     3.75e-03      2.93x     fail
+  brezinski_theta1             0.015431     5.43e-03      2.02x     fail
+  shanks_1                     0.015556     5.56e-03      1.98x     fail
+  wynn_eps_1                   0.015556     5.56e-03      1.98x     fail
+  levin_t1                     0.015556     5.56e-03      1.98x     fail
+  best_shanks_wynn             0.015556     5.56e-03      1.98x     fail
+  geom_avg_diff                0.015773     5.77e-03      1.90x     fail
+  single_exp_fit               0.018775     8.77e-03      1.25x     fail
+  double_exp_fit               0.018775     8.77e-03      1.25x     fail
+  richardson_a20               0.019401     9.40e-03      1.17x     fail
+  weniger_d1                  -0.000000     1.00e-02      1.10x     fail
+  weniger_d2                   0.000000     1.00e-02      1.10x     fail
+  anderson_3                   0.020976     1.10e-02      1.00x     fail
+  anderson_2                   0.020981     1.10e-02      1.00x     fail
+  anderson_1                   0.020985     1.10e-02      1.00x     fail
+  current_value                0.020989     1.10e-02      1.00x     fail
+  richardson_a05              -0.003977     1.40e-02      0.79x     fail
+  linear                        INVALID            —          —  INVALID
+  wynn_rho_3                    INVALID            —          —  INVALID
+
+────────────────────────────────────────────────────────────────────────
+  LOGSLOW: Log-slow — Brezinski-theta / Wynn-rho target
+  Threshold: >= 2x improvement  (or abs_error < 1e-08 = PASS)
+  Pass: 11/51   Valid: 50/51
+────────────────────────────────────────────────────────────────────────
+  Method                       Estimate     AbsError    Improve   Result
+  ──────────────────────── ──────────── ──────────── ────────── ────────
+  weniger_d1                  -0.000000     1.00e-02     17.66x     PASS
+  weniger_d2                   0.000000     1.00e-02     17.66x     PASS
+  pade_13                     -0.002569     1.26e-02     14.05x     PASS
+  pade_12                      0.034639     2.46e-02      7.17x     PASS
+  pade_32                     -0.035737     4.57e-02      3.86x     PASS
+  pade_23                      0.059463     4.95e-02      3.57x     PASS
+  levin_v2                     0.072071     6.21e-02      2.85x     PASS
+  log_linear                   0.078357     6.84e-02      2.58x     PASS
+  levin_v1                     0.081303     7.13e-02      2.48x     PASS
+  levin_u2                     0.082549     7.25e-02      2.43x     PASS
+  levin_u1                     0.092750     8.28e-02      2.13x     PASS
+  log_fit                      0.103922     9.39e-02      1.88x     fail
+  richardson_3                 0.106455     9.65e-02      1.83x     fail
+  richardson_2                 0.106647     9.66e-02      1.83x     fail
+  wynn_rho_3                   0.107970     9.80e-02      1.80x     fail
+  richardson_1                 0.113991     1.04e-01      1.70x     fail
+  wynn_rho_2                   0.116557     1.07e-01      1.66x     fail
+  shanks_3                     0.123287     1.13e-01      1.56x     fail
+  shanks_4                     0.123622     1.14e-01      1.55x     fail
+  richardson_a05               0.124283     1.14e-01      1.55x     fail
+  pade_22                      0.125167     1.15e-01      1.53x     fail
+  neville_4                    0.128743     1.19e-01      1.49x     fail
+  median_ensemble              0.131337     1.21e-01      1.46x     fail
+  neville_3                    0.132717     1.23e-01      1.44x     fail
+  wynn_rho_1                   0.132724     1.23e-01      1.44x     fail
+  neville_2                    0.138694     1.29e-01      1.37x     fail
+  brezinski_theta2             0.138714     1.29e-01      1.37x     fail
+  shanks_2                     0.139386     1.29e-01      1.36x     fail
+  wynn_eps_3                   0.141495     1.31e-01      1.34x     fail
+  pade_11                      0.142574     1.33e-01      1.33x     fail
+  rational_fit                 0.143305     1.33e-01      1.32x     fail
+  stability_weighted           0.145565     1.36e-01      1.30x     fail
+  levin_t2                     0.148055     1.38e-01      1.28x     fail
+  wynn_eps_2                   0.148397     1.38e-01      1.28x     fail
+  brezinski_theta1             0.159452     1.49e-01      1.18x     fail
+  shanks_1                     0.159883     1.50e-01      1.18x     fail
+  wynn_eps_1                   0.159883     1.50e-01      1.18x     fail
+  levin_t1                     0.159883     1.50e-01      1.18x     fail
+  best_shanks_wynn             0.159883     1.50e-01      1.18x     fail
+  geom_avg_diff                0.160999     1.51e-01      1.17x     fail
+  richardson_a10               0.161842     1.52e-01      1.16x     fail
+  single_exp_fit               0.173741     1.64e-01      1.08x     fail
+  double_exp_fit               0.173740     1.64e-01      1.08x     fail
+  richardson_a20               0.184670     1.75e-01      1.01x     fail
+  anderson_3                   0.186244     1.76e-01      1.00x     fail
+  anderson_2                   0.186373     1.76e-01      1.00x     fail
+  anderson_1                   0.186497     1.76e-01      1.00x     fail
+  current_value                0.186617     1.77e-01      1.00x     fail
+  pade_21                     -0.364695     3.75e-01      0.47x     fail
+  pade_31                     13.123300     1.31e+01      0.01x     fail
+  linear                        INVALID            —          —  INVALID
+
+────────────────────────────────────────────────────────────────────────
+  ALTGEOM: Alternating geometric — Shanks/Aitken theoretically exact
+  Threshold: >= 20x improvement  (or abs_error < 1e-08 = PASS)
+  Pass: 10/51   Valid: 44/51
+────────────────────────────────────────────────────────────────────────
+  Method                       Estimate     AbsError    Improve   Result
+  ──────────────────────── ──────────── ──────────── ────────── ────────
+  wynn_eps_1                   0.010000     0.00e+00      exact     PASS
+  levin_t1                     0.010000     0.00e+00      exact     PASS
+  levin_t2                     0.010000     0.00e+00      exact     PASS
+  levin_u2                     0.010000     0.00e+00      exact     PASS
+  levin_v1                     0.010000     0.00e+00      exact     PASS
+  levin_v2                     0.010000     0.00e+00      exact     PASS
+  shanks_1                     0.010000     0.00e+00 88731213.53x     PASS
+  median_ensemble              0.010000     0.00e+00 88731213.53x     PASS
+  best_shanks_wynn             0.010000     0.00e+00 88731213.53x     PASS
+  levin_u1                     0.010000     0.00e+00    140.68x     PASS
+  anderson_3                   0.010000     2.70e-07      1.00x     fail
+  anderson_2                   0.010000     2.70e-07      1.00x     fail
+  anderson_1                   0.010000     2.70e-07      1.00x     fail
+  current_value                0.010000     2.70e-07      1.00x     fail
+  wynn_rho_1                   0.010000     3.10e-07      0.85x     fail
+  wynn_rho_2                   0.010000     3.70e-07      0.72x     fail
+  wynn_rho_3                   0.010000     4.30e-07      0.61x     fail
+  brezinski_theta1             0.009999     6.80e-07      0.39x     fail
+  brezinski_theta2             0.010002     1.75e-06      0.15x     fail
+  geom_avg_diff                0.010002     1.78e-06      0.15x     fail
+  pade_22                      0.009981     1.89e-05      0.01x     fail
+  pade_11                      0.009977     2.31e-05      0.01x     fail
+  single_exp_fit               0.009965     3.51e-05      0.01x     fail
+  double_exp_fit               0.009965     3.51e-05      0.01x     fail
+  rational_fit                 0.009965     3.51e-05      0.01x     fail
+  log_fit                      0.009964     3.63e-05      0.01x     fail
+  richardson_1                 0.010088     8.84e-05      0.00x     fail
+  richardson_a20               0.010123     1.23e-04      0.00x     fail
+  richardson_a10               0.010238     2.38e-04      0.00x     fail
+  richardson_a05               0.010425     4.25e-04      0.00x     fail
+  richardson_2                 0.009186     8.14e-04      0.00x     fail
+  richardson_3                 0.009186     8.14e-04      0.00x     fail
+  neville_2                    0.014817     4.82e-03      0.00x     fail
+  stability_weighted           0.006728     3.27e-03      0.00x     fail
+  linear                       0.027265     1.73e-02      0.00x     fail
+  pade_12                      1.001442     9.91e-01      0.00x     fail
+  pade_13                      0.000024     9.98e-03      0.00x     fail
+  pade_21                      0.019474     9.47e-03      0.00x     fail
+  pade_23                      0.037965     2.80e-02      0.00x     fail
+  pade_32                      0.017207     7.21e-03      0.00x     fail
+  weniger_d1                  -0.000000     1.00e-02      0.00x     fail
+  weniger_d2                  -0.000000     1.00e-02      0.00x     fail
+  neville_3                    0.309811     3.00e-01      0.00x     fail
+  neville_4                   13.841195     1.38e+01      0.00x     fail
+  log_linear                    INVALID            —          —  INVALID
+  shanks_2                      INVALID            —          —  INVALID
+  shanks_3                      INVALID            —          —  INVALID
+  shanks_4                      INVALID            —          —  INVALID
+  wynn_eps_2                    INVALID            —          —  INVALID
+  wynn_eps_3                    INVALID            —          —  INVALID
+  pade_31                       INVALID            —          —  INVALID
+
+========================================================================
+  GLOBAL PASS SUMMARY  (✓ = PASS, · = fail or invalid)
+  Method                       GEOM     HARM     LOGS     ALTG    Total
+  ──────────────────────── ──────── ──────── ──────── ──────── ────────
+  levin_v1                        ✓        ✓        ✓        ✓        4
+  levin_v2                        ✓        ✓        ✓        ✓        4
+  levin_u2                        ✓        ✓        ✓        ✓        4
+  levin_u1                        ·        ✓        ✓        ✓        3
+  log_linear                      ✓        ✓        ✓        ·        3
+  pade_13                         ·        ✓        ✓        ·        2
+  pade_12                         ·        ✓        ✓        ·        2
+  pade_23                         ·        ✓        ✓        ·        2
+  pade_32                         ·        ✓        ✓        ·        2
+  median_ensemble                 ·        ✓        ·        ✓        2
+  wynn_eps_1                      ✓        ·        ·        ✓        2
+  levin_t2                        ✓        ·        ·        ✓        2
+  levin_t1                        ✓        ·        ·        ✓        2
+  shanks_1                        ✓        ·        ·        ✓        2
+  best_shanks_wynn                ✓        ·        ·        ✓        2
+  pade_22                         ·        ✓        ·        ·        1
+  richardson_3                    ·        ✓        ·        ·        1
+  richardson_2                    ·        ✓        ·        ·        1
+  richardson_1                    ·        ✓        ·        ·        1
+  weniger_d2                      ·        ·        ✓        ·        1
+  richardson_a10                  ·        ✓        ·        ·        1
+  rational_fit                    ·        ✓        ·        ·        1
+  weniger_d1                      ·        ·        ✓        ·        1
+  pade_31                         ·        ✓        ·        ·        1
+  shanks_3                        ·        ✓        ·        ·        1
+  pade_21                         ·        ✓        ·        ·        1
+  neville_3                       ·        ✓        ·        ·        1
+  pade_11                         ·        ✓        ·        ·        1
+  neville_4                       ·        ✓        ·        ·        1
+  single_exp_fit                  ✓        ·        ·        ·        1
+  neville_2                       ·        ✓        ·        ·        1
+  geom_avg_diff                   ✓        ·        ·        ·        1
+  double_exp_fit                  ✓        ·        ·        ·        1
+  wynn_rho_1                      ·        ✓        ·        ·        1
+  brezinski_theta2                ✓        ·        ·        ·        1
+  brezinski_theta1                ✓        ·        ·        ·        1
+  wynn_rho_2                      ·        ✓        ·        ·        1
+  shanks_4                        ·        ✓        ·        ·        1
+  wynn_eps_2                      ·        ·        ·        ·        0
+  wynn_eps_3                      ·        ·        ·        ·        0
+  stability_weighted              ·        ·        ·        ·        0
+  anderson_1                      ·        ·        ·        ·        0
+  shanks_2                        ·        ·        ·        ·        0
+  richardson_a20                  ·        ·        ·        ·        0
+  richardson_a05                  ·        ·        ·        ·        0
+  anderson_2                      ·        ·        ·        ·        0
+  log_fit                         ·        ·        ·        ·        0
+  linear                          ·        ·        ·        ·        0
+  current_value                   ·        ·        ·        ·        0
+  anderson_3                      ·        ·        ·        ·        0
+  wynn_rho_3                      ·        ·        ·        ·        0
+
+========================================================================
+  IMPLEMENTATION FLAGS
+────────────────────────────────────────────────────────────────────────
+  ✓  No method was always-invalid across all four tests.
+
+  ℹ  VALID ESTIMATES but below threshold on all four tests.
+     Check against theoretical expectations before flagging as broken.
+       anderson_1
+       anderson_2
+       anderson_3
+       current_value
+       linear
+       log_fit
+       richardson_a05
+       richardson_a20
+       shanks_2
+       stability_weighted
+       wynn_eps_2
+       wynn_eps_3
+       wynn_rho_3
+========================================================================

@@ -1,0 +1,205 @@
+test_case,description,method,true_limit,curr_val,curr_err,estimate,abs_error,improve_ratio,valid,passed,threshold
+GEOM,Geometric r=0.92 — algebraic methods should be exact,current_value,0.01,0.01044055,0.00044055,0.01044055,0.00044055,1.0,1,0,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,linear,0.01,0.01044055,0.00044055,,,,0,0,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,log_linear,0.01,0.01044055,0.00044055,0.01,0.0,103763899.1224,1,1,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,geom_avg_diff,0.01,0.01044055,0.00044055,0.01,0.0,inf,1,1,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,richardson_1,0.01,0.01044055,0.00044055,5.706e-05,0.00994294,0.0443,1,0,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,richardson_2,0.01,0.01044055,0.00044055,2.477e-05,0.00997523,0.0442,1,0,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,richardson_3,0.01,0.01044055,0.00044055,1.508e-05,0.00998492,0.0441,1,0,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,richardson_a05,0.01,0.01044055,0.00044055,-0.06085088,0.07085088,0.0062,1,0,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,richardson_a10,0.01,0.01044055,0.00044055,-0.02361248,0.03361248,0.0131,1,0,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,richardson_a20,0.01,0.01044055,0.00044055,-0.00078108,0.01078108,0.0409,1,0,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,single_exp_fit,0.01,0.01044055,0.00044055,0.01,0.0,1443565959.7941,1,1,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,double_exp_fit,0.01,0.01044055,0.00044055,0.01,0.0,156965.5195,1,1,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,rational_fit,0.01,0.01044055,0.00044055,0.00027615,0.00972385,0.0453,1,0,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,log_fit,0.01,0.01044055,0.00044055,0.01123231,0.00123231,0.3575,1,0,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,shanks_1,0.01,0.01044055,0.00044055,0.01,0.0,inf,1,1,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,shanks_2,0.01,0.01044055,0.00044055,,,,0,0,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,shanks_3,0.01,0.01044055,0.00044055,,,,0,0,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,shanks_4,0.01,0.01044055,0.00044055,,,,0,0,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,wynn_eps_1,0.01,0.01044055,0.00044055,0.01,0.0,inf,1,1,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,wynn_eps_2,0.01,0.01044055,0.00044055,,,,0,0,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,wynn_eps_3,0.01,0.01044055,0.00044055,,,,0,0,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,wynn_rho_1,0.01,0.01044055,0.00044055,0.00952114,0.00047886,0.92,1,0,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,wynn_rho_2,0.01,0.01044055,0.00044055,0.0105205,0.0005205,0.8464,1,0,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,wynn_rho_3,0.01,0.01044055,0.00044055,0.00943424,0.00056576,0.7787,1,0,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,pade_11,0.01,0.01044055,0.00044055,1.151e-05,0.00998849,0.0441,1,0,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,pade_12,0.01,0.01044055,0.00044055,0.00013364,0.00986636,0.0447,1,0,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,pade_13,0.01,0.01044055,0.00044055,-4.8e-07,0.01000048,0.0441,1,0,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,pade_21,0.01,0.01044055,0.00044055,1.56751384,1.55751384,0.0003,1,0,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,pade_22,0.01,0.01044055,0.00044055,0.0168862,0.0068862,0.064,1,0,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,pade_23,0.01,0.01044055,0.00044055,0.00060871,0.00939129,0.0469,1,0,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,pade_31,0.01,0.01044055,0.00044055,,,,0,0,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,pade_32,0.01,0.01044055,0.00044055,,,,0,0,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,levin_t1,0.01,0.01044055,0.00044055,0.01,0.0,inf,1,1,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,levin_t2,0.01,0.01044055,0.00044055,0.01,0.0,310843747217.5973,1,1,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,levin_u1,0.01,0.01044055,0.00044055,0.00992276,7.724e-05,5.704,1,0,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,levin_u2,0.01,0.01044055,0.00044055,0.01,0.0,204971219916.6884,1,1,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,levin_v1,0.01,0.01044055,0.00044055,0.01,0.0,238235779996.9766,1,1,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,levin_v2,0.01,0.01044055,0.00044055,0.01,0.0,4957529066.2498,1,1,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,weniger_d1,0.01,0.01044055,0.00044055,-0.0,0.01,0.0441,1,0,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,weniger_d2,0.01,0.01044055,0.00044055,-0.0,0.01,0.0441,1,0,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,brezinski_theta1,0.01,0.01044055,0.00044055,0.00995836,4.164e-05,10.58,1,1,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,brezinski_theta2,0.01,0.01044055,0.00044055,0.01000394,3.94e-06,111.9364,1,1,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,neville_2,0.01,0.01044055,0.00044055,0.01628162,0.00628162,0.0701,1,0,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,neville_3,0.01,0.01044055,0.00044055,0.00702843,0.00297157,0.1483,1,0,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,neville_4,0.01,0.01044055,0.00044055,0.00544854,0.00455146,0.0968,1,0,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,anderson_1,0.01,0.01044055,0.00044055,0.01044006,0.00044006,1.0011,1,0,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,anderson_2,0.01,0.01044055,0.00044055,0.01043949,0.00043949,1.0024,1,0,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,anderson_3,0.01,0.01044055,0.00044055,0.01043881,0.00043881,1.004,1,0,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,median_ensemble,0.01,0.01044055,0.00044055,0.00013364,0.00986636,0.0447,1,0,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,stability_weighted,0.01,0.01044055,0.00044055,0.00587677,0.00412323,0.1068,1,0,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,best_shanks_wynn,0.01,0.01044055,0.00044055,0.01,0.0,inf,1,1,10.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,current_value,0.01,0.02098901,0.01098901,0.02098901,0.01098901,1.0,1,0,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,linear,0.01,0.02098901,0.01098901,,,,0,0,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,log_linear,0.01,0.02098901,0.01098901,0.01021331,0.00021331,51.5171,1,1,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,geom_avg_diff,0.01,0.02098901,0.01098901,0.01577294,0.00577294,1.9035,1,0,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,richardson_1,0.01,0.02098901,0.01098901,0.0098658,0.0001342,81.888,1,1,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,richardson_2,0.01,0.02098901,0.01098901,0.0098658,0.0001342,81.8882,1,1,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,richardson_3,0.01,0.02098901,0.01098901,0.01022032,0.00022032,49.8775,1,1,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,richardson_a05,0.01,0.02098901,0.01098901,-0.00397671,0.01397671,0.7862,1,0,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,richardson_a10,0.01,0.02098901,0.01098901,0.01055315,0.00055315,19.8662,1,1,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,richardson_a20,0.01,0.02098901,0.01098901,0.01940133,0.00940133,1.1689,1,0,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,single_exp_fit,0.01,0.02098901,0.01098901,0.01877483,0.00877483,1.2523,1,0,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,double_exp_fit,0.01,0.02098901,0.01098901,0.01877479,0.00877479,1.2523,1,0,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,rational_fit,0.01,0.02098901,0.01098901,0.01019991,0.00019991,54.9709,1,1,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,log_fit,0.01,0.02098901,0.01098901,0.01344234,0.00344234,3.1923,1,0,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,shanks_1,0.01,0.02098901,0.01098901,0.01555556,0.00555556,1.978,1,0,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,shanks_2,0.01,0.02098901,0.01098901,0.01280899,0.00280899,3.9121,1,0,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,shanks_3,0.01,0.02098901,0.01098901,0.01142075,0.00142075,7.7346,1,1,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,shanks_4,0.01,0.02098901,0.01098901,0.01123068,0.00123068,8.9292,1,1,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,wynn_eps_1,0.01,0.02098901,0.01098901,0.01555556,0.00555556,1.978,1,0,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,wynn_eps_2,0.01,0.02098901,0.01098901,0.01374532,0.00374532,2.9341,1,0,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,wynn_eps_3,0.01,0.02098901,0.01098901,0.01284096,0.00284096,3.8681,1,0,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,wynn_rho_1,0.01,0.02098901,0.01098901,0.01,0.0,1919034699120.225,1,1,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,wynn_rho_2,0.01,0.02098901,0.01098901,0.01,0.0,3917584132217.6025,1,1,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,wynn_rho_3,0.01,0.02098901,0.01098901,,,,0,0,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,pade_11,0.01,0.02098901,0.01098901,0.01019996,0.00019996,54.956,1,1,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,pade_12,0.01,0.02098901,0.01098901,0.01019996,0.00019996,54.956,1,1,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,pade_13,0.01,0.02098901,0.01098901,0.01019982,0.00019982,54.9957,1,1,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,pade_21,0.01,0.02098901,0.01098901,0.01019996,0.00019996,54.956,1,1,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,pade_22,0.01,0.02098901,0.01098901,0.01019996,0.00019996,54.956,1,1,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,pade_23,0.01,0.02098901,0.01098901,0.01019996,0.00019996,54.9557,1,1,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,pade_31,0.01,0.02098901,0.01098901,0.01019992,0.00019992,54.9664,1,1,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,pade_32,0.01,0.02098901,0.01098901,0.01019996,0.00019996,54.9558,1,1,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,levin_t1,0.01,0.02098901,0.01098901,0.01555556,0.00555556,1.978,1,0,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,levin_t2,0.01,0.02098901,0.01098901,0.01373134,0.00373134,2.9451,1,0,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,levin_u1,0.01,0.02098901,0.01098901,0.00987516,0.00012484,88.022,1,1,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,levin_u2,0.01,0.02098901,0.01098901,0.01,0.0,5908334919.0248,1,1,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,levin_v1,0.01,0.02098901,0.01098901,0.00987232,0.00012768,86.0659,1,1,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,levin_v2,0.01,0.02098901,0.01098901,0.01,0.0,47776217.237,1,1,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,weniger_d1,0.01,0.02098901,0.01098901,-0.0,0.01,1.0989,1,0,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,weniger_d2,0.01,0.02098901,0.01098901,0.0,0.01,1.0989,1,0,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,brezinski_theta1,0.01,0.02098901,0.01098901,0.01543071,0.00543071,2.0235,1,0,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,brezinski_theta2,0.01,0.02098901,0.01098901,0.01268188,0.00268188,4.0975,1,0,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,neville_2,0.01,0.02098901,0.01098901,0.01020126,0.00020126,54.6012,1,1,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,neville_3,0.01,0.02098901,0.01098901,0.01019997,0.00019997,54.9521,1,1,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,neville_4,0.01,0.02098901,0.01098901,0.01019996,0.00019996,54.956,1,1,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,anderson_1,0.01,0.02098901,0.01098901,0.02098492,0.01098492,1.0004,1,0,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,anderson_2,0.01,0.02098901,0.01098901,0.02098061,0.01098061,1.0008,1,0,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,anderson_3,0.01,0.02098901,0.01098901,0.02097605,0.01097605,1.0012,1,0,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,median_ensemble,0.01,0.02098901,0.01098901,0.01211487,0.00211487,5.1961,1,1,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,stability_weighted,0.01,0.02098901,0.01098901,0.01276021,0.00276021,3.9812,1,0,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,best_shanks_wynn,0.01,0.02098901,0.01098901,0.01555556,0.00555556,1.978,1,0,5.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,current_value,0.01,0.18661738,0.17661738,0.18661738,0.17661738,1.0,1,0,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,linear,0.01,0.18661738,0.17661738,,,,0,0,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,log_linear,0.01,0.18661738,0.17661738,0.07835655,0.06835655,2.5838,1,1,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,geom_avg_diff,0.01,0.18661738,0.17661738,0.16099925,0.15099925,1.1697,1,0,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,richardson_1,0.01,0.18661738,0.17661738,0.11399052,0.10399052,1.6984,1,0,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,richardson_2,0.01,0.18661738,0.17661738,0.10664738,0.09664738,1.8274,1,0,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,richardson_3,0.01,0.18661738,0.17661738,0.10645453,0.09645453,1.8311,1,0,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,richardson_a05,0.01,0.18661738,0.17661738,0.12428313,0.11428313,1.5454,1,0,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,richardson_a10,0.01,0.18661738,0.17661738,0.16184205,0.15184205,1.1632,1,0,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,richardson_a20,0.01,0.18661738,0.17661738,0.18467028,0.17467028,1.0111,1,0,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,single_exp_fit,0.01,0.18661738,0.17661738,0.17374072,0.16374072,1.0786,1,0,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,double_exp_fit,0.01,0.18661738,0.17661738,0.17374033,0.16374033,1.0786,1,0,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,rational_fit,0.01,0.18661738,0.17661738,0.14330506,0.13330506,1.3249,1,0,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,log_fit,0.01,0.18661738,0.17661738,0.10392181,0.09392181,1.8805,1,0,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,shanks_1,0.01,0.18661738,0.17661738,0.15988252,0.14988252,1.1784,1,0,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,shanks_2,0.01,0.18661738,0.17661738,0.13938638,0.12938638,1.365,1,0,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,shanks_3,0.01,0.18661738,0.17661738,0.12328733,0.11328733,1.559,1,0,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,shanks_4,0.01,0.18661738,0.17661738,0.12362218,0.11362218,1.5544,1,0,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,wynn_eps_1,0.01,0.18661738,0.17661738,0.15988252,0.14988252,1.1784,1,0,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,wynn_eps_2,0.01,0.18661738,0.17661738,0.14839651,0.13839651,1.2762,1,0,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,wynn_eps_3,0.01,0.18661738,0.17661738,0.1414951,0.1314951,1.3431,1,0,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,wynn_rho_1,0.01,0.18661738,0.17661738,0.13272382,0.12272382,1.4391,1,0,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,wynn_rho_2,0.01,0.18661738,0.17661738,0.11655729,0.10655729,1.6575,1,0,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,wynn_rho_3,0.01,0.18661738,0.17661738,0.10796999,0.09796999,1.8028,1,0,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,pade_11,0.01,0.18661738,0.17661738,0.14257435,0.13257435,1.3322,1,0,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,pade_12,0.01,0.18661738,0.17661738,0.03463931,0.02463931,7.1681,1,1,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,pade_13,0.01,0.18661738,0.17661738,-0.00256853,0.01256853,14.0524,1,1,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,pade_21,0.01,0.18661738,0.17661738,-0.36469534,0.37469534,0.4714,1,0,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,pade_22,0.01,0.18661738,0.17661738,0.12516677,0.11516677,1.5336,1,0,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,pade_23,0.01,0.18661738,0.17661738,0.05946305,0.04946305,3.5707,1,1,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,pade_31,0.01,0.18661738,0.17661738,13.12329979,13.11329979,0.0135,1,0,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,pade_32,0.01,0.18661738,0.17661738,-0.03573749,0.04573749,3.8615,1,1,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,levin_t1,0.01,0.18661738,0.17661738,0.15988252,0.14988252,1.1784,1,0,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,levin_t2,0.01,0.18661738,0.17661738,0.14805484,0.13805484,1.2793,1,0,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,levin_u1,0.01,0.18661738,0.17661738,0.09275016,0.08275016,2.1343,1,1,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,levin_u2,0.01,0.18661738,0.17661738,0.08254887,0.07254887,2.4345,1,1,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,levin_v1,0.01,0.18661738,0.17661738,0.08130319,0.07130319,2.477,1,1,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,levin_v2,0.01,0.18661738,0.17661738,0.07207058,0.06207058,2.8454,1,1,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,weniger_d1,0.01,0.18661738,0.17661738,-0.0,0.01,17.6617,1,1,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,weniger_d2,0.01,0.18661738,0.17661738,0.0,0.01,17.6617,1,1,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,brezinski_theta1,0.01,0.18661738,0.17661738,0.15945196,0.14945196,1.1818,1,0,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,brezinski_theta2,0.01,0.18661738,0.17661738,0.13871408,0.12871408,1.3722,1,0,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,neville_2,0.01,0.18661738,0.17661738,0.13869401,0.12869401,1.3724,1,0,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,neville_3,0.01,0.18661738,0.17661738,0.13271662,0.12271662,1.4392,1,0,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,neville_4,0.01,0.18661738,0.17661738,0.12874309,0.11874309,1.4874,1,0,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,anderson_1,0.01,0.18661738,0.17661738,0.18649721,0.17649721,1.0007,1,0,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,anderson_2,0.01,0.18661738,0.17661738,0.18637289,0.17637289,1.0014,1,0,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,anderson_3,0.01,0.18661738,0.17661738,0.18624428,0.17624428,1.0021,1,0,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,median_ensemble,0.01,0.18661738,0.17661738,0.13133686,0.12133686,1.4556,1,0,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,stability_weighted,0.01,0.18661738,0.17661738,0.14556527,0.13556527,1.3028,1,0,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,best_shanks_wynn,0.01,0.18661738,0.17661738,0.15988252,0.14988252,1.1784,1,0,2.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,current_value,0.01,0.01000027,2.7e-07,0.01000027,2.7e-07,1.0,1,0,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,linear,0.01,0.01000027,2.7e-07,0.02726536,0.01726536,0.0,1,0,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,log_linear,0.01,0.01000027,2.7e-07,,,,0,0,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,geom_avg_diff,0.01,0.01000027,2.7e-07,0.01000178,1.78e-06,0.15,1,0,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,richardson_1,0.01,0.01000027,2.7e-07,0.01008844,8.844e-05,0.003,1,0,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,richardson_2,0.01,0.01000027,2.7e-07,0.00918607,0.00081393,0.0003,1,0,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,richardson_3,0.01,0.01000027,2.7e-07,0.00918602,0.00081398,0.0003,1,0,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,richardson_a05,0.01,0.01000027,2.7e-07,0.01042546,0.00042546,0.0006,1,0,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,richardson_a10,0.01,0.01000027,2.7e-07,0.01023761,0.00023761,0.0011,1,0,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,richardson_a20,0.01,0.01000027,2.7e-07,0.01012294,0.00012294,0.0022,1,0,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,single_exp_fit,0.01,0.01000027,2.7e-07,0.00996494,3.506e-05,0.0076,1,0,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,double_exp_fit,0.01,0.01000027,2.7e-07,0.00996494,3.506e-05,0.0076,1,0,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,rational_fit,0.01,0.01000027,2.7e-07,0.00996494,3.506e-05,0.0076,1,0,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,log_fit,0.01,0.01000027,2.7e-07,0.00996369,3.631e-05,0.0073,1,0,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,shanks_1,0.01,0.01000027,2.7e-07,0.01,0.0,88731213.5277,1,1,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,shanks_2,0.01,0.01000027,2.7e-07,,,,0,0,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,shanks_3,0.01,0.01000027,2.7e-07,,,,0,0,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,shanks_4,0.01,0.01000027,2.7e-07,,,,0,0,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,wynn_eps_1,0.01,0.01000027,2.7e-07,0.01,0.0,inf,1,1,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,wynn_eps_2,0.01,0.01000027,2.7e-07,,,,0,0,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,wynn_eps_3,0.01,0.01000027,2.7e-07,,,,0,0,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,wynn_rho_1,0.01,0.01000027,2.7e-07,0.01000031,3.1e-07,0.85,1,0,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,wynn_rho_2,0.01,0.01000027,2.7e-07,0.01000037,3.7e-07,0.7225,1,0,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,wynn_rho_3,0.01,0.01000027,2.7e-07,0.01000043,4.3e-07,0.6141,1,0,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,pade_11,0.01,0.01000027,2.7e-07,0.00997687,2.313e-05,0.0115,1,0,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,pade_12,0.01,0.01000027,2.7e-07,1.0014423,0.9914423,0.0,1,0,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,pade_13,0.01,0.01000027,2.7e-07,2.369e-05,0.00997631,0.0,1,0,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,pade_21,0.01,0.01000027,2.7e-07,0.01947377,0.00947377,0.0,1,0,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,pade_22,0.01,0.01000027,2.7e-07,0.00998105,1.895e-05,0.0141,1,0,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,pade_23,0.01,0.01000027,2.7e-07,0.03796528,0.02796528,0.0,1,0,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,pade_31,0.01,0.01000027,2.7e-07,,,,0,0,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,pade_32,0.01,0.01000027,2.7e-07,0.01720745,0.00720745,0.0,1,0,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,levin_t1,0.01,0.01000027,2.7e-07,0.01,0.0,inf,1,1,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,levin_t2,0.01,0.01000027,2.7e-07,0.01,0.0,inf,1,1,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,levin_u1,0.01,0.01000027,2.7e-07,0.01,0.0,140.675,1,1,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,levin_u2,0.01,0.01000027,2.7e-07,0.01,0.0,inf,1,1,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,levin_v1,0.01,0.01000027,2.7e-07,0.01,0.0,inf,1,1,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,levin_v2,0.01,0.01000027,2.7e-07,0.01,0.0,inf,1,1,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,weniger_d1,0.01,0.01000027,2.7e-07,-0.0,0.01,0.0,1,0,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,weniger_d2,0.01,0.01000027,2.7e-07,-0.0,0.01,0.0,1,0,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,brezinski_theta1,0.01,0.01000027,2.7e-07,0.00999932,6.8e-07,0.3905,1,0,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,brezinski_theta2,0.01,0.01000027,2.7e-07,0.01000175,1.75e-06,0.1525,1,0,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,neville_2,0.01,0.01000027,2.7e-07,0.01481659,0.00481659,0.0001,1,0,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,neville_3,0.01,0.01000027,2.7e-07,0.3098113,0.2998113,0.0,1,0,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,neville_4,0.01,0.01000027,2.7e-07,13.84119477,13.83119477,0.0,1,0,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,anderson_1,0.01,0.01000027,2.7e-07,0.01000027,2.7e-07,1.0002,1,0,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,anderson_2,0.01,0.01000027,2.7e-07,0.01000027,2.7e-07,1.0004,1,0,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,anderson_3,0.01,0.01000027,2.7e-07,0.01000027,2.7e-07,1.0007,1,0,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,median_ensemble,0.01,0.01000027,2.7e-07,0.01,0.0,88731213.5277,1,1,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,stability_weighted,0.01,0.01000027,2.7e-07,0.00672755,0.00327245,0.0001,1,0,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,best_shanks_wynn,0.01,0.01000027,2.7e-07,0.01,0.0,88731213.5277,1,1,20.0
