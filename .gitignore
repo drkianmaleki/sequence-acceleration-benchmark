@@ -1,7 +1,5 @@
 # ── Results & generated outputs (large raw files excluded) ────────────────────
 results/phase4/phase4_raw.csv
-results/phase2/phase2_features.csv
-results/phase2/phase2_sweep_aggregated.csv
 results/phase5a/phase5a_raw.csv
 
 # ── Downloaded datasets (generated at runtime via OpenML) ─────────────────────
