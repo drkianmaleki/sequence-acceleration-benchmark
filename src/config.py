@@ -48,6 +48,21 @@ PERTURB_SCALE:  float = 0.02           # relative perturbation magnitude
 W_CAT:   float = 2.0
 W_BEATS: float = 0.4
 
+# ── Phase 1 derived classification ─────────────────────────────────────────────
+# Methods that Phase 1 classifies as dangerous: their pooled stability score is
+# negative at one or more horizons, meaning they fail worse than making no
+# prediction at all.  Phases 5a and 5b both consume this set.
+#
+# IMPORTANT: this set is *derived* from Phase 1 output, not independent of it.
+# After any change that alters Phase 1 results, re-derive it from
+# results/phase1/phase1_global.csv (any method with stability < 0 at any
+# horizon) and update it here.  scripts/check_dangerous.py does this check.
+DANGEROUS_METHODS = frozenset({
+    "neville_2", "neville_3", "neville_4",
+    "pade_21", "pade_31", "pade_32",
+    "linear", "geom_avg_diff",
+})
+
 # ── Output ─────────────────────────────────────────────────────────────────────
 OUTPUT_DIR: str = "results"   # relative to the working directory
 FIG_DPI:    int = 150

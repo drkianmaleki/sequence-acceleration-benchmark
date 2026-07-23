@@ -39,7 +39,9 @@ Table / figure mapping
     Real data → Tables 16, 17, 18; Figures (real_data)
 
 All output is written to results/<phase>/ and results/real_data/.
-Pre-computed results are already committed to results/ for reference.
+The results/ directory ships empty; every table and figure is generated here.
+Results are only meaningful alongside the commit that produced them, so
+regenerate the full set rather than mixing output from different commits.
 """
 
 import argparse
@@ -50,25 +52,25 @@ import time
 
 
 SCRIPTS = [
-    ("Phase 0 — unit tests",           ["python", "scripts/run_phase0_tests.py"]),
-    ("Phase 1 — synthetic benchmark",  ["python", "scripts/run_phase1.py", "--full"]),
-    ("Phase 2 — failure detection",    ["python", "scripts/run_phase2.py",  "--full"]),
-    ("Phase 3 — adaptive selection",   ["python", "scripts/run_phase3.py",  "--full"]),
-    ("Phase 4 — perturbation diag.",   ["python", "scripts/run_phase4.py",  "--full"]),
-    ("Phase 5a — ensemble ablation",   ["python", "scripts/run_phase5a.py", "--full"]),
-    ("Phase 5b — sensitivity sweeps",  ["python", "scripts/run_phase5b.py", "--full"]),
-    ("Real data — XGBoost transfer",   ["python", "scripts/run_real_data.py"]),
+    ("Phase 0 — unit tests",           [sys.executable, "scripts/run_phase0_tests.py"]),
+    ("Phase 1 — synthetic benchmark",  [sys.executable, "scripts/run_phase1.py", "--full"]),
+    ("Phase 2 — failure detection",    [sys.executable, "scripts/run_phase2.py",  "--full"]),
+    ("Phase 3 — adaptive selection",   [sys.executable, "scripts/run_phase3.py",  "--full"]),
+    ("Phase 4 — perturbation diag.",   [sys.executable, "scripts/run_phase4.py",  "--full"]),
+    ("Phase 5a — ensemble ablation",   [sys.executable, "scripts/run_phase5a.py", "--full"]),
+    ("Phase 5b — sensitivity sweeps",  [sys.executable, "scripts/run_phase5b.py", "--full"]),
+    ("Real data — XGBoost transfer",   [sys.executable, "scripts/run_real_data.py"]),
 ]
 
 SCRIPTS_QUICK = [
-    ("Phase 0 — unit tests",           ["python", "scripts/run_phase0_tests.py"]),
-    ("Phase 1 — synthetic benchmark",  ["python", "scripts/run_phase1.py",  "--quick"]),
-    ("Phase 2 — failure detection",    ["python", "scripts/run_phase2.py",  "--quick"]),
-    ("Phase 3 — adaptive selection",   ["python", "scripts/run_phase3.py",  "--quick"]),
-    ("Phase 4 — perturbation diag.",   ["python", "scripts/run_phase4.py",  "--quick"]),
-    ("Phase 5a — ensemble ablation",   ["python", "scripts/run_phase5a.py", "--quick"]),
-    ("Phase 5b — sensitivity sweeps",  ["python", "scripts/run_phase5b.py", "--quick"]),
-    ("Real data — XGBoost transfer",   ["python", "scripts/run_real_data.py"]),
+    ("Phase 0 — unit tests",           [sys.executable, "scripts/run_phase0_tests.py"]),
+    ("Phase 1 — synthetic benchmark",  [sys.executable, "scripts/run_phase1.py",  "--quick"]),
+    ("Phase 2 — failure detection",    [sys.executable, "scripts/run_phase2.py",  "--quick"]),
+    ("Phase 3 — adaptive selection",   [sys.executable, "scripts/run_phase3.py",  "--quick"]),
+    ("Phase 4 — perturbation diag.",   [sys.executable, "scripts/run_phase4.py",  "--quick"]),
+    ("Phase 5a — ensemble ablation",   [sys.executable, "scripts/run_phase5a.py", "--quick"]),
+    ("Phase 5b — sensitivity sweeps",  [sys.executable, "scripts/run_phase5b.py", "--quick"]),
+    ("Real data — XGBoost transfer",   [sys.executable, "scripts/run_real_data.py"]),
 ]
 
 
@@ -87,7 +89,12 @@ def run_step(label: str, cmd: list, step: int, total: int) -> bool:
     print(f"  [{step}/{total}]  {label}")
     print(bar)
     t0 = time.time()
-    result = subprocess.run(cmd, cwd=os.path.dirname(os.path.abspath(__file__)))
+    # Phase scripts print box-drawing characters; force UTF-8 in the child so
+    # that redirecting output to a file cannot fail on a non-UTF-8 console.
+    env = os.environ.copy()
+    env.setdefault("PYTHONIOENCODING", "utf-8")
+    result = subprocess.run(cmd, cwd=os.path.dirname(os.path.abspath(__file__)),
+                            env=env)
     elapsed = time.time() - t0
     if result.returncode != 0:
         print(f"\n  ERROR: {label} failed (exit code {result.returncode}).")

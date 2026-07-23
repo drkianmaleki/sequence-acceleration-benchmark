@@ -270,6 +270,48 @@ def write_report(df, out_dir):
     print(f"Saved: {txt_path}")
 
 
+# ── pytest entry points ────────────────────────────────────────────────────────
+# This module is primarily the Phase 0 runner, invoked by
+# scripts/run_phase0_tests.py to produce the unit-test report.  The wrappers
+# below also make it collectable by `pytest tests/`, which otherwise finds no
+# test functions here and reports success without running anything.
+
+
+def test_all_methods_are_exercised():
+    """Every registered method must appear in the Phase 0 report."""
+    df = run_all_tests()
+    assert df["method"].nunique() == len(METHOD_NAMES)
+    assert len(df) == len(METHOD_NAMES) * len(TEST_CASES)
+
+
+def test_every_method_produces_at_least_one_valid_estimate():
+    """A method that is never valid on any analytic case is broken, not merely weak."""
+    df = run_all_tests()
+    per_method = df.groupby("method")["valid"].max()
+    dead = sorted(per_method[per_method == 0].index)
+    assert not dead, f"methods never produced a valid estimate: {dead}"
+
+
+def test_every_test_case_is_solved_by_someone():
+    """Each analytic case must be passed by at least one method.
+
+    If a case is passed by nobody, the case or its threshold is miscalibrated
+    rather than every method being wrong.
+    """
+    df = run_all_tests()
+    per_case = df.groupby("test_case")["passed"].sum()
+    unsolved = sorted(per_case[per_case == 0].index)
+    assert not unsolved, f"no method passed these cases: {unsolved}"
+
+
+def test_baseline_is_not_reported_as_an_improvement():
+    """current_value is the baseline; it cannot improve on itself."""
+    df = run_all_tests()
+    baseline = df[df["method"] == "current_value"]
+    assert not baseline.empty
+    assert baseline["passed"].sum() == 0
+
+
 if __name__ == "__main__":
     print("=" * 72)
     print("  PHASE 0 — Unit Tests")

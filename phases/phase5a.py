@@ -48,8 +48,9 @@ PHASE2_METHODS = [
     'log_linear', 'weniger_d2', 'anderson_1',
 ]
 
-DANGEROUS = {'neville_2', 'neville_3', 'neville_4',
-             'pade_21', 'pade_31', 'pade_32', 'linear'}
+# Single definition lives in src/config.py; see the note there on re-deriving
+# it after any change that alters Phase 1 results.
+DANGEROUS = set(CFG_MOD.DANGEROUS_METHODS)
 
 EPS     = 0.01   # for continuous weighting
 FIG_DPI = 150
