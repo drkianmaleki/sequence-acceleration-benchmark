@@ -54,7 +54,7 @@ def load_datasets() -> dict:
             # Handle categorical columns
             for col in X.select_dtypes(include='category').columns:
                 X[col] = X[col].cat.codes
-            X = X.to_numpy(dtype=float)
+            X = X.to_numpy(dtype=float, copy = True)
         else:
             X = np.array(X, dtype=float)
 
