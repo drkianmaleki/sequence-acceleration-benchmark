@@ -1,6 +1,6 @@
 selector,mean_error,median_error,n
-oracle,0.014508,0.004659,4320
-fixed_rational,0.078375,0.019365,4320
-fixed_richardson,0.081994,0.020317,4320
-phase2_proxy,0.061952,0.008809,4320
-diag_ensemble,0.031495,0.010793,4320
+oracle,0.007693,0.003965,4320
+fixed_rational,0.042219,0.01232,4320
+fixed_richardson,0.052288,0.015963,4320
+phase2_proxy,0.025817,0.008059,4320
+diag_ensemble,0.067046,0.042717,4320

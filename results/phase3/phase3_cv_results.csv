@@ -74,11 +74,11 @@ slow_osc_power,enhanced_cascade,1.11
 slow_osc_power,oracle,1.339
 slow_osc_power,fixed_richardson,1.2153
 slow_osc_power,fixed_single_exp,1.0195
-staircase,phase2_cascade,1.2969
-staircase,enhanced_cascade,1.2969
-staircase,oracle,1.4
-staircase,fixed_richardson,1.2265
-staircase,fixed_single_exp,1.2633
+staircase,phase2_cascade,1.28
+staircase,enhanced_cascade,1.3042
+staircase,oracle,1.3834
+staircase,fixed_richardson,1.244
+staircase,fixed_single_exp,1.3199
 three_exp,phase2_cascade,1.3923
 three_exp,enhanced_cascade,1.3535
 three_exp,oracle,1.3969

@@ -9,8 +9,8 @@ GEOM,Geometric r=0.92 — algebraic methods should be exact,richardson_3,0.01,0.
 GEOM,Geometric r=0.92 — algebraic methods should be exact,richardson_a05,0.01,0.01044055,0.00044055,-0.06085088,0.07085088,0.0062,1,0,10.0
 GEOM,Geometric r=0.92 — algebraic methods should be exact,richardson_a10,0.01,0.01044055,0.00044055,-0.02361248,0.03361248,0.0131,1,0,10.0
 GEOM,Geometric r=0.92 — algebraic methods should be exact,richardson_a20,0.01,0.01044055,0.00044055,-0.00078108,0.01078108,0.0409,1,0,10.0
-GEOM,Geometric r=0.92 — algebraic methods should be exact,single_exp_fit,0.01,0.01044055,0.00044055,0.01,0.0,1443565959.7941,1,1,10.0
-GEOM,Geometric r=0.92 — algebraic methods should be exact,double_exp_fit,0.01,0.01044055,0.00044055,0.01,0.0,156965.5195,1,1,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,single_exp_fit,0.01,0.01044055,0.00044055,0.01,0.0,1443369052.8322,1,1,10.0
+GEOM,Geometric r=0.92 — algebraic methods should be exact,double_exp_fit,0.01,0.01044055,0.00044055,0.01,0.0,156969.3546,1,1,10.0
 GEOM,Geometric r=0.92 — algebraic methods should be exact,rational_fit,0.01,0.01044055,0.00044055,0.00027615,0.00972385,0.0453,1,0,10.0
 GEOM,Geometric r=0.92 — algebraic methods should be exact,log_fit,0.01,0.01044055,0.00044055,0.01123231,0.00123231,0.3575,1,0,10.0
 GEOM,Geometric r=0.92 — algebraic methods should be exact,shanks_1,0.01,0.01044055,0.00044055,0.01,0.0,inf,1,1,10.0
@@ -55,8 +55,8 @@ HARMONIC,Harmonic (power-law alpha=1) — Richardson target,linear,0.01,0.020989
 HARMONIC,Harmonic (power-law alpha=1) — Richardson target,log_linear,0.01,0.02098901,0.01098901,0.01021331,0.00021331,51.5171,1,1,5.0
 HARMONIC,Harmonic (power-law alpha=1) — Richardson target,geom_avg_diff,0.01,0.02098901,0.01098901,0.01577294,0.00577294,1.9035,1,0,5.0
 HARMONIC,Harmonic (power-law alpha=1) — Richardson target,richardson_1,0.01,0.02098901,0.01098901,0.0098658,0.0001342,81.888,1,1,5.0
-HARMONIC,Harmonic (power-law alpha=1) — Richardson target,richardson_2,0.01,0.02098901,0.01098901,0.0098658,0.0001342,81.8882,1,1,5.0
-HARMONIC,Harmonic (power-law alpha=1) — Richardson target,richardson_3,0.01,0.02098901,0.01098901,0.01022032,0.00022032,49.8775,1,1,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,richardson_2,0.01,0.02098901,0.01098901,0.0098658,0.0001342,81.8881,1,1,5.0
+HARMONIC,Harmonic (power-law alpha=1) — Richardson target,richardson_3,0.01,0.02098901,0.01098901,0.01021398,0.00021398,51.3563,1,1,5.0
 HARMONIC,Harmonic (power-law alpha=1) — Richardson target,richardson_a05,0.01,0.02098901,0.01098901,-0.00397671,0.01397671,0.7862,1,0,5.0
 HARMONIC,Harmonic (power-law alpha=1) — Richardson target,richardson_a10,0.01,0.02098901,0.01098901,0.01055315,0.00055315,19.8662,1,1,5.0
 HARMONIC,Harmonic (power-law alpha=1) — Richardson target,richardson_a20,0.01,0.02098901,0.01098901,0.01940133,0.00940133,1.1689,1,0,5.0
@@ -106,8 +106,8 @@ LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,linear,0.01,0.18661738,0.
 LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,log_linear,0.01,0.18661738,0.17661738,0.07835655,0.06835655,2.5838,1,1,2.0
 LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,geom_avg_diff,0.01,0.18661738,0.17661738,0.16099925,0.15099925,1.1697,1,0,2.0
 LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,richardson_1,0.01,0.18661738,0.17661738,0.11399052,0.10399052,1.6984,1,0,2.0
-LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,richardson_2,0.01,0.18661738,0.17661738,0.10664738,0.09664738,1.8274,1,0,2.0
-LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,richardson_3,0.01,0.18661738,0.17661738,0.10645453,0.09645453,1.8311,1,0,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,richardson_2,0.01,0.18661738,0.17661738,0.10701097,0.09701097,1.8206,1,0,2.0
+LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,richardson_3,0.01,0.18661738,0.17661738,0.10716029,0.09716029,1.8178,1,0,2.0
 LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,richardson_a05,0.01,0.18661738,0.17661738,0.12428313,0.11428313,1.5454,1,0,2.0
 LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,richardson_a10,0.01,0.18661738,0.17661738,0.16184205,0.15184205,1.1632,1,0,2.0
 LOGSLOW,Log-slow — Brezinski-theta / Wynn-rho target,richardson_a20,0.01,0.18661738,0.17661738,0.18467028,0.17467028,1.0111,1,0,2.0
@@ -157,8 +157,8 @@ ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,linear,0.01,
 ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,log_linear,0.01,0.01000027,2.7e-07,,,,0,0,20.0
 ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,geom_avg_diff,0.01,0.01000027,2.7e-07,0.01000178,1.78e-06,0.15,1,0,20.0
 ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,richardson_1,0.01,0.01000027,2.7e-07,0.01008844,8.844e-05,0.003,1,0,20.0
-ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,richardson_2,0.01,0.01000027,2.7e-07,0.00918607,0.00081393,0.0003,1,0,20.0
-ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,richardson_3,0.01,0.01000027,2.7e-07,0.00918602,0.00081398,0.0003,1,0,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,richardson_2,0.01,0.01000027,2.7e-07,0.00918606,0.00081394,0.0003,1,0,20.0
+ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,richardson_3,0.01,0.01000027,2.7e-07,0.00918601,0.00081399,0.0003,1,0,20.0
 ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,richardson_a05,0.01,0.01000027,2.7e-07,0.01042546,0.00042546,0.0006,1,0,20.0
 ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,richardson_a10,0.01,0.01000027,2.7e-07,0.01023761,0.00023761,0.0011,1,0,20.0
 ALTGEOM,Alternating geometric — Shanks/Aitken theoretically exact,richardson_a20,0.01,0.01000027,2.7e-07,0.01012294,0.00012294,0.0022,1,0,20.0

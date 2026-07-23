@@ -19,9 +19,9 @@
   levin_v1                     0.010000     0.00e+00 238235779996.98x     PASS
   levin_u2                     0.010000     0.00e+00 204971219916.69x     PASS
   levin_v2                     0.010000     0.00e+00 4957529066.25x     PASS
-  single_exp_fit               0.010000     0.00e+00 1443565959.79x     PASS
+  single_exp_fit               0.010000     0.00e+00 1443369052.83x     PASS
   log_linear                   0.010000     0.00e+00 103763899.12x     PASS
-  double_exp_fit               0.010000     0.00e+00 156965.52x     PASS
+  double_exp_fit               0.010000     0.00e+00 156969.35x     PASS
   brezinski_theta2             0.010004     3.94e-06    111.94x     PASS
   brezinski_theta1             0.009958     4.16e-05     10.58x     PASS
   levin_u1                     0.009923     7.72e-05      5.70x     fail
@@ -90,7 +90,7 @@
   neville_3                    0.010200     2.00e-04     54.95x     PASS
   neville_2                    0.010201     2.01e-04     54.60x     PASS
   log_linear                   0.010213     2.13e-04     51.52x     PASS
-  richardson_3                 0.010220     2.20e-04     49.88x     PASS
+  richardson_3                 0.010214     2.14e-04     51.36x     PASS
   richardson_a10               0.010553     5.53e-04     19.87x     PASS
   shanks_4                     0.011231     1.23e-03      8.93x     PASS
   shanks_3                     0.011421     1.42e-03      7.73x     PASS
@@ -140,8 +140,8 @@
   levin_u2                     0.082549     7.25e-02      2.43x     PASS
   levin_u1                     0.092750     8.28e-02      2.13x     PASS
   log_fit                      0.103922     9.39e-02      1.88x     fail
-  richardson_3                 0.106455     9.65e-02      1.83x     fail
-  richardson_2                 0.106647     9.66e-02      1.83x     fail
+  richardson_2                 0.107011     9.70e-02      1.82x     fail
+  richardson_3                 0.107160     9.72e-02      1.82x     fail
   wynn_rho_3                   0.107970     9.80e-02      1.80x     fail
   richardson_1                 0.113991     1.04e-01      1.70x     fail
   wynn_rho_2                   0.116557     1.07e-01      1.66x     fail
@@ -243,56 +243,56 @@
   GLOBAL PASS SUMMARY  (✓ = PASS, · = fail or invalid)
   Method                       GEOM     HARM     LOGS     ALTG    Total
   ──────────────────────── ──────── ──────── ──────── ──────── ────────
-  levin_v1                        ✓        ✓        ✓        ✓        4
-  levin_v2                        ✓        ✓        ✓        ✓        4
   levin_u2                        ✓        ✓        ✓        ✓        4
-  levin_u1                        ·        ✓        ✓        ✓        3
+  levin_v2                        ✓        ✓        ✓        ✓        4
+  levin_v1                        ✓        ✓        ✓        ✓        4
   log_linear                      ✓        ✓        ✓        ·        3
-  pade_13                         ·        ✓        ✓        ·        2
+  levin_u1                        ·        ✓        ✓        ✓        3
+  levin_t1                        ✓        ·        ·        ✓        2
+  best_shanks_wynn                ✓        ·        ·        ✓        2
+  median_ensemble                 ·        ✓        ·        ✓        2
+  levin_t2                        ✓        ·        ·        ✓        2
   pade_12                         ·        ✓        ✓        ·        2
+  pade_13                         ·        ✓        ✓        ·        2
   pade_23                         ·        ✓        ✓        ·        2
   pade_32                         ·        ✓        ✓        ·        2
-  median_ensemble                 ·        ✓        ·        ✓        2
-  wynn_eps_1                      ✓        ·        ·        ✓        2
-  levin_t2                        ✓        ·        ·        ✓        2
-  levin_t1                        ✓        ·        ·        ✓        2
   shanks_1                        ✓        ·        ·        ✓        2
-  best_shanks_wynn                ✓        ·        ·        ✓        2
-  pade_22                         ·        ✓        ·        ·        1
-  richardson_3                    ·        ✓        ·        ·        1
-  richardson_2                    ·        ✓        ·        ·        1
-  richardson_1                    ·        ✓        ·        ·        1
-  weniger_d2                      ·        ·        ✓        ·        1
-  richardson_a10                  ·        ✓        ·        ·        1
-  rational_fit                    ·        ✓        ·        ·        1
-  weniger_d1                      ·        ·        ✓        ·        1
-  pade_31                         ·        ✓        ·        ·        1
-  shanks_3                        ·        ✓        ·        ·        1
-  pade_21                         ·        ✓        ·        ·        1
-  neville_3                       ·        ✓        ·        ·        1
-  pade_11                         ·        ✓        ·        ·        1
-  neville_4                       ·        ✓        ·        ·        1
-  single_exp_fit                  ✓        ·        ·        ·        1
-  neville_2                       ·        ✓        ·        ·        1
-  geom_avg_diff                   ✓        ·        ·        ·        1
+  wynn_eps_1                      ✓        ·        ·        ✓        2
   double_exp_fit                  ✓        ·        ·        ·        1
-  wynn_rho_1                      ·        ✓        ·        ·        1
+  geom_avg_diff                   ✓        ·        ·        ·        1
   brezinski_theta2                ✓        ·        ·        ·        1
   brezinski_theta1                ✓        ·        ·        ·        1
   wynn_rho_2                      ·        ✓        ·        ·        1
+  richardson_3                    ·        ✓        ·        ·        1
   shanks_4                        ·        ✓        ·        ·        1
-  wynn_eps_2                      ·        ·        ·        ·        0
-  wynn_eps_3                      ·        ·        ·        ·        0
-  stability_weighted              ·        ·        ·        ·        0
-  anderson_1                      ·        ·        ·        ·        0
-  shanks_2                        ·        ·        ·        ·        0
-  richardson_a20                  ·        ·        ·        ·        0
-  richardson_a05                  ·        ·        ·        ·        0
-  anderson_2                      ·        ·        ·        ·        0
+  richardson_a10                  ·        ✓        ·        ·        1
+  single_exp_fit                  ✓        ·        ·        ·        1
+  weniger_d2                      ·        ·        ✓        ·        1
+  pade_11                         ·        ✓        ·        ·        1
+  neville_4                       ·        ✓        ·        ·        1
+  pade_22                         ·        ✓        ·        ·        1
+  pade_21                         ·        ✓        ·        ·        1
+  pade_31                         ·        ✓        ·        ·        1
+  rational_fit                    ·        ✓        ·        ·        1
+  richardson_1                    ·        ✓        ·        ·        1
+  richardson_2                    ·        ✓        ·        ·        1
+  neville_2                       ·        ✓        ·        ·        1
+  neville_3                       ·        ✓        ·        ·        1
+  wynn_rho_1                      ·        ✓        ·        ·        1
+  shanks_3                        ·        ✓        ·        ·        1
+  weniger_d1                      ·        ·        ✓        ·        1
   log_fit                         ·        ·        ·        ·        0
-  linear                          ·        ·        ·        ·        0
+  anderson_2                      ·        ·        ·        ·        0
+  anderson_1                      ·        ·        ·        ·        0
   current_value                   ·        ·        ·        ·        0
   anderson_3                      ·        ·        ·        ·        0
+  linear                          ·        ·        ·        ·        0
+  richardson_a05                  ·        ·        ·        ·        0
+  richardson_a20                  ·        ·        ·        ·        0
+  shanks_2                        ·        ·        ·        ·        0
+  stability_weighted              ·        ·        ·        ·        0
+  wynn_eps_2                      ·        ·        ·        ·        0
+  wynn_eps_3                      ·        ·        ·        ·        0
   wynn_rho_3                      ·        ·        ·        ·        0
 
 ========================================================================
