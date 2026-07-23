@@ -259,7 +259,13 @@ def write_report(df, out_dir):
     txt = "\n".join(L)
     with open(txt_path, "w", encoding="utf-8") as fh:
         fh.write(txt)
-    print(txt)
+    try:
+        print(txt)
+    except UnicodeEncodeError:
+        # Legacy Windows consoles (cp1252) cannot render the report's
+        # Unicode symbols; fall back to ASCII. Files on disk are UTF-8
+        # and unaffected.
+        print(txt.encode("ascii", errors="replace").decode("ascii"))
     print(f"Saved: {csv_path}")
     print(f"Saved: {txt_path}")
 
