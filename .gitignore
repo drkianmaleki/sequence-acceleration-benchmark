@@ -8,8 +8,12 @@ results/phase5a/phase5a_raw.csv
 data/*
 !data/README.md
 
+# ── Scratch / smoke-test output (not repo content) ────────────────────────────
+paper_tables*/
+
 # ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
+.pytest_cache/
 *.py[cod]
 *.pyo
 *.pyd
