@@ -3,7 +3,7 @@ datasets.py
 ===========
 Real-data pipeline: OpenML dataset loading and XGBoost training.
 
-Downloads tabular classification datasets from OpenML CC-18,
+Downloads tabular classification datasets from OpenML,
 trains XGBoost for 500 rounds recording validation log-loss every round,
 and returns the loss curves for use in the real-data experiment.
 """

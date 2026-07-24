@@ -8,6 +8,7 @@ data/*
 
 # ── Scratch / smoke-test output (not repo content) ────────────────────────────
 paper_tables*/
+paper_figures/
 
 # ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/

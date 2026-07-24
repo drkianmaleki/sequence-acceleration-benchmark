@@ -4,13 +4,13 @@ Benchmark code for the paper:
 
 > Maleki, K. (2026). **Finite-Horizon Learning-Curve Prediction for Gradient Boosting: Why Sequence Acceleration Fails and Simple Curve Fits Suffice.** *Machine Learning* (submitted).
 
-Given the validation-loss trajectory of a gradient boosting run, predict the loss at a specified future round. This repository evaluates **51 methods from 13 families** — Richardson extrapolation, Padé approximants, parametric curve fits, and the classical algebraic accelerators (Shanks, Wynn, Levin, Brezinski, Anderson mixing) — across **18 synthetic convergence regimes**, 3 noise levels, 3 prediction horizons, 30 seeds, and 10 observation depths (**2.478 M evaluations**), plus a transfer check on six real XGBoost curves from OpenML CC-18.
+Given the validation-loss trajectory of a gradient boosting run, predict the loss at a specified future round. This repository evaluates **51 methods from 13 families** — Richardson extrapolation, Padé approximants, parametric curve fits, and the classical algebraic accelerators (Shanks, Wynn, Levin, Brezinski, Anderson mixing) — across **18 synthetic convergence regimes**, 3 noise levels, 3 prediction horizons, and 30 seeds (**247,860 evaluations** in the main benchmark; **1.77 M** across all phases, spanning observation depths 20–140), plus a transfer check on six real XGBoost curves from OpenML (dataset IDs 1590, 1461, 1596, 23512, 41150, 41168).
 
 **Headline findings.**
-- The classical acceleration toolbox is a **no-op** on this task: 21 of 23 classical methods deliver median improvement within ±10 % of the do-nothing baseline, despite being exact on clean textbook sequences. They help only at long horizon with exactly zero noise — a cell real validation curves never occupy.
+- The classical acceleration toolbox is a **no-op** on this task: 21 of 23 classical methods deliver median improvement within ±10 % of the do-nothing baseline, despite being exact on clean textbook sequences. They help only at long horizon with exactly zero noise — a cell recorded validation curves do not occupy in practice.
 - Trajectory curve fits earn 2–4× median improvement but carry **both tails** of the ranking; method choice is risk management, and the paper reports median error and catastrophe rate as separate axes.
-- Adaptive selection hits hard limits (regime classification 35.6 %, ensembles lose to the best fixed method). The recommended deployment is a fixed default (`rational_fit`) plus a perturbation-based reliability alarm.
-- The real-data check reproduces the synthetic structure without calibration (58.7 % reduction in mean prediction error).
+- Adaptive selection hits hard limits (regime classification 35.6 %, ensembles lose to the best fixed method). The recommended deployment is a fixed default (`rational_fit`) plus a perturbation-based screen for erratic failure — validated on the synthetic grid, and shown (in the paper's real-curve check) to be blind to the systematic failure mode real curves exhibit; the practical mitigation there is observation depth.
+- The real-data check reproduces the synthetic structure without calibration (58.7 % reduction in mean prediction error; 3 of 18 cases worse, concentrated at the mid-transition depth).
 
 ---
 
@@ -102,7 +102,7 @@ sequence-acceleration-benchmark/
 ├── tests/
 │   ├── test_accelerators.py     Unit tests on four analytic sequences
 │   └── test_generators.py       Regime definition invariants
-├── results/              Generated output (empty until a phase is run)
+├── results/              Committed output for every phase
 ├── data/                 Downloaded datasets (populated at runtime)
 ├── requirements.txt
 └── reproduce_all.py      Single script reproducing all paper results
@@ -136,7 +136,7 @@ Three defects found during internal review were corrected before the reported ru
 ## Data availability
 
 - **Synthetic sequences** are generated deterministically from `src/generators.py` and `src/config.py`; no download is required.
-- **Real XGBoost curves** (§9) are derived from the [OpenML CC-18 benchmark suite](https://www.openml.org), downloaded automatically by `scripts/run_real_data.py`. The exact outputs used in the paper are committed under `results/`, including the real-data curves and per-case results in `results/real_data/`.
+- **Real XGBoost curves** (§9) are derived from the [OpenML benchmark suite](https://www.openml.org), downloaded automatically by `scripts/run_real_data.py`. The exact outputs used in the paper are committed under `results/`, including the real-data curves and per-case results in `results/real_data/`.
 
 ---
 
@@ -152,3 +152,16 @@ Three defects found during internal review were corrected before the reported ru
   note    = {Submitted}
 }
 ```
+
+---
+
+## Real-curve diagnostics and optional figures
+
+Two standalone scripts support the real-curve diagnostic experiment reported in the paper and provide optional summary visualizations (the submitted manuscript itself is table-only and contains no figures):
+
+```bash
+python scripts/make_paper_figures.py        # optional: summary figures to paper_figures/
+python scripts/analyze_real_diagnostics.py  # perturb_IQR on all 18 real windows + standardized regime mapping
+```
+
+`analyze_real_diagnostics.py` reproduces the stored real-data routings and predictions exactly, then reports the perturbation-diagnostic AUC and the scaling-sensitivity of the nearest-regime mapping (both negative results are reported in the paper). Extended appendix tables (S1–S9) live in the paper's Online Resource; the in-repo table generator `scripts/make_paper_tables.py` is unchanged.
