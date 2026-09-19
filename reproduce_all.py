@@ -1,45 +1,26 @@
 """
-reproduce_all.py
-================
-Single entry point that reproduces all tables in the main text of:
+reproduce_all.py  (v2)
+======================
+Single entry point that reproduces every result of the redesign-v2 pipeline
+in the required order:
 
-    Maleki, K. (2026). Finite-Horizon Learning-Curve Prediction for Gradient
-    Boosting: Regime Dependence, Failure Detection, and Conservative
-    Extrapolation Rules. Machine Learning (submitted).
+    Phase 0  -> Phase 1  -> dangerous re-derivation  -> Phases 2, 3, 4, 5a, 5b
+             -> real-data re-evaluation of the recorded curves
+
+The dangerous-method set is derived from Phase-1 output into
+results/phase1/dangerous_methods.json; phases 5a/5b refuse to run without
+that artifact, so the ordering is enforced by construction and executed
+explicitly here.
 
 Usage
 -----
-    pip install -r requirements.txt
-    python reproduce_all.py
+    python reproduce_all.py                # full run
+    python reproduce_all.py --quick        # 2 seeds, 2 regimes per group, 2 noise
+                                           # levels: every phase end to end (~10 min)
+    python reproduce_all.py --plan         # print the evaluation counts per phase
+    python reproduce_all.py --skip-real-data
 
-    # Faster sanity-check run (reduced seeds / noise levels):
-    python reproduce_all.py --quick
-
-Runtime (full mode, modern laptop / workstation)
-------------------------------------------------
-    Phase 0  — unit tests             :  ~1 min
-    Phase 1  — synthetic benchmark    :  ~20-40 min
-    Phase 2  — failure detection      :  ~25-40 min
-    Phase 3  — adaptive selection     :  ~10-20 min
-    Phase 4  — perturbation diag.     :  ~15-30 min
-    Phase 5a — ensemble ablation      :  ~10-15 min
-    Phase 5b — sensitivity sweeps     :  ~10-20 min
-    Real data — XGBoost transfer      :  ~15-30 min (requires internet + OpenML)
-    Total                             :  ~2-4 hours
-
-Table / figure mapping
-----------------------
-    Phase 0  → Appendix A.4 (unit-test results)
-    Phase 1  → Tables 4, 5, 22, 23; Figures 1-6
-    Phase 2  → Tables 7, 8; Figures (phase2)
-    Phase 3  → Tables 9, 10, 11; Figures (phase3)
-    Phase 4  → Tables 19, 20, 21; Figures (phase4)
-    Phase 5a → Table 11 (corrected); Figures (phase5a)
-    Phase 5b → Tables 12, 13, 14, 15, 29, 30, 31; Figures (phase5b)
-    Real data → Tables 16, 17, 18; Figures (real_data)
-
-All output is written to results/<phase>/ and results/real_data/.
-The results/ directory ships empty; every table and figure is generated here.
+Per-phase grids live in src/config.py (PHASE1 ... PHASE5B, REAL_DATA).
 Results are only meaningful alongside the commit that produced them, so
 regenerate the full set rather than mixing output from different commits.
 """
@@ -50,89 +31,171 @@ import subprocess
 import sys
 import time
 
+_ROOT = os.path.dirname(os.path.abspath(__file__))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
 
-SCRIPTS = [
-    ("Phase 0 — unit tests",           [sys.executable, "scripts/run_phase0_tests.py"]),
-    ("Phase 1 — synthetic benchmark",  [sys.executable, "scripts/run_phase1.py", "--full"]),
-    ("Phase 2 — failure detection",    [sys.executable, "scripts/run_phase2.py",  "--full"]),
-    ("Phase 3 — adaptive selection",   [sys.executable, "scripts/run_phase3.py",  "--full"]),
-    ("Phase 4 — perturbation diag.",   [sys.executable, "scripts/run_phase4.py",  "--full"]),
-    ("Phase 5a — ensemble ablation",   [sys.executable, "scripts/run_phase5a.py", "--full"]),
-    ("Phase 5b — sensitivity sweeps",  [sys.executable, "scripts/run_phase5b.py", "--full"]),
-    ("Real data — XGBoost transfer",   [sys.executable, "scripts/run_real_data.py"]),
-]
 
-SCRIPTS_QUICK = [
-    ("Phase 0 — unit tests",           [sys.executable, "scripts/run_phase0_tests.py"]),
-    ("Phase 1 — synthetic benchmark",  [sys.executable, "scripts/run_phase1.py",  "--quick"]),
-    ("Phase 2 — failure detection",    [sys.executable, "scripts/run_phase2.py",  "--quick"]),
-    ("Phase 3 — adaptive selection",   [sys.executable, "scripts/run_phase3.py",  "--quick"]),
-    ("Phase 4 — perturbation diag.",   [sys.executable, "scripts/run_phase4.py",  "--quick"]),
-    ("Phase 5a — ensemble ablation",   [sys.executable, "scripts/run_phase5a.py", "--quick"]),
-    ("Phase 5b — sensitivity sweeps",  [sys.executable, "scripts/run_phase5b.py", "--quick"]),
-    ("Real data — XGBoost transfer",   [sys.executable, "scripts/run_real_data.py"]),
+# (label, script, takes_mode_flag)
+STEPS = [
+    ("Phase 0 — analytic unit tests",              "scripts/run_phase0_tests.py", False),
+    ("Phase 1 — main benchmark",                   "scripts/run_phase1.py",       True),
+    ("Dangerous re-derivation (Phase 1 -> artifact)", "scripts/derive_dangerous.py", False),
+    ("Phase 2 — failure detection",                "scripts/run_phase2.py",       True),
+    ("Phase 3 — adaptive selection",               "scripts/run_phase3.py",       True),
+    ("Phase 4 — perturbation diagnostics",         "scripts/run_phase4.py",       True),
+    ("Phase 5a — ensemble ablation",               "scripts/run_phase5a.py",      True),
+    ("Phase 5b — sensitivity sweeps",              "scripts/run_phase5b.py",      True),
+    ("Real data — recorded-curve re-evaluation",   "scripts/run_real_data.py",    True),
 ]
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description="Reproduce all tables in the paper.")
+    p = argparse.ArgumentParser(description="Reproduce all results (redesign v2).")
     p.add_argument("--quick", action="store_true",
-                   help="Reduced seeds/noise for a fast sanity-check run.")
+                   help="2 seeds, 2 regimes per group, 2 noise levels; every phase runs.")
+    p.add_argument("--plan", action="store_true",
+                   help="Print planned evaluation counts per phase (full and quick) and exit.")
     p.add_argument("--skip-real-data", action="store_true",
-                   help="Skip the OpenML download step (requires internet).")
+                   help="Skip the real-data re-evaluation step.")
     return p.parse_args()
 
 
-def run_step(label: str, cmd: list, step: int, total: int) -> bool:
+def plan(mode: str) -> list:
+    """Planned evaluation counts per phase from the config grids."""
+    import src.config as C
+    from src.accelerators import METHOD_NAMES
+    from src.pipeline import resolve_regimes, ACCEL_METHODS, TRIVIAL_NON_ORACLE
+    from phases.phase2 import PHASE2_METHODS
+    from phases.phase4 import PHASE4_METHODS, EVAL_METHODS as P4_EVAL
+
+    rows = []
+    # Phase 0: 51 accelerators x 4 analytic cases
+    rows.append(("Phase 0", len(ACCEL_METHODS) * 4, "51 accelerators x 4 analytic cases (trivials excluded)"))
+
+    c = C.PHASE1[mode]
+    r = resolve_regimes(c["core_regimes"], c["holdout_regimes"], True)
+    n1 = len(r) * c["n_seeds"] * len(c["noise_levels"]) * len(c["gap_fractions"]) * len(METHOD_NAMES)
+    rows.append(("Phase 1", n1, f"{len(r)} regimes x {c['n_seeds']} seeds x {len(c['noise_levels'])} noise x "
+                                f"{len(c['gap_fractions'])} strata x {len(METHOD_NAMES)} methods"))
+    rows.append(("Dangerous derivation", 0, "reads phase1_aggregated.csv"))
+
+    c = C.PHASE2[mode]
+    r = resolve_regimes(c["core_regimes"], include_holdout=False)
+    cells2 = len(c["obs_idx_list"]) * len(c["noise_list"]) * c["n_seeds"] * len(r) * len(c["gap_fractions"])
+    rows.append(("Phase 2", cells2 * len(PHASE2_METHODS),
+                 f"{len(c['obs_idx_list'])} depths x {len(c['noise_list'])} noise x {c['n_seeds']} seeds x "
+                 f"{len(r)} core regimes x {len(c['gap_fractions'])} strata x {len(PHASE2_METHODS)} methods "
+                 f"(+2 skill-reference calls per cell)"))
+    rows.append(("Phase 3", 0, "analysis of Phase 2 output"))
+
+    c = C.PHASE4[mode]
+    r = resolve_regimes(c["core_regimes"], c["holdout_regimes"], True)
+    cells4 = len(c["obs_idx_list"]) * len(c["noise_list"]) * c["n_seeds"] * len(r) * len(c["gap_fractions"])
+    central4 = cells4 * len(P4_EVAL)
+    diag4 = cells4 * len(PHASE4_METHODS) * (len(c["shifts"]) + c["perturb_trials"])
+    rows.append(("Phase 4", central4, f"central evaluations ({len(r)} regimes, {len(P4_EVAL)} methods); "
+                                      f"+ {diag4:,} diagnostic calls"))
+
+    c = C.PHASE5A[mode]
+    r = resolve_regimes(c["core_regimes"], c["holdout_regimes"], True)
+    cells5 = len(c["obs_idx_list"]) * len(c["noise_list"]) * c["n_seeds"] * len(r) * len(c["gap_fractions"])
+    central5 = cells5 * len(METHOD_NAMES)
+    pert5 = cells5 * len(ACCEL_METHODS) * c["perturb_trials"]
+    rows.append(("Phase 5a", central5, f"central evaluations ({len(r)} regimes, {len(METHOD_NAMES)} methods); "
+                                       f"+ {pert5:,} perturbation calls"))
+
+    c = C.PHASE5B[mode]
+    r = resolve_regimes(c["core_regimes"], c["holdout_regimes"], True)
+    base = len(c["noise_list"]) * c["n_seeds"] * len(r) * len(c["gap_fractions"])
+    s1 = len(c["assumed_modes"]) * base * 2
+    s2 = len(c["window_lengths"]) * base * 2
+    s3 = len(c["catmult_values"]) * base * (len(ACCEL_METHODS) + len(TRIVIAL_NON_ORACLE))
+    rows.append(("Phase 5b", s1 + s2 + s3, f"sweep1 {s1:,} + sweep2 {s2:,} + sweep3 {s3:,} "
+                                          f"({len(r)} regimes, {len(c['gap_fractions'])} strata)"))
+
+    rd = C.REAL_DATA
+    pairs = [(d, t) for d in rd["depths"] for t in rd["targets"] if d < t]
+    rows.append(("Real data", 6 * len(pairs) * 7, f"6 datasets x {len(pairs)} (depth, target) pairs x 7 methods"))
+    return rows
+
+
+def print_plan():
+    for mode in ("full", "quick"):
+        rows = plan(mode)
+        total = sum(n for _, n, _ in rows)
+        print("=" * 78)
+        print(f"  PLANNED EVALUATIONS  [{mode.upper()}]")
+        print("=" * 78)
+        for label, n, note in rows:
+            print(f"  {label:<22} {n:>12,}   {note}")
+        print("  " + "-" * 74)
+        print(f"  {'TOTAL (central)':<22} {total:>12,}")
+        print()
+
+
+def run_step(label: str, cmd: list, step: int, total: int):
     bar = "=" * 72
     print(f"\n{bar}")
     print(f"  [{step}/{total}]  {label}")
-    print(bar)
+    print(f"  $ {' '.join(os.path.relpath(c, _ROOT) if os.path.isabs(c) else c for c in cmd[1:])}")
+    print(bar, flush=True)
     t0 = time.time()
-    # Phase scripts print box-drawing characters; force UTF-8 in the child so
-    # that redirecting output to a file cannot fail on a non-UTF-8 console.
     env = os.environ.copy()
     env.setdefault("PYTHONIOENCODING", "utf-8")
-    result = subprocess.run(cmd, cwd=os.path.dirname(os.path.abspath(__file__)),
-                            env=env)
+    result = subprocess.run(cmd, cwd=_ROOT, env=env)
     elapsed = time.time() - t0
-    if result.returncode != 0:
+    ok = result.returncode == 0
+    if ok:
+        print(f"\n  Completed in {elapsed:.0f}s", flush=True)
+    else:
         print(f"\n  ERROR: {label} failed (exit code {result.returncode}).")
-        print(f"  Elapsed: {elapsed:.0f}s\n")
-        return False
-    print(f"\n  Completed in {elapsed:.0f}s")
-    return True
+        print(f"  Elapsed: {elapsed:.0f}s\n", flush=True)
+    return ok, elapsed
 
 
 def main():
     args = parse_args()
-    plan = SCRIPTS_QUICK if args.quick else SCRIPTS
+    if args.plan:
+        print_plan()
+        return
 
-    if args.skip_real_data:
-        plan = [(label, cmd) for label, cmd in plan
-                if "real data" not in label.lower()]
+    mode_flag = "--quick" if args.quick else "--full"
+    steps = [s for s in STEPS if not (args.skip_real_data and s[1].endswith("run_real_data.py"))]
 
     mode = "QUICK" if args.quick else "FULL"
     print("=" * 72)
-    print(f"  Reproducing all paper tables  [{mode} mode]")
+    print(f"  Reproducing all results  [{mode} mode, redesign v2]")
     print("=" * 72)
-    print(f"  {len(plan)} phases to run.")
+    print(f"  {len(steps)} steps.  Order: Phase 0 -> Phase 1 -> dangerous re-derivation "
+          f"-> Phases 2-5 -> real data")
     print("  Output: results/<phase>/\n")
 
-    failures = []
-    for i, (label, cmd) in enumerate(plan, 1):
-        ok = run_step(label, cmd, i, len(plan))
-        if not ok:
-            failures.append(label)
+    outcomes = []
+    t_start = time.time()
+    for i, (label, script, takes_mode) in enumerate(steps, 1):
+        cmd = [sys.executable, script] + ([mode_flag] if takes_mode else [])
+        ok, elapsed = run_step(label, cmd, i, len(steps))
+        outcomes.append((label, ok, elapsed))
+        if not ok and script.endswith(("run_phase1.py", "derive_dangerous.py")):
+            print("  Stopping: later phases depend on this step.")
+            break
 
     print("\n" + "=" * 72)
-    if not failures:
-        print("  All phases completed successfully.")
-        print("  Results are in results/")
+    print(f"  PIPELINE SUMMARY  [{mode}]")
+    print("=" * 72)
+    print(f"  {'#':>2}  {'step':<48} {'status':<8} {'time':>8}")
+    print("  " + "-" * 70)
+    for i, (label, ok, elapsed) in enumerate(outcomes, 1):
+        print(f"  {i:>2}  {label:<48} {'OK' if ok else 'FAILED':<8} {elapsed:>7.0f}s")
+    print("  " + "-" * 70)
+    print(f"  {'':>2}  {'total':<48} {'':<8} {time.time() - t_start:>7.0f}s")
+    failures = [label for label, ok, _ in outcomes if not ok]
+    if not failures and len(outcomes) == len(steps):
+        print("  All steps completed successfully.  Results are in results/")
     else:
-        print(f"  {len(failures)} phase(s) failed:")
-        for f in failures:
-            print(f"    - {f}")
+        print(f"  {len(failures)} step(s) failed: {failures}")
+        print("=" * 72 + "\n")
         sys.exit(1)
     print("=" * 72 + "\n")
 

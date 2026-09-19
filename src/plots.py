@@ -297,28 +297,35 @@ def fig5_regime_recommendations(df_best: pd.DataFrame,
              .copy()
              .reset_index(drop=True))
 
+    # Redesign v2: the primary per-regime recommendation is best_by_skill
+    # (median skill vs the best-of-four trivial reference; lower is better,
+    # 1.0 = trivial parity).  Capped cells are marked.
     fig, ax = plt.subplots(figsize=(12, 7))
-    regime_labels = [r.replace('_', '\n') for r in sub['regime']]
+    regime_labels = [r.replace('_', '\n') + (' [CAP]' if c else '')
+                     for r, c in zip(sub['regime'], sub['capped'])]
     colours = [FAMILY_COLOURS.get(f, '#cccccc') for f in sub['family']]
+    heights = sub['best_skill'].fillna(0.0)
 
-    bars = ax.bar(range(len(sub)), sub['stability'],
+    bars = ax.bar(range(len(sub)), heights,
                   color=colours, edgecolor='white', lw=0.5)
 
-    for i, (bm, sc, vr, cr) in enumerate(zip(
-            sub['best_method'], sub['stability'],
-            sub['valid_rate'],  sub['cat_rate'])):
-        ax.text(i, sc + 0.01, bm.replace('_', '\n'),
+    for i, (bm, sk, vr, cr) in enumerate(zip(
+            sub['best_by_skill'], sub['best_skill'],
+            sub['skill_best_valid_rate'], sub['skill_best_cat_rate'])):
+        ax.text(i, (sk if np.isfinite(sk) else 0.0) + 0.01, bm.replace('_', '\n'),
                 ha='center', va='bottom', fontsize=6.5, rotation=0)
-        ax.text(i, -0.05, f'V={vr:.2f}\nC={cr:.2f}',
+        ax.text(i, -0.02, f'V={vr:.2f}\nC={cr:.2f}',
                 ha='center', va='top', fontsize=5.5, color='#555555')
 
     ax.set_xticks(range(len(sub)))
     ax.set_xticklabels(regime_labels, fontsize=7.5)
-    ax.set_ylabel('Best Stability Score', fontsize=9)
+    ax.set_ylabel('Median skill of best-by-skill method  (lower = better)', fontsize=9)
     ax.set_title(
-        f'Figure 5 — Per-Regime Best Method  (gap stratum g = {default_horizon})\n'
-        'Method name shown above each bar; V = valid rate, C = cat rate',
+        f'Figure 5 — Per-Regime Best Method by Skill  (gap stratum g = {default_horizon})\n'
+        'Method name above each bar; skill 1.0 = parity with the best trivial predictor; '
+        'V = valid rate, C = cat rate',
         fontsize=10, fontweight='bold')
+    ax.axhline(1.0, color='black', lw=0.8, ls='--', alpha=0.6)
     ax.axhline(0, color='black', lw=0.6)
 
     handles = [mpatches.Patch(color=c, label=f)

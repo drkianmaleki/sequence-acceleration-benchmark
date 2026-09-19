@@ -12,9 +12,105 @@ import sys
 import numpy as np
 import pandas as pd
 
+# ══════════════════════════════════════════════════════════════════════════════
+# OUTPUT CONTRACT v2  (stub — implementation lands in Prompt 4)
+# ------------------------------------------------------------------------------
+# The redesign-v2 results are keyed by gap stratum (target_g), carry skill /
+# capped / is_holdout / is_oracle columns, and separate core from held-out
+# regimes.  The fragments below replace the v1 set (t03 ... t31).  Every
+# pooled fragment applies the capped-exclusion rule; the capped block is its
+# own fragment; the oracle comparator appears in tables but never in ranks.
+#   python scripts/make_paper_tables.py --contract      prints this contract
+# ══════════════════════════════════════════════════════════════════════════════
+OUTPUT_CONTRACT_V2 = {
+    # Phase 1 — main benchmark
+    "v2_t03_global_core_g0.1.tex":       ("phase1/phase1_global.csv",
+        "core regimes, headline stratum g=0.1, sorted by med_error; skill, valid, cat, "
+        "stability; oracle row shown unranked; trivial comparators flagged"),
+    "v2_t03b_global_core_g0.5.tex":      ("phase1/phase1_global.csv", "as t03 at g=0.5"),
+    "v2_t03c_global_core_g0.02.tex":     ("phase1/phase1_global.csv", "as t03 at g=0.02"),
+    "v2_t04_global_holdout.tex":         ("phase1/phase1_global_holdout.csv",
+        "held-out regimes, three strata, sorted by med_error"),
+    "v2_t05_regime_best_by_skill.tex":   ("phase1/phase1_regime_best.csv",
+        "best_by_skill per (regime, g) with best_skill; best_by_stability as secondary column; "
+        "capped cells marked"),
+    "v2_t06_capped_block.tex":           ("phase1/phase1_capped.csv",
+        "capped (regime, g) cells with n_f and achieved_g; excluded from all pooled fragments"),
+    "v2_t07_trivial_comparators.tex":    ("phase1/phase1_global.csv",
+        "constant_assumed, last_value, window_mean, window_min, constant_oracle per stratum"),
+    "v2_t08_dangerous.tex":              ("phase1/dangerous_methods.json",
+        "re-derived dangerous set with pooled S; legacy set shown for the record"),
+    "v2_t09_horizons.tex":               ("phase1/phase1_horizons.csv",
+        "n_f(regime, g) at n_obs=90 with achieved g on capped cells"),
+    # Phase 2 — failure detection
+    "v2_t10_features.tex":               ("phase2/phase2_correlations_g0.1.csv",
+        "global Spearman correlations vs Richardson losing margin (capped excluded)"),
+    "v2_t11_cascade_rules.tex":          ("phase2/phase2_rules_g0.1.csv",
+        "threshold rules: precision / recall / gain at the headline stratum"),
+    "v2_t12_phase_diagram.tex":          ("phase2/phase2_phase_diagram_g0.1.csv",
+        "Richardson rank among the 10-method rank pool by regime and depth"),
+    # Phase 3 — selectors
+    "v2_t13_selectors.tex":              ("phase3/phase3_selector_comparison.csv",
+        "mean achieved stability per selector and stratum (capped excluded)"),
+    "v2_t14_classifier.tex":             ("phase3/phase3_regime_classifier.csv", "unchanged form"),
+    "v2_t15_cv.tex":                     ("phase3/phase3_cv_results.csv", "leave-one-regime-out"),
+    # Phase 4 — diagnostics
+    "v2_t16_diag_global.tex":            ("phase4/phase4_diagnostic_correlations.csv", "core"),
+    "v2_t16b_diag_holdout.tex":          ("phase4/phase4_diagnostic_correlations_holdout.csv", "held-out"),
+    "v2_t17_rejection_rules.tex":        ("phase4/phase4_rejection_rules.csv", "group A methods"),
+    "v2_t18_diag_depth.tex":             ("phase4/phase4_obs_reliability.csv", "richardson_1 by depth"),
+    "v2_t19_diag_ensemble.tex":          ("phase4/phase4_ensemble.csv",
+        "selectors incl. trivial references, mean/median error and skill"),
+    # Phase 5a — ensembles
+    "v2_t20_ensemble.tex":               ("phase5a/phase5a_ensemble.csv",
+        "core, per stratum, mean/median error and med_skill; trivial references flagged"),
+    "v2_t20b_ensemble_holdout.tex":      ("phase5a/phase5a_ensemble_holdout.csv", "held-out"),
+    "v2_t21_ablation.tex":               ("phase5a/phase5a_ablation.csv", "per stratum"),
+    "v2_t22_reliability_ranking.tex":    ("phase5a/phase5a_method_weights.csv",
+        "mean perturb_IQR ranking with dangerous flag from the artifact"),
+    # Phase 5b — sensitivity
+    "v2_t23_sweep1_modes.tex":           ("phase5b/phase5b_sweep1_global.csv",
+        "cascade precision/recall/gain vs assumed-asymptote mode (core; oracle labelled)"),
+    "v2_t24_sweep2_window.tex":          ("phase5b/phase5b_sweep2_global.csv", "core"),
+    "v2_t25_sweep3_concordance.tex":     ("phase5b/phase5b_sweep3_concordance.csv", "per stratum"),
+    "v2_t26_sweep3_champions.tex":       ("phase5b/phase5b_sweep3_champions.csv",
+        "core + held-out champions with dangerous flag"),
+    # Real data
+    "v2_t27_real_grid.tex":              ("real_data/real_data_summary_v2.csv",
+        "6 datasets x 15 (depth, target) cells: cascade error, best trivial, skill"),
+    "v2_t28_real_methods.tex":           ("real_data/real_data_results_v2.csv",
+        "median skill per method over the grid"),
+    "v2_t29_real_legacy18.tex":          ("real_data/real_data_results.csv",
+        "the preserved 18-cell results of the original run, for comparison"),
+}
+
+
+def print_contract():
+    print("OUTPUT CONTRACT v2  (make_paper_tables.py; implementation pending Prompt 4)")
+    print(f"{'fragment':<36} {'source':<50} description")
+    print("-" * 120)
+    for name, (src, desc) in OUTPUT_CONTRACT_V2.items():
+        print(f"{name:<36} {src:<50} {desc}")
+
+
+if "--contract" in sys.argv or len(sys.argv) < 4:
+    print_contract()
+    sys.exit(0)
+
 RES = sys.argv[1]
 REAL = sys.argv[2]
 OUT = sys.argv[3]
+
+# v2 results are not consumed by the v1 code below (schema changed); refuse
+# loudly rather than emit wrong tables.
+_g_path = os.path.join(RES, "phase1", "phase1_global.csv")
+if os.path.exists(_g_path) and "target_g" in pd.read_csv(_g_path, nrows=1).columns:
+    print("results/ holds redesign-v2 output (target_g schema). The v1 table code "
+          "below does not apply; the v2 fragments are specified in OUTPUT_CONTRACT_V2 "
+          "and will be implemented in Prompt 4.")
+    print_contract()
+    sys.exit(2)
+
 os.makedirs(OUT, exist_ok=True)
 EPS = 1e-9
 DANGEROUS = ["neville_2", "neville_3", "neville_4",

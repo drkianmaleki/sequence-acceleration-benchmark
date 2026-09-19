@@ -331,3 +331,124 @@ def process_curves(
             records.append(row)
 
     return pd.DataFrame(records)
+
+
+# ── Redesign v2: re-evaluation of RECORDED curves (no retraining) ─────────────
+
+REAL_EVAL_METHODS = ['richardson_1', 'rational_fit']
+
+
+def evaluate_recorded_curves(
+    curves:               dict,
+    depths:               list,
+    targets:              list,
+    window_len:           int   = 60,
+    assumed_mode:         str   = None,
+    phase2_features_path: str   = None,
+):
+    """
+    Re-evaluate recorded real curves on a (depth, target-round) grid.
+
+    For every dataset, observation depth and target round with
+    depth < target <= n_rounds: build the window ending at the depth,
+    compute L_hat from the assumed-asymptote mode (no oracle on real
+    curves), extract features, apply the two-rule cascade, and predict the
+    loss at the target round with richardson_1, rational_fit, the cascade's
+    choice and the four trivial reference methods.  Skill is
+    err / err(best of the four trivial references).
+
+    Returns
+    -------
+    (df_long, df_summary)
+        df_long    : one row per (dataset, obs_depth, target_round, method)
+        df_summary : one row per (dataset, obs_depth, target_round)
+    """
+    from src.accelerators import METHODS
+    from src.trivial import (SKILL_REFERENCE_METHODS, best_reference_error,
+                             skill_score)
+
+    assumed_mode = resolve_mode(assumed_mode)
+    regime_centroids = None
+    if phase2_features_path and os.path.exists(phase2_features_path):
+        df_feat = pd.read_csv(phase2_features_path)
+        regime_centroids = df_feat.groupby('regime')[FEATURE_COLS].mean()
+
+    cfg = _DEFAULT_CFG.copy()
+    long_rows, summary_rows = [], []
+
+    for name, curve in curves.items():
+        curve    = np.asarray(curve, dtype=float)
+        n_rounds = len(curve)
+
+        for depth in depths:
+            if depth >= n_rounds:
+                continue
+            start  = max(0, depth - window_len)
+            window = curve[start:depth]
+            idxs   = np.arange(start + 1, depth + 1, dtype=float)
+
+            L_hat = assumed_asymptote(None, window, assumed_mode)
+            cfg['L_inf'] = L_hat
+            feats    = extract_features(window, idxs, L_hat)
+            selected = apply_cascade(feats)
+            regime   = (map_to_regime(feats, regime_centroids)
+                        if regime_centroids is not None else 'unknown')
+            current_val = float(curve[depth - 1])
+
+            for target in targets:
+                if depth >= target or target > n_rounds:
+                    continue
+                true_val    = float(curve[target - 1])
+                fx          = float(target)
+                current_err = abs(current_val - true_val)
+
+                preds = {}
+                for m in REAL_EVAL_METHODS:
+                    preds[m] = apply_accelerator(m, window, idxs, fx, cfg)
+                for m in SKILL_REFERENCE_METHODS:
+                    try:
+                        preds[m] = float(METHODS[m](list(window), list(idxs), fx, cfg))
+                    except Exception:
+                        preds[m] = float('nan')
+                preds['cascade'] = preds[selected]
+
+                errs = {m: (abs(p - true_val) if np.isfinite(p) else float('nan'))
+                        for m, p in preds.items()}
+                ref_err = best_reference_error(errs)
+                ref_best = min((m for m in SKILL_REFERENCE_METHODS
+                                if np.isfinite(errs[m])),
+                               key=lambda m: errs[m], default='')
+
+                for m, p in preds.items():
+                    e = errs[m]
+                    long_rows.append(dict(
+                        dataset=name, obs_depth=depth, target_round=target,
+                        method=m, selected_method=selected,
+                        is_cascade=int(m == 'cascade'),
+                        is_trivial=int(m in SKILL_REFERENCE_METHODS),
+                        prediction=p, true_val=true_val, error=e,
+                        current_err=current_err, ref_error=ref_err,
+                        skill=(skill_score(e, ref_err) if np.isfinite(e) else float('nan')),
+                        L_hat=L_hat, assumed_mode=assumed_mode,
+                        nearest_regime=regime,
+                    ))
+
+                casc_err = errs['cascade']
+                summary_rows.append(dict(
+                    dataset=name, obs_depth=depth, target_round=target,
+                    selected_method=selected, cascade_pred=preds['cascade'],
+                    true_val=true_val, cascade_err=casc_err,
+                    richardson_err=errs['richardson_1'],
+                    rational_err=errs['rational_fit'],
+                    current_err=current_err, ref_error=ref_err,
+                    ref_best_method=ref_best,
+                    cascade_skill=(skill_score(casc_err, ref_err)
+                                   if np.isfinite(casc_err) else float('nan')),
+                    improvement=((current_err - casc_err) / current_err
+                                 if (np.isfinite(casc_err) and current_err > 1e-10)
+                                 else float('nan')),
+                    L_hat=L_hat, assumed_mode=assumed_mode, nearest_regime=regime,
+                    **{f: feats.get(f, np.nan) for f in FEATURE_COLS},
+                ))
+
+    return pd.DataFrame(long_rows), pd.DataFrame(summary_rows)

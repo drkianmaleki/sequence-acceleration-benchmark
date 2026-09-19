@@ -1,11 +1,11 @@
 """
 phase2.py
 =========
-Phase 2 — Richardson Failure Condition Mapping.
+Phase 2 — Richardson Failure Condition Mapping (redesign v2).
 
 Four components:
-  1. Sweep evaluation   — run a reduced 9-method set across (obs_idx, noise,
-                          future_idx) grids to map where Richardson's rank falls.
+  1. Sweep evaluation   — run the reduced method pool across (obs_idx, noise,
+                          gap stratum) grids to map where Richardson's rank falls.
   2. Feature extraction — compute six trajectory features for every sequence,
                           using a dynamic L0 baseline that prevents NaN on
                           near-converged windows.
@@ -14,14 +14,20 @@ Four components:
                           per-regime correlation.
   4. Rule testing       — evaluate simple and compound threshold rules.
 
-Changes from v1
----------------
-  * Dynamic L0 in feature extraction: L0 = min(L_inf, 0.5*min(window))
-    prevents NaN on near-converged sequences (fixes per-regime correlations).
-  * Additional candidate rules: lower R2 thresholds and compound selectors.
-  * Per-regime correlation guard raised from n>=5 to n>=15.
-  * Noise-value matching in phase diagram uses nearest-value lookup.
-  * Crossover figure uses near-zero comparison for sigma==0.
+Redesign v2
+-----------
+  * Targets are gap-stratified: for every (regime, obs_idx) and every g in
+    config.HORIZON_GAP_FRACTIONS the target index is
+    n_f = first n > obs_idx with gap(n) <= g * gap(obs_idx), capped at
+    50,000 with the achieved fraction recorded.  Records and aggregations
+    are keyed by target_g; capped cells are flagged and excluded from every
+    pooled cross-regime statistic (phase diagram mean, correlations, rules).
+  * The pool is the existing 9 methods + constant_assumed + constant_oracle.
+    The oracle is evaluation-only: it never enters a rank or a "best other".
+  * Core 18 regimes only (this phase feeds selector / cascade training).
+  * Methods receive L_hat (ASSUMED_L_MODE "zero"); L_true is hidden.
+  * Every record carries L_true, L_hat, target_g, achieved_g, n_f, capped,
+    skill (vs best-of-four trivial reference), is_trivial, is_oracle.
 
 Reduced method set (9 methods covering all Phase 1 champions):
   current_value   baseline floor
@@ -35,7 +41,7 @@ Reduced method set (9 methods covering all Phase 1 champions):
   anderson_1      Stable limit-estimator fallback
 
 Author : Kian Maleki
-Date   : 2026-05-24
+Date   : 2026-05-24 (v1), 2026-09-19 (redesign v2)
 """
 
 import os, math, warnings
@@ -43,22 +49,23 @@ import numpy as np
 import pandas as pd
 from scipy.stats import spearmanr
 from scipy.optimize import curve_fit
-from typing import List, Dict
+from typing import List, Dict, Optional
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-import matplotlib.colors as mcolors
-from matplotlib.gridspec import GridSpec
 
 warnings.filterwarnings('ignore')
 
 import src.config as CFG_MOD
 from src.accelerators import METHODS
-from src.generators   import REGIME_NAMES, regime_functions
+from src.generators   import regime_functions
 from src.asymptote    import assumed_asymptote
+from src.pipeline     import (REFERENCE_METHODS, capped_block, exclude_capped,
+                              horizon_meta, method_flags, resolve_regimes)
+from src.trivial      import ORACLE_METHODS, best_reference_error, skill_score
 
-# ── Reduced method set ─────────────────────────────────────────────────────────
-PHASE2_METHODS = [
+# ── Method pool ────────────────────────────────────────────────────────────────
+PHASE2_BASE_METHODS = [
     'current_value',
     'richardson_1',
     'richardson_a10',
@@ -69,25 +76,34 @@ PHASE2_METHODS = [
     'weniger_d2',
     'anderson_1',
 ]
+# Redesign v2: the trivial constant predictors are first-class comparators.
+PHASE2_METHODS = PHASE2_BASE_METHODS + ['constant_assumed', 'constant_oracle']
+# Ranks, "best other" and selector candidates never include the oracle.
+RANK_POOL = [m for m in PHASE2_METHODS if m not in ORACLE_METHODS]
 
 METHOD_COLOURS = {
-    'current_value':  '#888888',
-    'richardson_1':   '#f4a261',
-    'richardson_a10': '#e76f51',
-    'single_exp_fit': '#2196f3',
-    'rational_fit':   '#1565c0',
-    'pade_22':        '#e91e63',
-    'log_linear':     '#00897b',
-    'weniger_d2':     '#9c27b0',
-    'anderson_1':     '#795548',
+    'current_value':    '#888888',
+    'richardson_1':     '#f4a261',
+    'richardson_a10':   '#e76f51',
+    'single_exp_fit':   '#2196f3',
+    'rational_fit':     '#1565c0',
+    'pade_22':          '#e91e63',
+    'log_linear':       '#00897b',
+    'weniger_d2':       '#9c27b0',
+    'anderson_1':       '#795548',
+    'constant_assumed': '#212121',
+    'constant_oracle':  '#000000',
 }
 
 FIG_DPI = 150
+CELL_KEYS = ['regime', 'obs_idx', 'noise', 'target_g']
+
 
 # ── Config builder ─────────────────────────────────────────────────────────────
-def _cfg(future_idx: int, L_hat: float) -> dict:
-    """L_hat is the ASSUMED asymptote (src.asymptote); never L_true."""
-    return {
+def _cfg(future_idx: int, L_hat: float, L_true: Optional[float] = None) -> dict:
+    """L_hat is the ASSUMED asymptote (src.asymptote); never L_true.  L_true is
+    stored under cfg['L_true'] for the constant_oracle comparator only."""
+    cfg = {
         'L_inf':          float(L_hat),
         'ridge':          CFG_MOD.RIDGE,
         'min_valid':      CFG_MOD.MIN_VALID,
@@ -98,7 +114,11 @@ def _cfg(future_idx: int, L_hat: float) -> dict:
         'perturb_scale':  CFG_MOD.PERTURB_SCALE,
         'W_CAT':          CFG_MOD.W_CAT,
         'W_BEATS':        CFG_MOD.W_BEATS,
+        'future_idx':     future_idx,
     }
+    if L_true is not None:
+        cfg['L_true'] = float(L_true)
+    return cfg
 
 
 def _valid(v: float, cfg: dict) -> bool:
@@ -110,15 +130,21 @@ def _stab(vr: float, cr: float, br: float) -> float:
     return vr - CFG_MOD.W_CAT * cr + CFG_MOD.W_BEATS * br
 
 
+def _med(series) -> float:
+    vals = pd.Series(series).dropna()
+    return float(vals.median()) if len(vals) else float('nan')
+
+
 # ── Feature extraction (local, with dynamic L0 fix) ───────────────────────────
 
-def _extract_features(seq: list, indices: list, L_inf: float) -> dict:
+def _extract_features(seq: list, indices: list, L_hat: float) -> dict:
     """
     Extract six scalar features from an observable window.
 
-    Dynamic L0 fix: uses L0 = min(L_inf, 0.5 * min(window)) so that
+    Dynamic L0 fix: uses L0 = min(L_hat, 0.5 * min(window)) so that
     shifted = s - L0 > 0 even when the sequence is near its limit.
-    This prevents NaN on near-converged windows.
+    This prevents NaN on near-converged windows.  L_hat is the ASSUMED
+    asymptote handed to the cascade; L_true is never used here.
 
     Features
     --------
@@ -135,7 +161,7 @@ def _extract_features(seq: list, indices: list, L_inf: float) -> dict:
 
     # Dynamic L0: guarantee all shifted values are positive
     win_min  = float(np.min(s))
-    L0       = max(0.0, min(L_inf, win_min * 0.5))
+    L0       = max(0.0, min(float(L_hat), win_min * 0.5))
     # If window min is non-positive (noisy plateau), subtract 0
     if win_min <= 0.0:
         L0 = 0.0
@@ -253,25 +279,29 @@ CANDIDATE_RULES = [
 
 def run_sweep(obs_idx_list: List[int],
               noise_list:   List[float],
-              future_list:  List[int],
+              gap_fractions: List[float],
               n_seeds:      int,
               window_len:   int,
               out_dir:      str,
+              core_regimes: Optional[List[str]] = None,
               verbose:      bool = True):
     """
-    Evaluate PHASE2_METHODS across all (obs_idx, noise, future_idx) grids.
-    Returns (df_agg, df_feat) DataFrames.
+    Evaluate PHASE2_METHODS across all (obs_idx, noise, gap stratum) grids on
+    the core regimes.  Returns (df_agg, df_feat) DataFrames.
     """
     os.makedirs(out_dir, exist_ok=True)
+    regimes = resolve_regimes(core_regimes, include_holdout=False)
+    gap_fractions = [float(g) for g in gap_fractions]
 
-    n_total = (len(obs_idx_list) * len(noise_list)
-               * n_seeds * len(REGIME_NAMES))
+    n_total = (len(obs_idx_list) * len(noise_list) * n_seeds * len(regimes))
     done    = 0
 
     sweep_records   = []
     feature_records = []
 
-    n_arr_max = np.arange(max(future_list) + 200, dtype=float)
+    # Only the observed prefix is needed: targets come from the noiseless truth.
+    n_arr = np.arange(max(obs_idx_list) + 1, dtype=float)
+    extra_refs = [m for m in REFERENCE_METHODS if m not in PHASE2_METHODS]
 
     for obs_idx in obs_idx_list:
         wl = min(window_len, obs_idx)
@@ -281,10 +311,10 @@ def run_sweep(obs_idx_list: List[int],
                 rng = np.random.RandomState(
                     seed * 137 + int(sigma * 1e6) % 9973 + obs_idx * 7)
 
-                for regime in REGIME_NAMES:
+                for regime in regimes:
                     # Hidden per-(regime, seed) asymptote; methods never see L_true.
                     gen, truth, L_true = regime_functions(regime, seed)
-                    seq_full = gen(n_arr_max, rng, sigma)
+                    seq_full = gen(n_arr, rng, sigma)
 
                     # Observation window
                     w_start  = max(0, obs_idx - wl + 1)
@@ -306,50 +336,58 @@ def run_sweep(obs_idx_list: List[int],
                     feat_row.update(feats)
                     feature_records.append(feat_row)
 
-                    # Method evaluations
-                    for fid in future_list:
-                        true_val = float(truth(fid))
+                    # Method evaluations, one gap stratum at a time
+                    for g in gap_fractions:
+                        hm       = horizon_meta(regime, obs_idx, g, seed)
+                        n_f      = hm['n_f']
+                        true_val = float(truth(n_f))
                         curr_err = abs(curr_val - true_val)
-                        cfg      = _cfg(fid, L_hat)
+                        cfg      = _cfg(n_f, L_hat, L_true)
 
-                        for method in PHASE2_METHODS:
-                            fn = METHODS[method]
+                        ests: Dict[str, float] = {}
+                        errs: Dict[str, float] = {}
+                        for method in PHASE2_METHODS + extra_refs:
                             try:
-                                est = fn(seq_win, idx_win, float(fid), cfg)
+                                est = float(METHODS[method](seq_win, idx_win, float(n_f), cfg))
                             except Exception:
                                 est = float('nan')
+                            ests[method] = est
+                            errs[method] = abs(est - true_val) if _valid(est, cfg) else float('nan')
+                        ref_err = best_reference_error(errs)
 
-                            valid = _valid(est, cfg)
-                            err   = abs(est - true_val) if valid else float('nan')
+                        for method in PHASE2_METHODS:
+                            est, err = ests[method], errs[method]
+                            valid = math.isfinite(err)
                             cat   = (not valid) or (
-                                valid and curr_err > 1e-12
-                                and err > CFG_MOD.CAT_MULT * curr_err)
-                            beats = (valid and curr_err > 1e-12
-                                     and err < curr_err)
-                            impv  = ((curr_err / err)
-                                     if (valid and err > 1e-12)
+                                curr_err > 1e-12 and err > CFG_MOD.CAT_MULT * curr_err)
+                            beats = valid and curr_err > 1e-12 and err < curr_err
+                            impv  = ((curr_err / err) if (valid and err > 1e-12)
                                      else (1.0 if valid else float('nan')))
-
-                            sweep_records.append({
+                            rec = {
                                 'method':       method,
                                 'regime':       regime,
                                 'obs_idx':      obs_idx,
                                 'noise':        sigma,
-                                'future_idx':   fid,
                                 'seed':         seed,
+                                'L_true':       L_true,
+                                'L_hat':        L_hat,
                                 'valid':        int(valid),
                                 'catastrophic': int(cat),
                                 'beats':        int(beats),
                                 'error':        err if valid else float('nan'),
-                                'impv':         (impv if math.isfinite(impv)
-                                                 else float('nan')),
-                            })
+                                'impv':         impv if math.isfinite(impv) else float('nan'),
+                                'ref_error':    ref_err,
+                                'skill':        skill_score(err, ref_err) if valid else float('nan'),
+                            }
+                            rec.update(hm)
+                            rec.update(method_flags(method))
+                            sweep_records.append(rec)
 
-                done += 1
-                if verbose and done % max(1, n_total // 20) == 0:
-                    print(f'  [{done:>6}/{n_total}]  {100*done/n_total:5.1f}%'
-                          f'  obs={obs_idx}  sigma={sigma:.3f}',
-                          flush=True)
+                    done += 1
+                    if verbose and done % max(1, n_total // 20) == 0:
+                        print(f'  [{done:>6}/{n_total}]  {100*done/n_total:5.1f}%'
+                              f'  obs={obs_idx}  sigma={sigma:.3f}',
+                              flush=True)
 
     if verbose:
         print(f'  [{n_total}/{n_total}] 100.0%  Done.\n')
@@ -359,22 +397,29 @@ def run_sweep(obs_idx_list: List[int],
 
     # ── Aggregate ──────────────────────────────────────────────────────────────
     agg = []
-    for keys, grp in df_raw.groupby(
-            ['method', 'regime', 'obs_idx', 'noise', 'future_idx']):
-        method, regime, obs_idx, sigma, fid = keys
+    for keys, grp in df_raw.groupby(['method'] + CELL_KEYS, sort=False):
+        method, regime, obs_idx, sigma, g = keys
         vr = grp['valid'].mean()
         cr = grp['catastrophic'].mean()
         br = grp['beats'].mean()
-        errors = grp['error'].dropna().tolist()
-        me = float(np.median(errors)) if errors else float('nan')
-        sc = _stab(vr, cr, br)
         agg.append({
             'method':     method,   'regime':     regime,
             'obs_idx':    obs_idx,  'noise':      sigma,
-            'future_idx': fid,      'valid_rate': round(vr, 4),
+            'target_g':   g,
+            'n_f':        float(grp['n_f'].median()),
+            'achieved_g': _med(grp['achieved_g']),
+            'capped':     int(grp['capped'].max()),
+            'L_true':     _med(grp['L_true']),
+            'L_hat':      _med(grp['L_hat']),
+            'is_trivial': int(grp['is_trivial'].iloc[0]),
+            'is_oracle':  int(grp['is_oracle'].iloc[0]),
+            'valid_rate': round(vr, 4),
             'cat_rate':   round(cr, 4),
             'beats_rate': round(br, 4),
-            'med_error':  me,       'stability':  round(sc, 4),
+            'med_error':  _med(grp['error']),
+            'med_skill':  _med(grp['skill']),
+            'stability':  round(_stab(vr, cr, br), 4),
+            'n_seeds':    int(len(grp)),
         })
 
     df_agg = pd.DataFrame(agg)
@@ -388,6 +433,12 @@ def run_sweep(obs_idx_list: List[int],
     df_feat.to_csv(p, index=False)
     print(f'  Saved: {p}  ({len(df_feat)} rows)')
 
+    df_cap = capped_block(df_agg, keys=['regime', 'obs_idx', 'target_g', 'method'],
+                          value_cols=['med_error', 'med_skill'])
+    p = os.path.join(out_dir, 'phase2_capped.csv')
+    df_cap.to_csv(p, index=False)
+    print(f'  Saved: {p}  ({len(df_cap)} rows)')
+
     return df_agg, df_feat
 
 
@@ -395,27 +446,32 @@ def run_sweep(obs_idx_list: List[int],
 # 2.  PHASE DIAGRAMS
 # =============================================================================
 
-def build_phase_diagrams(df_agg:     pd.DataFrame,
-                          default_fid: int,
-                          out_dir:    str) -> pd.DataFrame:
+def build_phase_diagrams(df_agg:  pd.DataFrame,
+                         g:       float,
+                         out_dir: str) -> pd.DataFrame:
     """
-    For each (regime, obs_idx, noise) at the default horizon, determine
-    Richardson's rank among the 9 methods and the best alternative.
+    For each (regime, obs_idx, noise) at stratum g, determine Richardson's
+    rank among the RANK_POOL (oracle excluded) and the best alternative.
+    Cells carry n_f / achieved_g / capped so pooled views can drop capped cells.
     """
     rows = []
-    sub  = df_agg[df_agg['future_idx'] == default_fid]
+    sub  = df_agg[(df_agg['target_g'] == g) & (df_agg['method'].isin(RANK_POOL))]
 
-    for (regime, obs_idx, sigma), grp in sub.groupby(
-            ['regime', 'obs_idx', 'noise']):
-        ranked = (grp.sort_values('stability', ascending=False)
+    for (regime, obs_idx, sigma), grp in sub.groupby(['regime', 'obs_idx', 'noise']):
+        ranked = (grp.sort_values(['stability', 'med_error'], ascending=[False, True])
                      .reset_index(drop=True))
         ranked['rank'] = ranked.index + 1
+        by_err = (grp[grp['med_error'].notna()].sort_values('med_error')
+                     .reset_index(drop=True))
+        by_err['err_rank'] = by_err.index + 1
 
         r1 = ranked[ranked['method'] == 'richardson_1']
+        r1e = by_err[by_err['method'] == 'richardson_1']
         best = ranked.iloc[0]
 
         r1_stab  = float(r1['stability'].values[0]) if not r1.empty else float('nan')
         r1_rank  = int(r1['rank'].values[0])         if not r1.empty else 99
+        r1_erank = int(r1e['err_rank'].values[0])    if not r1e.empty else 99
         best_sc  = float(best['stability'])
         best_m   = str(best['method'])
         margin   = round(best_sc - r1_stab, 4)
@@ -424,9 +480,13 @@ def build_phase_diagrams(df_agg:     pd.DataFrame,
             'regime':                 regime,
             'obs_idx':                obs_idx,
             'noise':                  sigma,
-            'future_idx':             default_fid,
+            'target_g':               g,
+            'n_f':                    float(grp['n_f'].iloc[0]),
+            'achieved_g':             float(grp['achieved_g'].iloc[0]),
+            'capped':                 int(grp['capped'].max()),
             'richardson_stability':   round(r1_stab, 4),
             'richardson_rank':        r1_rank,
+            'richardson_err_rank':    r1_erank,
             'best_method':            best_m,
             'best_stability':         round(best_sc, 4),
             'stability_margin':       margin,
@@ -434,7 +494,7 @@ def build_phase_diagrams(df_agg:     pd.DataFrame,
         })
 
     df_pd = pd.DataFrame(rows)
-    p = os.path.join(out_dir, f'phase2_phase_diagram_n{default_fid}.csv')
+    p = os.path.join(out_dir, f'phase2_phase_diagram_g{g:g}.csv')
     df_pd.to_csv(p, index=False)
     print(f'  Saved: {p}  ({len(df_pd)} rows)')
     return df_pd
@@ -444,47 +504,43 @@ def build_phase_diagrams(df_agg:     pd.DataFrame,
 # 3.  CORRELATION ANALYSIS
 # =============================================================================
 
-def run_correlation_analysis(df_feat:     pd.DataFrame,
-                              df_agg:      pd.DataFrame,
-                              default_fid: int,
-                              out_dir:     str):
+def run_correlation_analysis(df_feat: pd.DataFrame,
+                             df_agg:  pd.DataFrame,
+                             g:       float,
+                             out_dir: str,
+                             suffix:  str = ''):
     """
     Spearman correlations between trajectory features and Richardson's
-    losing margin.
+    losing margin at stratum g.
 
-    Global (ALL regimes) and per-regime.
-    Per-regime requires >= 15 finite observations (raised from 5 to avoid
-    spurious correlations from tiny samples).
+    Global (ALL regimes) and per-regime.  Capped cells are excluded (the
+    losing margin at a capped cell is measured against a non-target horizon).
+    Per-regime requires >= 15 finite observations.
     """
-    MIN_OBS = 15   # minimum valid observations for per-regime correlation
+    MIN_OBS = 15
+    keys = ['regime', 'obs_idx', 'noise']
 
-    # Richardson stability per grid point
-    r1 = (df_agg[df_agg['method'] == 'richardson_1']
-          [['regime', 'obs_idx', 'noise', 'future_idx', 'stability']]
+    sub = df_agg[(df_agg['target_g'] == g) & (df_agg['method'].isin(RANK_POOL))]
+    sub = exclude_capped(sub)
+
+    r1 = (sub[sub['method'] == 'richardson_1'][keys + ['stability']]
           .rename(columns={'stability': 'r1_stability'}))
-
-    # Best non-Richardson stability per grid point
-    best_other = (df_agg[df_agg['method'] != 'richardson_1']
-                  .groupby(['regime', 'obs_idx', 'noise', 'future_idx'])
-                  ['stability'].max()
+    best_other = (sub[sub['method'] != 'richardson_1']
+                  .groupby(keys)['stability'].max()
                   .reset_index()
                   .rename(columns={'stability': 'best_other_stability'}))
 
-    merged = r1.merge(best_other,
-                      on=['regime', 'obs_idx', 'noise', 'future_idx'])
-    merged['r1_losing_margin'] = (merged['best_other_stability']
-                                   - merged['r1_stability'])
-    merged['r1_is_losing']     = (merged['r1_losing_margin'] > 0.05
-                                   ).astype(int)
+    merged = r1.merge(best_other, on=keys)
+    merged['r1_losing_margin'] = merged['best_other_stability'] - merged['r1_stability']
+    merged['r1_is_losing']     = (merged['r1_losing_margin'] > 0.05).astype(int)
 
-    # Average features across seeds (one value per grid point)
     feat_avg = (df_feat.drop(columns=['seed'])
-                       .groupby(['regime', 'obs_idx', 'noise'])
+                       .groupby(keys)
                        .mean()
                        .reset_index())
 
-    base = merged[merged['future_idx'] == default_fid].merge(
-        feat_avg, on=['regime', 'obs_idx', 'noise'], how='left')
+    base = merged.merge(feat_avg, on=keys, how='left')
+    base['target_g'] = g
 
     corr_rows = []
 
@@ -494,12 +550,11 @@ def run_correlation_analysis(df_feat:     pd.DataFrame,
         n    = int(mask.sum())
         if n < 10:
             continue
-        r_m, p_m = spearmanr(base.loc[mask, feat],
-                               base.loc[mask, 'r1_losing_margin'])
-        r_l, p_l = spearmanr(base.loc[mask, feat],
-                               base.loc[mask, 'r1_is_losing'])
+        r_m, p_m = spearmanr(base.loc[mask, feat], base.loc[mask, 'r1_losing_margin'])
+        r_l, p_l = spearmanr(base.loc[mask, feat], base.loc[mask, 'r1_is_losing'])
         corr_rows.append({
             'regime':              'ALL',
+            'target_g':            g,
             'feature':             feat,
             'spearman_vs_margin':  round(float(r_m), 4),
             'p_vs_margin':         round(float(p_m), 4),
@@ -509,37 +564,30 @@ def run_correlation_analysis(df_feat:     pd.DataFrame,
         })
 
     # ── Per-regime correlations ────────────────────────────────────────────────
-    for regime in REGIME_NAMES:
-        sub = base[base['regime'] == regime]
+    for regime in sorted(df_agg['regime'].unique()):
+        rsub = base[base['regime'] == regime]
         for feat in FEATURE_COLS:
-            mask = sub[feat].notna() & sub['r1_losing_margin'].notna()
+            mask = rsub[feat].notna() & rsub['r1_losing_margin'].notna()
             n    = int(mask.sum())
             if n < MIN_OBS:
-                # Record NaN row so all regimes appear in output
                 corr_rows.append({
-                    'regime':              regime,
-                    'feature':             feat,
-                    'spearman_vs_margin':  float('nan'),
-                    'p_vs_margin':         float('nan'),
-                    'spearman_vs_losing':  float('nan'),
-                    'p_vs_losing':         float('nan'),
-                    'n_obs':               n,
+                    'regime': regime, 'target_g': g, 'feature': feat,
+                    'spearman_vs_margin': float('nan'), 'p_vs_margin': float('nan'),
+                    'spearman_vs_losing': float('nan'), 'p_vs_losing': float('nan'),
+                    'n_obs': n,
                 })
                 continue
-            r_m, p_m = spearmanr(sub.loc[mask, feat],
-                                   sub.loc[mask, 'r1_losing_margin'])
+            r_m, p_m = spearmanr(rsub.loc[mask, feat], rsub.loc[mask, 'r1_losing_margin'])
             corr_rows.append({
-                'regime':              regime,
-                'feature':             feat,
-                'spearman_vs_margin':  round(float(r_m), 4),
-                'p_vs_margin':         round(float(p_m), 4),
-                'spearman_vs_losing':  float('nan'),
-                'p_vs_losing':         float('nan'),
-                'n_obs':               n,
+                'regime': regime, 'target_g': g, 'feature': feat,
+                'spearman_vs_margin': round(float(r_m), 4),
+                'p_vs_margin': round(float(p_m), 4),
+                'spearman_vs_losing': float('nan'), 'p_vs_losing': float('nan'),
+                'n_obs': n,
             })
 
     df_corr = pd.DataFrame(corr_rows)
-    p = os.path.join(out_dir, 'phase2_correlations.csv')
+    p = os.path.join(out_dir, f'phase2_correlations{suffix}.csv')
     df_corr.to_csv(p, index=False)
     print(f'  Saved: {p}  ({len(df_corr)} rows)')
     return df_corr, base
@@ -552,30 +600,31 @@ def run_correlation_analysis(df_feat:     pd.DataFrame,
 def test_simple_rules(merged_full: pd.DataFrame,
                       df_feat:     pd.DataFrame,
                       df_agg:      pd.DataFrame,
-                      default_fid: int,
-                      out_dir:     str) -> pd.DataFrame:
+                      g:           float,
+                      out_dir:     str,
+                      suffix:      str = '') -> pd.DataFrame:
     """
     For each candidate rule (feature, operator, threshold, alternative),
-    compute precision, recall, and mean stability gain.
+    compute precision, recall, and mean stability gain at stratum g.
+    Capped cells are excluded.
 
     Precision = P(Richardson is losing | rule fires)
     Recall    = P(rule fires | Richardson is losing)
     Mean gain = mean(stability(alt) - stability(richardson_1)) when rule fires
     """
-    # Per grid-point: features + stability of each method
+    keys = ['regime', 'obs_idx', 'noise']
     feat_avg = (df_feat.drop(columns=['seed'])
-                        .groupby(['regime', 'obs_idx', 'noise'])
+                        .groupby(keys)
                         .mean()
                         .reset_index())
 
-    pivot = (df_agg[df_agg['future_idx'] == default_fid]
-             .pivot_table(index=['regime', 'obs_idx', 'noise'],
-                          columns='method',
-                          values='stability')
-             .reset_index())
+    sub = exclude_capped(df_agg[(df_agg['target_g'] == g)
+                                & (df_agg['method'].isin(RANK_POOL))])
+    pivot = (sub.pivot_table(index=keys, columns='method', values='stability')
+                .reset_index())
     pivot.columns.name = None
 
-    ev = pivot.merge(feat_avg, on=['regime', 'obs_idx', 'noise'], how='left')
+    ev = pivot.merge(feat_avg, on=keys, how='left')
 
     rule_rows = []
     for feat, op, thresh, alt in CANDIDATE_RULES:
@@ -584,29 +633,28 @@ def test_simple_rules(merged_full: pd.DataFrame,
         if alt not in ev.columns or 'richardson_1' not in ev.columns:
             continue
 
-        valid = (ev[feat].notna()
-                 & ev['richardson_1'].notna()
-                 & ev[alt].notna())
-        sub = ev[valid].copy()
-        if len(sub) < 5:
+        valid = (ev[feat].notna() & ev['richardson_1'].notna() & ev[alt].notna())
+        sub_ev = ev[valid].copy()
+        if len(sub_ev) < 5:
             continue
 
-        fires        = sub[feat] < thresh if op == '<' else sub[feat] > thresh
-        r1_is_losing = sub[alt] > sub['richardson_1']
+        fires        = sub_ev[feat] < thresh if op == '<' else sub_ev[feat] > thresh
+        r1_is_losing = sub_ev[alt] > sub_ev['richardson_1']
 
         n_fire   = int(fires.sum())
-        n_total  = len(sub)
+        n_total  = len(sub_ev)
         n_losing = int(r1_is_losing.sum())
 
         precision = (float((fires & r1_is_losing).sum() / n_fire)
                      if n_fire > 0 else float('nan'))
         recall    = (float((fires & r1_is_losing).sum() / n_losing)
                      if n_losing > 0 else float('nan'))
-        gain      = (float((sub.loc[fires, alt]
-                            - sub.loc[fires, 'richardson_1']).mean())
+        gain      = (float((sub_ev.loc[fires, alt]
+                            - sub_ev.loc[fires, 'richardson_1']).mean())
                      if n_fire > 0 else float('nan'))
 
         rule_rows.append({
+            'target_g':    g,
             'feature':     feat,
             'operator':    op,
             'threshold':   thresh,
@@ -619,10 +667,12 @@ def test_simple_rules(merged_full: pd.DataFrame,
             'mean_gain':   round(gain,      4) if math.isfinite(gain)      else float('nan'),
         })
 
-    df_rules = (pd.DataFrame(rule_rows)
+    cols = ['target_g', 'feature', 'operator', 'threshold', 'alternative', 'n_fire',
+            'n_total', 'fire_rate', 'precision', 'recall', 'mean_gain']
+    df_rules = (pd.DataFrame(rule_rows, columns=cols)
                   .sort_values('precision', ascending=False)
                   .reset_index(drop=True))
-    p = os.path.join(out_dir, 'phase2_rules.csv')
+    p = os.path.join(out_dir, f'phase2_rules{suffix}.csv')
     df_rules.to_csv(p, index=False)
     print(f'  Saved: {p}  ({len(df_rules)} rows)')
     return df_rules
@@ -654,7 +704,8 @@ def fig_p2_01_phase_diagram(df_pd:   pd.DataFrame,
     ]
     obs_vals   = sorted(df_pd['obs_idx'].unique())
     noise_vals = sorted(df_pd['noise'].unique())
-    n_methods  = len(PHASE2_METHODS)
+    n_methods  = len(RANK_POOL)
+    g          = float(df_pd['target_g'].iloc[0]) if len(df_pd) else float('nan')
 
     fig, axes = plt.subplots(2, 4, figsize=(18, 9))
     axes_flat  = axes.flatten()
@@ -683,33 +734,36 @@ def fig_p2_01_phase_diagram(df_pd:   pd.DataFrame,
                             color='white' if v > 4 else 'black')
         return im
 
-    # Aggregated across all regimes
-    agg_df = (df_pd.groupby(['obs_idx', 'noise'])
+    # Aggregated across all regimes: capped cells excluded (pooled statistic)
+    agg_df = (exclude_capped(df_pd).groupby(['obs_idx', 'noise'])
                    ['richardson_rank'].mean()
                    .reset_index())
-    im = _draw(axes_flat[0], agg_df, 'ALL REGIMES (mean rank)')
+    im = _draw(axes_flat[0], agg_df, 'ALL REGIMES (mean rank, capped excluded)')
     plt.colorbar(im, ax=axes_flat[0], label='Richardson rank', shrink=0.8)
 
     for k, regime in enumerate(key_regimes):
         ax  = axes_flat[k + 1]
         sub = df_pd[df_pd['regime'] == regime]
-        im  = _draw(ax, sub, regime.replace('_', '\n'))
+        cap = ' [CAP]' if (len(sub) and sub['capped'].max() == 1) else ''
+        im  = _draw(ax, sub, regime.replace('_', '\n') + cap)
         plt.colorbar(im, ax=ax, label='Rank', shrink=0.8)
 
     axes_flat[7].axis('off')
     axes_flat[7].text(0.5, 0.5,
-        'Richardson Rank\n(1 = best of 9, 9 = worst)\n\n'
+        f'Richardson Rank\n(1 = best of {n_methods}, {n_methods} = worst;\n'
+        'oracle comparator excluded)\n\n'
         'Green = Richardson wins\n'
         'Red   = Richardson fails\n\n'
         'Rows    = noise level\n'
-        'Columns = obs_idx',
+        'Columns = obs_idx\n'
+        '[CAP] = some cells hit the horizon cap',
         ha='center', va='center', fontsize=10,
         transform=axes_flat[7].transAxes)
 
     fig.suptitle(
         f'Figure P2-1 — Richardson Rank Phase Diagram  '
         f'(obs_idx × noise)\n'
-        f'Horizon = {df_pd["future_idx"].iloc[0]}',
+        f'Gap stratum g = {g:g}',
         fontsize=11, fontweight='bold')
     fig.tight_layout()
     path = os.path.join(out_dir, 'figure_p2_01_phase_diagram.png')
@@ -724,16 +778,15 @@ def fig_p2_02_crossover(df_pd:   pd.DataFrame,
     """Richardson rank vs obs_idx for each regime (sigma ≈ 0)."""
     sub = df_pd[df_pd['noise'] < 1e-9].copy()
     if sub.empty:
-        # Fallback: use lowest noise level
         min_noise = df_pd['noise'].min()
         sub = df_pd[df_pd['noise'] == min_noise].copy()
 
     obs_vals  = sorted(sub['obs_idx'].unique())
-    ever_wins = (sub.groupby('regime')
-                    .apply(lambda g: (g['richardson_rank'] == 1).any()))
+    ever_wins = {r: bool((grp['richardson_rank'] == 1).any())
+                 for r, grp in sub.groupby('regime')}
 
     fig, ax = plt.subplots(figsize=(13, 7))
-    for regime in REGIME_NAMES:
+    for regime in sorted(sub['regime'].unique()):
         rsub = sub[sub['regime'] == regime].sort_values('obs_idx')
         if rsub.empty:
             continue
@@ -742,10 +795,9 @@ def fig_p2_02_crossover(df_pd:   pd.DataFrame,
         lw     = 2.0       if wins else 1.0
         ax.plot(rsub['obs_idx'], rsub['richardson_rank'],
                 lw=lw, color=colour, alpha=0.75)
-        if not rsub.empty:
-            last = rsub.iloc[-1]
-            ax.text(last['obs_idx'] + 1, last['richardson_rank'],
-                    regime[:8], fontsize=6, va='center', color=colour)
+        last = rsub.iloc[-1]
+        ax.text(last['obs_idx'] + 1, last['richardson_rank'],
+                regime[:8], fontsize=6, va='center', color=colour)
 
     ax.axhline(1, color='#555', lw=0.8, ls='--', alpha=0.5,
                label='Rank 1 (wins)')
@@ -753,14 +805,14 @@ def fig_p2_02_crossover(df_pd:   pd.DataFrame,
                label='Rank 3 (top-tier)')
     ax.invert_yaxis()
     ax.set_xlabel('obs_idx  (observation depth)', fontsize=10)
-    ax.set_ylabel('Richardson rank  (1 = best of 9)', fontsize=10)
+    ax.set_ylabel(f'Richardson rank  (1 = best of {len(RANK_POOL)})', fontsize=10)
     ax.set_title(
         'Figure P2-2 — Richardson Rank vs Observation Depth\n'
         'Green = eventually wins; Red = never wins  (lowest noise level)',
         fontsize=10, fontweight='bold')
     ax.set_xticks(obs_vals)
     ax.set_xticklabels(obs_vals, fontsize=8)
-    ax.set_ylim(len(PHASE2_METHODS) + 0.5, 0.5)
+    ax.set_ylim(len(RANK_POOL) + 0.5, 0.5)
     ax.legend(fontsize=9)
     fig.tight_layout()
     path = os.path.join(out_dir, 'figure_p2_02_crossover.png')
@@ -902,7 +954,6 @@ def fig_p2_05_rules(df_rules: pd.DataFrame,
         'Bubble size ∝ n_fire; gain annotation = mean stability gain when rule fires',
         fontsize=10, fontweight='bold')
 
-    # Legend for alternatives
     seen, handles = set(), []
     for m, c in METHOD_COLOURS.items():
         if m in valid['alternative'].values and m not in seen:
@@ -920,11 +971,11 @@ def fig_p2_05_rules(df_rules: pd.DataFrame,
 # MASTER CALL
 # =============================================================================
 
-def make_all_figures(df_pd:      pd.DataFrame,
-                     df_corr:    pd.DataFrame,
-                     df_rules:   pd.DataFrame,
-                     default_fid: int,
-                     out_dir:    str) -> list:
+def make_all_figures(df_pd:    pd.DataFrame,
+                     df_corr:  pd.DataFrame,
+                     df_rules: pd.DataFrame,
+                     g:        float,
+                     out_dir:  str) -> list:
     print('\n  Generating figures ...')
     paths = [
         fig_p2_01_phase_diagram(df_pd, out_dir),

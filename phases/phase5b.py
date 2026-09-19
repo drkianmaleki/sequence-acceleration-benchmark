@@ -1,79 +1,57 @@
 """
 phase5b.py
 ==========
-Phase 5B — Sensitivity Analysis.
+Phase 5B — Sensitivity Analysis (redesign v2).
 
-Three sweeps test whether the key Phase 1-4 findings are robust to the
-main modelling assumptions.
+Three sweeps test whether the key findings are robust to the main modelling
+assumptions.  All sweeps evaluate at the gap strata in
+config.PHASE5B_GAP_FRACTIONS (g = 0.5 and 0.1), with n_obs = 90.
 
 Sweep 1 — assumed-asymptote (L_hat) sensitivity
-----------------------------
-Question: Does the Phase 2 two-rule cascade still work when the assumed
-asymptotic value L_inf differs from the true value?
+-----------------------------------------------
+Question: Does the Phase 2 two-rule cascade still work when what the
+methods are told about the asymptote changes?  L_true is hidden and per
+(regime, seed); the ASSUMED value is swept over config.ASSUMED_L_MODES
+= {zero, half, oracle, double, winmin} (oracle = L_true, labelled).
 
-In real gradient boosting L_inf is unknown and must be guessed.
-Redesign v2: L_true is hidden and per (regime, seed).  We vary the ASSUMED L_hat mode
-to simulate practitioner misspecification:
+For each mode, trajectory features (log_log_slope, richardson_r2) are
+recomputed with that L_hat and the cascade is applied with fixed Phase 2
+thresholds (slope > -0.1, R^2 < 0.5).
 
-  assumed_mode in config.ASSUMED_L_MODES = {zero, half, oracle, double, winmin}
+Sweep 2 — Window length sensitivity  (window_len in {20, 40, 60, 80, 100})
+Sweep 3 — CAT_MULT sensitivity       (CAT_MULT in {2, 5, 10})
 
-For each assumed value, trajectory features (log_log_slope, richardson_r2)
-are recomputed with that L_inf, and the cascade is applied with fixed
-Phase 2 thresholds (slope > -0.1, R² < 0.5).
-
-Metric: cascade precision (P(rational_fit better | rule fires)),
-recall (P(rule fires | richardson fails)), and mean gain.
-
-Sweep 2 — Window length sensitivity
--------------------------------------
-Question: Do the fixed Phase 2 thresholds generalise to different window
-lengths?  All Phase 1-4 work used window_len = 60.
-
-  window_len in {20, 40, 60, 80, 100}  (obs_idx fixed at 90)
-
-For each window length, the cascade thresholds are applied WITHOUT
-re-fitting.  Measures whether practitioners can use Phase 2 rules
-directly without re-tuning for their window length.
-
-Metric: same as Sweep 1, plus optimal threshold at each window_len
-(what threshold would maximise precision × recall?).
-
-Sweep 3 — CAT_MULT sensitivity
----------------------------------
-Question: Do the Phase 1 regime champions change when the catastrophic
-threshold is varied?
-
-  CAT_MULT in {2, 5, 10}  (currently 5 throughout)
-
-For each value, stability scores are recomputed for all 51 methods
-and regime champions are identified.
-
-Metric: Kendall's tau between method rankings at different CAT_MULT;
-fraction of 54 regime-horizon champion slots that change.
+Redesign v2
+-----------
+  * Records carry target_g, achieved_g, n_f, capped and is_holdout.  Global
+    rows are pooled over the core regimes with capped cells excluded
+    (regime_set = 'core'); held-out regimes get their own pooled rows
+    (regime_set = 'holdout'); per-regime rows flag capped cells.
+  * Sweep 3 ranks the 51 accelerators plus the four non-oracle trivial
+    comparators; the oracle never enters a ranking.  The dangerous flag
+    comes from the Phase-1 artifact.
 
 Output files
 ------------
-phase5b_sweep1_global.csv      Cascade metrics vs assumed-asymptote mode (global)
+phase5b_sweep1_global.csv      Cascade metrics vs assumed-asymptote mode (pooled)
 phase5b_sweep1_regime.csv      Cascade metrics vs assumed-asymptote mode (per regime)
-phase5b_sweep2_global.csv      Cascade metrics vs window_len (global)
+phase5b_sweep2_global.csv      Cascade metrics vs window_len (pooled)
 phase5b_sweep2_regime.csv      Cascade metrics vs window_len (per regime)
 phase5b_sweep3_champions.csv   Regime champions at each CAT_MULT
 phase5b_sweep3_global.csv      Global stability rankings at each CAT_MULT
 phase5b_sweep3_concordance.csv Kendall tau between CAT_MULT rankings
-figure_p5b_01_linf.png
-figure_p5b_02_window.png
-figure_p5b_03_catmult.png
+figure_p5b_01_linf.png / figure_p5b_02_window.png / figure_p5b_03_catmult.png
 
 Author : Kian Maleki
-Date   : 2026-05-24
+Date   : 2026-05-24 (v1), 2026-09-19 (redesign v2)
 """
 
 import os, math, warnings
 import numpy as np
 import pandas as pd
-from scipy.stats import kendalltau, spearmanr
+from scipy.stats import kendalltau
 from scipy.optimize import curve_fit
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 import matplotlib
 matplotlib.use('Agg')
@@ -82,9 +60,13 @@ import matplotlib.pyplot as plt
 warnings.filterwarnings('ignore')
 
 import src.config as CFG_MOD
-from src.accelerators import METHODS, METHOD_NAMES
-from src.generators   import REGIME_NAMES, regime_functions
+from src.accelerators import METHODS
+from src.generators   import regime_functions
 from src.asymptote    import assumed_asymptote
+from src.dangerous    import load_dangerous
+from src.pipeline     import (ACCEL_METHODS, TRIVIAL_NON_ORACLE, exclude_capped,
+                              horizon_meta, is_holdout, method_flags,
+                              resolve_regimes)
 
 # ── Method sets ────────────────────────────────────────────────────────────────
 CASCADE_METHODS = [
@@ -93,10 +75,8 @@ CASCADE_METHODS = [
     'log_linear', 'weniger_d2', 'anderson_1',
 ]
 
-ALL_METHODS = list(METHOD_NAMES)
-# Single definition lives in src/config.py; see the note there on re-deriving
-# it after any change that alters Phase 1 results.
-DANGEROUS   = set(CFG_MOD.DANGEROUS_METHODS)
+# Sweep 3 ranks accelerators and the deployable trivial comparators; no oracle.
+ALL_METHODS = list(ACCEL_METHODS) + list(TRIVIAL_NON_ORACLE)
 
 FIG_DPI = 150
 
@@ -132,8 +112,13 @@ def _save_csv(df, out_dir, fname):
     df.to_csv(p, index=False)
     print(f'  Saved: {p}  ({len(df)} rows)')
 
+def _headline(df, default_g=None):
+    gs = set(df['target_g'].unique())
+    g = CFG_MOD.HEADLINE_G if default_g is None else float(default_g)
+    return g if g in gs else float(max(gs))
 
-# ── Feature extraction (inline with configurable L_inf) ───────────────────────
+
+# ── Feature extraction (inline with configurable L_hat) ───────────────────────
 def _cascade_features(seq_win, idx_win, L_hat):
     s  = np.asarray(seq_win, dtype=float)
     x  = np.asarray(idx_win, dtype=float)
@@ -187,35 +172,121 @@ def _eval_methods(seq_win, idx_win, fid, cfg, methods):
     return out
 
 
+def _cascade_metrics(sub: pd.DataFrame) -> Dict[str, float]:
+    fire    = sub['cascade_fired'] == 1
+    correct = fire & (sub['rat_better'] == 1)
+    precision = (float(correct.sum() / fire.sum()) if fire.sum() > 0 else float('nan'))
+    recall    = (float(correct.sum() / sub['rat_better'].sum())
+                 if sub['rat_better'].sum() > 0 else float('nan'))
+    mask = sub['rich_err'].notna() & sub['chosen_err'].notna()
+    gain = (float((sub.loc[mask, 'rich_err'] - sub.loc[mask, 'chosen_err']).mean())
+            if mask.sum() > 0 else float('nan'))
+    return {
+        'fire_rate': round(float(fire.mean()), 4),
+        'precision': round(precision, 4) if math.isfinite(precision) else float('nan'),
+        'recall':    round(recall, 4) if math.isfinite(recall) else float('nan'),
+        'mean_gain': round(gain, 6) if math.isfinite(gain) else float('nan'),
+        'n':         int(len(sub)),
+    }
+
+
+def _cascade_cell_record(regime, sigma, seed, hm, L_true, L_hat, slope, r2,
+                         chosen, cascade_fired, ests, true_val, curr_err):
+    rich_err = (abs(ests['richardson_1'] - true_val)
+                if math.isfinite(ests['richardson_1']) else float('nan'))
+    rat_err  = (abs(ests['rational_fit'] - true_val)
+                if math.isfinite(ests['rational_fit']) else float('nan'))
+    chosen_est = ests.get(chosen, float('nan'))
+    chosen_err = (abs(chosen_est - true_val) if math.isfinite(chosen_est) else float('nan'))
+    rat_better = (math.isfinite(rat_err) and math.isfinite(rich_err) and rat_err < rich_err)
+    rec = {
+        'regime':        regime,
+        'is_holdout':    is_holdout(regime),
+        'noise':         sigma,
+        'seed':          seed,
+        'L_true':        L_true,
+        'L_hat':         L_hat,
+        'cascade_fired': int(cascade_fired),
+        'rat_better':    int(rat_better),
+        'rich_err':      rich_err,
+        'rat_err':       rat_err,
+        'chosen_err':    chosen_err,
+        'curr_err':      curr_err,
+        'slope':         slope,
+        'r2':            r2,
+    }
+    rec.update(hm)
+    return rec
+
+
+def _aggregate_cascade(df: pd.DataFrame, sweep_key: str, sweep_values,
+                       gap_fractions, noise_list, regimes):
+    """Pooled rows (core / holdout, capped excluded) and per-regime rows."""
+    global_rows, regime_rows = [], []
+    for v in sweep_values:
+        for g in gap_fractions:
+            for sigma in noise_list:
+                sub_all = df[(df[sweep_key] == v) & (df['target_g'] == g)
+                             & (df['noise'] == sigma)]
+                if sub_all.empty:
+                    continue
+                for label, flag in (('core', 0), ('holdout', 1)):
+                    sub = exclude_capped(sub_all[sub_all['is_holdout'] == flag])
+                    if sub.empty:
+                        continue
+                    row = {sweep_key: v, 'target_g': g, 'noise': sigma, 'regime_set': label,
+                           'n_capped_excluded': int((sub_all['is_holdout'] == flag).sum()) - len(sub)}
+                    row.update(_cascade_metrics(sub))
+                    global_rows.append(row)
+                for regime in regimes:
+                    rsub = sub_all[sub_all['regime'] == regime]
+                    if rsub.empty:
+                        continue
+                    row = {sweep_key: v, 'regime': regime,
+                           'is_holdout': int(rsub['is_holdout'].iloc[0]),
+                           'target_g': g, 'noise': sigma,
+                           'n_f': float(rsub['n_f'].median()),
+                           'achieved_g': float(rsub['achieved_g'].median()),
+                           'capped': int(rsub['capped'].max())}
+                    m = _cascade_metrics(rsub)
+                    row.update({'precision': m['precision'], 'mean_gain': m['mean_gain'],
+                                'n': m['n']})
+                    regime_rows.append(row)
+    return pd.DataFrame(global_rows), pd.DataFrame(regime_rows)
+
+
 # =============================================================================
-# SWEEP 1 — L_inf SENSITIVITY
+# SWEEP 1 — ASSUMED-ASYMPTOTE SENSITIVITY
 # =============================================================================
 
 def sweep1_linf(assumed_modes, obs_idx, window_len, noise_list,
-                future_list, n_seeds, out_dir, verbose=True):
+                gap_fractions, n_seeds, out_dir, core_regimes=None,
+                holdout_regimes=None, verbose=True):
     """
     Test Phase 2 cascade robustness to the assumed asymptote.
-    Redesign v2: L_true is hidden and per (regime, seed); the ASSUMED value
-    L_hat is swept over the config.ASSUMED_L_MODES listed in assumed_modes
+    L_true is hidden and per (regime, seed); the ASSUMED value L_hat is
+    swept over the config.ASSUMED_L_MODES listed in assumed_modes
     (oracle = L_true, labelled as such).
     """
-    n_arr   = np.arange(max(future_list) + 200, dtype=float)
+    regimes = resolve_regimes(core_regimes, holdout_regimes, include_holdout=True)
+    gap_fractions = [float(g) for g in gap_fractions]
+    n_arr   = np.arange(obs_idx + 1, dtype=float)
     wl      = min(window_len, obs_idx)
     records = []
 
-    total = len(assumed_modes) * len(noise_list) * n_seeds * len(REGIME_NAMES)
+    total = len(assumed_modes) * len(noise_list) * n_seeds * len(regimes)
     done  = 0
 
     print(f'  Sweep 1: {len(assumed_modes)} assumed-L modes × '
           f'{len(noise_list)} noise × {n_seeds} seeds × '
-          f'{len(REGIME_NAMES)} regimes')
+          f'{len(regimes)} regimes × {len(gap_fractions)} strata')
 
     for assumed_mode in assumed_modes:
         for sigma in noise_list:
             for seed in range(n_seeds):
                 rng = np.random.RandomState(seed * 137 + int(sigma*1e6) % 9973)
 
-                for regime in REGIME_NAMES:
+                for regime in regimes:
                     # Hidden per-(regime, seed) asymptote; methods never see L_true.
                     gen, truth_fn, L_true = regime_functions(regime, seed)
                     seq_full = gen(n_arr, rng, sigma)
@@ -223,127 +294,36 @@ def sweep1_linf(assumed_modes, obs_idx, window_len, noise_list,
                     w_start  = max(0, obs_idx - wl + 1)
                     seq_win  = list(seq_full[w_start : obs_idx + 1])
                     idx_win  = list(range(w_start, obs_idx + 1))
+                    curr_val = float(seq_full[obs_idx])
 
                     L_hat     = assumed_asymptote(L_true, seq_win, assumed_mode)
                     slope, r2 = _cascade_features(seq_win, idx_win, L_hat)
                     chosen    = _phase2_cascade(slope, r2)
                     cascade_fired = (chosen == 'rational_fit')
 
-                    for fid in future_list:
-                        true_val = float(truth_fn(fid))
-                        curr_val = float(seq_full[obs_idx])
+                    for g in gap_fractions:
+                        hm       = horizon_meta(regime, obs_idx, g, seed)
+                        n_f      = hm['n_f']
+                        true_val = float(truth_fn(n_f))
                         curr_err = abs(curr_val - true_val)
-                        cfg      = _cfg(fid, L_hat)
+                        cfg      = _cfg(n_f, L_hat)
+                        ests = _eval_methods(seq_win, idx_win, n_f, cfg,
+                                             ['richardson_1', 'rational_fit'])
+                        rec = _cascade_cell_record(regime, sigma, seed, hm, L_true, L_hat,
+                                                   slope, r2, chosen, cascade_fired,
+                                                   ests, true_val, curr_err)
+                        rec['assumed_mode'] = assumed_mode
+                        records.append(rec)
 
-                        ests = _eval_methods(seq_win, idx_win, fid, cfg,
-                                             ['richardson_1','rational_fit'])
-                        rich_err = (abs(ests['richardson_1'] - true_val)
-                                    if math.isfinite(ests['richardson_1'])
-                                    else float('nan'))
-                        rat_err  = (abs(ests['rational_fit'] - true_val)
-                                    if math.isfinite(ests['rational_fit'])
-                                    else float('nan'))
-
-                        # Cascade outcome
-                        chosen_est = ests.get(chosen, float('nan'))
-                        chosen_err = (abs(chosen_est - true_val)
-                                      if math.isfinite(chosen_est)
-                                      else float('nan'))
-
-                        # Is Richardson the best we can do?
-                        rich_is_best = (math.isfinite(rich_err)
-                                        and (not math.isfinite(rat_err)
-                                             or rich_err <= rat_err))
-                        rat_better   = (math.isfinite(rat_err)
-                                        and math.isfinite(rich_err)
-                                        and rat_err < rich_err)
-
-                        records.append({
-                            'assumed_mode':  assumed_mode,
-                            'L_hat':         L_hat,
-                            'L_true':        L_true,
-                            'regime':        regime,
-                            'noise':         sigma,
-                            'seed':          seed,
-                            'future_idx':    fid,
-                            'cascade_fired': int(cascade_fired),
-                            'rat_better':    int(rat_better),
-                            'rich_err':      rich_err,
-                            'rat_err':       rat_err,
-                            'chosen_err':    chosen_err,
-                            'curr_err':      curr_err,
-                            'slope':         slope,
-                            'r2':            r2,
-                        })
-
-                done += 1
-                if verbose and done % max(1, total // 10) == 0:
-                    print(f'    [{done:>5}/{total}]  {100*done/total:5.1f}%'
-                          f'  mode={assumed_mode}  sigma={sigma:.3f}',
-                          flush=True)
+                    done += 1
+                    if verbose and done % max(1, total // 10) == 0:
+                        print(f'    [{done:>5}/{total}]  {100*done/total:5.1f}%'
+                              f'  mode={assumed_mode}  sigma={sigma:.3f}',
+                              flush=True)
 
     df = pd.DataFrame(records)
-
-    # ── Aggregate globally and per regime ─────────────────────────────────────
-    global_rows, regime_rows = [], []
-
-    for mode_v in assumed_modes:
-        for fid in future_list:
-            for sigma in noise_list:
-                sub = df[(df['assumed_mode'] == mode_v)
-                         & (df['future_idx']  == fid)
-                         & (df['noise']       == sigma)]
-                if sub.empty:
-                    continue
-
-                fire    = sub['cascade_fired'] == 1
-                correct = fire & (sub['rat_better'] == 1)
-                missed  = (~fire) & (sub['rat_better'] == 1)
-
-                precision = (float(correct.sum() / fire.sum())
-                             if fire.sum() > 0 else float('nan'))
-                recall    = (float(correct.sum() / sub['rat_better'].sum())
-                             if sub['rat_better'].sum() > 0 else float('nan'))
-
-                mask = sub['rich_err'].notna() & sub['chosen_err'].notna()
-                gain = float((sub.loc[mask,'rich_err']
-                              - sub.loc[mask,'chosen_err']).mean()) if mask.sum() > 0 \
-                       else float('nan')
-
-                global_rows.append({
-                    'assumed_mode':  mode_v,
-                    'future_idx':    fid,
-                    'noise':         sigma,
-                    'fire_rate':     round(float(fire.mean()), 4),
-                    'precision':     round(precision, 4) if math.isfinite(precision) else float('nan'),
-                    'recall':        round(recall, 4) if math.isfinite(recall) else float('nan'),
-                    'mean_gain':     round(gain, 6) if math.isfinite(gain) else float('nan'),
-                    'n':             len(sub),
-                })
-
-                # Per regime
-                for regime in REGIME_NAMES:
-                    rsub = sub[sub['regime'] == regime]
-                    if rsub.empty:
-                        continue
-                    rfire = rsub['cascade_fired'] == 1
-                    rcorr = rfire & (rsub['rat_better'] == 1)
-                    rp    = (float(rcorr.sum() / rfire.sum())
-                             if rfire.sum() > 0 else float('nan'))
-                    rmask = rsub['rich_err'].notna() & rsub['chosen_err'].notna()
-                    rgain = float((rsub.loc[rmask,'rich_err']
-                                   - rsub.loc[rmask,'chosen_err']).mean()) \
-                            if rmask.sum() > 0 else float('nan')
-                    regime_rows.append({
-                        'assumed_mode': mode_v,
-                        'regime': regime, 'future_idx': fid, 'noise': sigma,
-                        'precision': round(rp, 4) if math.isfinite(rp) else float('nan'),
-                        'mean_gain': round(rgain, 6) if math.isfinite(rgain) else float('nan'),
-                        'n': len(rsub),
-                    })
-
-    df_global = pd.DataFrame(global_rows)
-    df_regime = pd.DataFrame(regime_rows)
+    df_global, df_regime = _aggregate_cascade(df, 'assumed_mode', assumed_modes,
+                                              gap_fractions, noise_list, regimes)
     _save_csv(df_global, out_dir, 'phase5b_sweep1_global.csv')
     _save_csv(df_regime, out_dir, 'phase5b_sweep1_regime.csv')
     return df_global, df_regime
@@ -353,21 +333,24 @@ def sweep1_linf(assumed_modes, obs_idx, window_len, noise_list,
 # SWEEP 2 — WINDOW LENGTH SENSITIVITY
 # =============================================================================
 
-def sweep2_window(window_lengths, obs_idx, noise_list, future_list,
-                  n_seeds, out_dir, verbose=True):
+def sweep2_window(window_lengths, obs_idx, noise_list, gap_fractions,
+                  n_seeds, out_dir, core_regimes=None, holdout_regimes=None,
+                  verbose=True):
     """
     Test Phase 2 cascade robustness to window length variation.
-    Fixed Phase 2 thresholds applied without re-fitting.
+    Fixed Phase 2 thresholds applied without re-fitting; mode = config default.
     """
-    n_arr   = np.arange(max(future_list) + 200, dtype=float)
+    regimes = resolve_regimes(core_regimes, holdout_regimes, include_holdout=True)
+    gap_fractions = [float(g) for g in gap_fractions]
+    n_arr   = np.arange(obs_idx + 1, dtype=float)
     records = []
 
-    total = len(window_lengths) * len(noise_list) * n_seeds * len(REGIME_NAMES)
+    total = len(window_lengths) * len(noise_list) * n_seeds * len(regimes)
     done  = 0
 
     print(f'  Sweep 2: {len(window_lengths)} window lengths × '
           f'{len(noise_list)} noise × {n_seeds} seeds × '
-          f'{len(REGIME_NAMES)} regimes')
+          f'{len(regimes)} regimes × {len(gap_fractions)} strata')
 
     for wl in window_lengths:
         actual_wl = min(wl, obs_idx)
@@ -377,7 +360,7 @@ def sweep2_window(window_lengths, obs_idx, noise_list, future_list,
                 rng = np.random.RandomState(seed * 137 + int(sigma*1e6) % 9973
                                             + wl * 11)
 
-                for regime in REGIME_NAMES:
+                for regime in regimes:
                     # Hidden per-(regime, seed) asymptote; methods never see L_true.
                     gen, truth_fn, L_true = regime_functions(regime, seed)
                     seq_full = gen(n_arr, rng, sigma)
@@ -385,114 +368,36 @@ def sweep2_window(window_lengths, obs_idx, noise_list, future_list,
                     w_start  = max(0, obs_idx - actual_wl + 1)
                     seq_win  = list(seq_full[w_start : obs_idx + 1])
                     idx_win  = list(range(w_start, obs_idx + 1))
+                    curr_val = float(seq_full[obs_idx])
 
                     L_hat     = assumed_asymptote(L_true, seq_win)
                     slope, r2 = _cascade_features(seq_win, idx_win, L_hat)
                     chosen    = _phase2_cascade(slope, r2)
                     cascade_fired = (chosen == 'rational_fit')
 
-                    for fid in future_list:
-                        true_val = float(truth_fn(fid))
-                        curr_val = float(seq_full[obs_idx])
+                    for g in gap_fractions:
+                        hm       = horizon_meta(regime, obs_idx, g, seed)
+                        n_f      = hm['n_f']
+                        true_val = float(truth_fn(n_f))
                         curr_err = abs(curr_val - true_val)
-                        cfg      = _cfg(fid, L_hat)
+                        cfg      = _cfg(n_f, L_hat)
+                        ests = _eval_methods(seq_win, idx_win, n_f, cfg,
+                                             ['richardson_1', 'rational_fit'])
+                        rec = _cascade_cell_record(regime, sigma, seed, hm, L_true, L_hat,
+                                                   slope, r2, chosen, cascade_fired,
+                                                   ests, true_val, curr_err)
+                        rec['window_len'] = wl
+                        records.append(rec)
 
-                        ests = _eval_methods(seq_win, idx_win, fid, cfg,
-                                             ['richardson_1','rational_fit'])
-                        rich_err = (abs(ests['richardson_1'] - true_val)
-                                    if math.isfinite(ests['richardson_1'])
-                                    else float('nan'))
-                        rat_err  = (abs(ests['rational_fit'] - true_val)
-                                    if math.isfinite(ests['rational_fit'])
-                                    else float('nan'))
-                        chosen_est = ests.get(chosen, float('nan'))
-                        chosen_err = (abs(chosen_est - true_val)
-                                      if math.isfinite(chosen_est)
-                                      else float('nan'))
-                        rat_better = (math.isfinite(rat_err)
-                                      and math.isfinite(rich_err)
-                                      and rat_err < rich_err)
-
-                        records.append({
-                            'window_len':  wl,
-                            'regime':      regime,
-                            'noise':       sigma,
-                            'seed':        seed,
-                            'future_idx':  fid,
-                            'cascade_fired': int(cascade_fired),
-                            'rat_better':  int(rat_better),
-                            'rich_err':    rich_err,
-                            'rat_err':     rat_err,
-                            'chosen_err':  chosen_err,
-                            'curr_err':    curr_err,
-                            'slope':       slope,
-                            'r2':          r2,
-                        })
-
-                done += 1
-                if verbose and done % max(1, total // 10) == 0:
-                    print(f'    [{done:>5}/{total}]  {100*done/total:5.1f}%'
-                          f'  win={wl}  sigma={sigma:.3f}',
-                          flush=True)
+                    done += 1
+                    if verbose and done % max(1, total // 10) == 0:
+                        print(f'    [{done:>5}/{total}]  {100*done/total:5.1f}%'
+                              f'  win={wl}  sigma={sigma:.3f}',
+                              flush=True)
 
     df = pd.DataFrame(records)
-
-    # ── Aggregate ──────────────────────────────────────────────────────────────
-    global_rows, regime_rows = [], []
-
-    for wl in window_lengths:
-        for fid in future_list:
-            for sigma in noise_list:
-                sub = df[(df['window_len']  == wl)
-                         & (df['future_idx'] == fid)
-                         & (df['noise']      == sigma)]
-                if sub.empty:
-                    continue
-
-                fire    = sub['cascade_fired'] == 1
-                correct = fire & (sub['rat_better'] == 1)
-                precision = (float(correct.sum() / fire.sum())
-                             if fire.sum() > 0 else float('nan'))
-                recall    = (float(correct.sum() / sub['rat_better'].sum())
-                             if sub['rat_better'].sum() > 0 else float('nan'))
-                mask = sub['rich_err'].notna() & sub['chosen_err'].notna()
-                gain = float((sub.loc[mask,'rich_err']
-                              - sub.loc[mask,'chosen_err']).mean()) \
-                       if mask.sum() > 0 else float('nan')
-
-                global_rows.append({
-                    'window_len':  wl,
-                    'future_idx':  fid,
-                    'noise':       sigma,
-                    'fire_rate':   round(float(fire.mean()), 4),
-                    'precision':   round(precision, 4) if math.isfinite(precision) else float('nan'),
-                    'recall':      round(recall, 4) if math.isfinite(recall) else float('nan'),
-                    'mean_gain':   round(gain, 6) if math.isfinite(gain) else float('nan'),
-                    'n':           len(sub),
-                })
-
-                for regime in REGIME_NAMES:
-                    rsub = sub[sub['regime'] == regime]
-                    if rsub.empty:
-                        continue
-                    rfire = rsub['cascade_fired'] == 1
-                    rcorr = rfire & (rsub['rat_better'] == 1)
-                    rp    = (float(rcorr.sum() / rfire.sum())
-                             if rfire.sum() > 0 else float('nan'))
-                    rmask = rsub['rich_err'].notna() & rsub['chosen_err'].notna()
-                    rgain = float((rsub.loc[rmask,'rich_err']
-                                   - rsub.loc[rmask,'chosen_err']).mean()) \
-                            if rmask.sum() > 0 else float('nan')
-                    regime_rows.append({
-                        'window_len': wl, 'regime': regime,
-                        'future_idx': fid, 'noise': sigma,
-                        'precision':  round(rp, 4) if math.isfinite(rp) else float('nan'),
-                        'mean_gain':  round(rgain, 6) if math.isfinite(rgain) else float('nan'),
-                        'n':          len(rsub),
-                    })
-
-    df_global = pd.DataFrame(global_rows)
-    df_regime = pd.DataFrame(regime_rows)
+    df_global, df_regime = _aggregate_cascade(df, 'window_len', window_lengths,
+                                              gap_fractions, noise_list, regimes)
     _save_csv(df_global, out_dir, 'phase5b_sweep2_global.csv')
     _save_csv(df_regime, out_dir, 'phase5b_sweep2_regime.csv')
     return df_global, df_regime
@@ -503,30 +408,35 @@ def sweep2_window(window_lengths, obs_idx, noise_list, future_list,
 # =============================================================================
 
 def sweep3_catmult(catmult_values, obs_idx, window_len, noise_list,
-                   future_list, n_seeds, out_dir, verbose=True):
+                   gap_fractions, n_seeds, out_dir, dangerous,
+                   core_regimes=None, holdout_regimes=None, verbose=True):
     """
-    Test whether Phase 1 regime champions and global rankings change
-    when the catastrophic threshold is varied.
-    Uses all 51 methods (no perturb_IQR needed — just central estimates).
+    Test whether regime champions and global rankings change when the
+    catastrophic threshold is varied.  Rankings are pooled over the core
+    regimes with capped cells excluded; champions are per regime (capped
+    cells excluded; flagged).
     """
-    n_arr = np.arange(max(future_list) + 200, dtype=float)
+    regimes = resolve_regimes(core_regimes, holdout_regimes, include_holdout=True)
+    gap_fractions = [float(g) for g in gap_fractions]
+    dangerous = set(dangerous)
+    n_arr = np.arange(obs_idx + 1, dtype=float)
     wl    = min(window_len, obs_idx)
     recs  = []
 
-    total = (len(catmult_values) * len(noise_list)
-             * n_seeds * len(REGIME_NAMES))
+    total = (len(catmult_values) * len(noise_list) * n_seeds * len(regimes))
     done  = 0
 
     print(f'  Sweep 3: {len(catmult_values)} CAT_MULT × '
           f'{len(noise_list)} noise × {n_seeds} seeds × '
-          f'{len(REGIME_NAMES)} regimes  (all {len(ALL_METHODS)} methods)')
+          f'{len(regimes)} regimes × {len(gap_fractions)} strata  '
+          f'({len(ALL_METHODS)} methods, oracle excluded)')
 
     for cat_mult in catmult_values:
         for sigma in noise_list:
             for seed in range(n_seeds):
                 rng = np.random.RandomState(seed * 137 + int(sigma*1e6) % 9973)
 
-                for regime in REGIME_NAMES:
+                for regime in regimes:
                     # Hidden per-(regime, seed) asymptote; methods never see L_true.
                     gen, truth_fn, L_true = regime_functions(regime, seed)
                     seq_full = gen(n_arr, rng, sigma)
@@ -536,16 +446,19 @@ def sweep3_catmult(catmult_values, obs_idx, window_len, noise_list,
                     idx_win  = list(range(w_start, obs_idx + 1))
                     curr_val = float(seq_full[obs_idx])
                     L_hat    = assumed_asymptote(L_true, seq_win)
+                    hold     = is_holdout(regime)
 
-                    for fid in future_list:
-                        true_val = float(truth_fn(fid))
+                    for g in gap_fractions:
+                        hm       = horizon_meta(regime, obs_idx, g, seed)
+                        n_f      = hm['n_f']
+                        true_val = float(truth_fn(n_f))
                         curr_err = abs(curr_val - true_val)
-                        cfg      = _cfg(fid, L_hat, cat_mult=cat_mult)
+                        cfg      = _cfg(n_f, L_hat, cat_mult=cat_mult)
 
                         for method in ALL_METHODS:
                             fn = METHODS[method]
                             try:
-                                est = fn(seq_win, idx_win, float(fid), cfg)
+                                est = fn(seq_win, idx_win, float(n_f), cfg)
                             except Exception:
                                 est = float('nan')
 
@@ -556,38 +469,40 @@ def sweep3_catmult(catmult_values, obs_idx, window_len, noise_list,
                                 and err > cat_mult * curr_err)
                             beats = valid and curr_err > 1e-12 and err < curr_err
 
-                            recs.append({
+                            rec = {
                                 'cat_mult':    cat_mult,
                                 'regime':      regime,
+                                'is_holdout':  hold,
                                 'noise':       sigma,
                                 'seed':        seed,
+                                'L_true':      L_true,
+                                'L_hat':       L_hat,
                                 'method':      method,
-                                'future_idx':  fid,
                                 'valid':       int(valid),
                                 'catastrophic':int(cat),
                                 'beats':       int(beats),
                                 'error':       err,
-                            })
+                            }
+                            rec.update(hm)
+                            rec.update(method_flags(method))
+                            recs.append(rec)
 
-                done += 1
-                if verbose and done % max(1, total // 10) == 0:
-                    print(f'    [{done:>5}/{total}]  {100*done/total:5.1f}%'
-                          f'  CAT_MULT={cat_mult:.0f}  sigma={sigma:.3f}',
-                          flush=True)
+                    done += 1
+                    if verbose and done % max(1, total // 10) == 0:
+                        print(f'    [{done:>5}/{total}]  {100*done/total:5.1f}%'
+                              f'  CAT_MULT={cat_mult:.0f}  sigma={sigma:.3f}',
+                              flush=True)
 
     df = pd.DataFrame(recs)
 
     # ── Aggregate stability scores ─────────────────────────────────────────────
     champ_rows, global_rows, concord_rows = [], [], []
+    cfg_ref = _cfg(0, 0.0)   # weights only
 
-    # Reference cfg for W_CAT/W_BEATS
-    cfg_ref = _cfg(future_list[0], 0.0)   # weights only
-
+    core_pool = exclude_capped(df[df['is_holdout'] == 0])
     for cat_mult in catmult_values:
-        for fid in future_list:
-            sub = df[(df['cat_mult'] == cat_mult) & (df['future_idx'] == fid)]
-
-            # Global ranking
+        for g in gap_fractions:
+            sub = core_pool[(core_pool['cat_mult'] == cat_mult) & (core_pool['target_g'] == g)]
             for method, mgrp in sub.groupby('method'):
                 vr = mgrp['valid'].mean()
                 cr = mgrp['catastrophic'].mean()
@@ -595,42 +510,51 @@ def sweep3_catmult(catmult_values, obs_idx, window_len, noise_list,
                 sc = _stability(vr, cr, br, cfg_ref)
                 global_rows.append({
                     'cat_mult':   cat_mult,
-                    'future_idx': fid,
+                    'target_g':   g,
                     'method':     method,
+                    'is_trivial': int(mgrp['is_trivial'].iloc[0]),
                     'stability':  round(sc, 4),
                     'valid_rate': round(float(vr), 4),
                     'cat_rate':   round(float(cr), 4),
                     'beats_rate': round(float(br), 4),
+                    'med_error':  float(mgrp['error'].median()),
+                    'n_cells':    int(len(mgrp)),
                 })
 
-            # Per-regime champion
-            for regime in REGIME_NAMES:
-                rsub = sub[sub['regime'] == regime]
+            sub_all = df[(df['cat_mult'] == cat_mult) & (df['target_g'] == g)]
+            for regime in regimes:
+                rsub = exclude_capped(sub_all[sub_all['regime'] == regime])
+                capped_n = int(((sub_all['regime'] == regime) & (sub_all['capped'] == 1)).sum())
+                if rsub.empty:
+                    continue
                 per_m = (rsub.groupby('method')
                              .agg(valid_rate=('valid','mean'),
                                   cat_rate=('catastrophic','mean'),
-                                  beats_rate=('beats','mean'))
+                                  beats_rate=('beats','mean'),
+                                  med_error=('error', 'median'))
                              .reset_index())
-                per_m['stability'] = per_m.apply(
-                    lambda r: _stability(r.valid_rate, r.cat_rate,
-                                         r.beats_rate, cfg_ref),
-                    axis=1)
-                best = per_m.sort_values('stability', ascending=False).iloc[0]
+                per_m['stability'] = [
+                    _stability(r.valid_rate, r.cat_rate, r.beats_rate, cfg_ref)
+                    for r in per_m.itertuples()]
+                best = per_m.sort_values(['stability', 'med_error'],
+                                         ascending=[False, True]).iloc[0]
                 champ_rows.append({
                     'cat_mult':     cat_mult,
                     'regime':       regime,
-                    'future_idx':   fid,
+                    'is_holdout':   is_holdout(regime),
+                    'target_g':     g,
+                    'capped_cells_excluded': capped_n,
                     'champion':     best['method'],
                     'stability':    round(float(best['stability']), 4),
-                    'is_dangerous': int(best['method'] in DANGEROUS),
+                    'is_dangerous': int(best['method'] in dangerous),
                 })
 
     df_champ  = pd.DataFrame(champ_rows)
     df_global = pd.DataFrame(global_rows)
 
     # ── Concordance between CAT_MULT settings ─────────────────────────────────
-    for fid in future_list:
-        sub_g = df_global[df_global['future_idx'] == fid]
+    for g in gap_fractions:
+        sub_g = df_global[df_global['target_g'] == g]
         pairs = [(catmult_values[i], catmult_values[j])
                  for i in range(len(catmult_values))
                  for j in range(i+1, len(catmult_values))]
@@ -641,35 +565,34 @@ def sweep3_catmult(catmult_values, obs_idx, window_len, noise_list,
             b_rank = (sub_g[sub_g['cat_mult'] == cm_b]
                       .sort_values('stability', ascending=False)
                       .reset_index()['method'])
-            # Align on common methods
             common = list(set(a_rank) & set(b_rank))
             if len(common) < 5:
                 continue
             a_pos = {m: i for i, m in enumerate(a_rank)}
             b_pos = {m: i for i, m in enumerate(b_rank)}
-            a_v   = [a_pos[m] for m in common]
-            b_v   = [b_pos[m] for m in common]
-            tau, _ = kendalltau(a_v, b_v)
+            tau, _ = kendalltau([a_pos[m] for m in common], [b_pos[m] for m in common])
 
-            # Fraction of regime champions that agree
-            ca = df_champ[(df_champ['cat_mult'] == cm_a)
-                          & (df_champ['future_idx'] == fid)]
-            cb = df_champ[(df_champ['cat_mult'] == cm_b)
-                          & (df_champ['future_idx'] == fid)]
-            merged = ca.merge(cb, on=['regime', 'future_idx'],
-                              suffixes=('_a','_b'))
-            agree  = float((merged['champion_a'] == merged['champion_b']).mean())
+            ca = df_champ[(df_champ['cat_mult'] == cm_a) & (df_champ['target_g'] == g)
+                          & (df_champ['is_holdout'] == 0)]
+            cb = df_champ[(df_champ['cat_mult'] == cm_b) & (df_champ['target_g'] == g)
+                          & (df_champ['is_holdout'] == 0)]
+            merged = ca.merge(cb, on=['regime', 'target_g'], suffixes=('_a','_b'))
+            agree  = (float((merged['champion_a'] == merged['champion_b']).mean())
+                      if len(merged) else float('nan'))
 
             concord_rows.append({
                 'cat_mult_a':   cm_a,
                 'cat_mult_b':   cm_b,
-                'future_idx':   fid,
+                'target_g':     g,
                 'kendall_tau':  round(float(tau), 4),
-                'champion_agreement': round(agree, 4),
+                'champion_agreement': round(agree, 4) if math.isfinite(agree) else float('nan'),
                 'n_methods':    len(common),
+                'n_regimes':    int(len(merged)),
             })
 
-    df_concord = pd.DataFrame(concord_rows)
+    df_concord = pd.DataFrame(concord_rows, columns=[
+        'cat_mult_a', 'cat_mult_b', 'target_g', 'kendall_tau', 'champion_agreement',
+        'n_methods', 'n_regimes'])
 
     _save_csv(df_champ,  out_dir, 'phase5b_sweep3_champions.csv')
     _save_csv(df_global, out_dir, 'phase5b_sweep3_global.csv')
@@ -681,115 +604,88 @@ def sweep3_catmult(catmult_values, obs_idx, window_len, noise_list,
 # FIGURES
 # =============================================================================
 
-def fig_p5b_01_linf(df_global: pd.DataFrame, out_dir: str) -> str:
-    """Cascade precision / recall / gain vs the assumed-asymptote mode.
-
-    Redesign v2: L_true is hidden and differs per (regime, seed); the x-axis
-    is the ASSUMED_L_MODE handed to the cascade, with the oracle labelled.
-    """
+def _cascade_fig(df_global, key, xlabel, title, fname, out_dir, default_g=None,
+                 categorical=False, vline=None, vline_label=''):
+    core = df_global[df_global['regime_set'] == 'core'] if 'regime_set' in df_global else df_global
+    if core.empty:
+        return ''
+    g     = _headline(core, default_g)
     fig, axes = plt.subplots(1, 3, figsize=(14, 5))
+    noise = sorted(core['noise'].unique())
+    cols  = {n: c for n, c in zip(noise, ['#1565c0', '#e65100', '#2e7d32'])}
+    sub   = core[core['target_g'] == g]
 
-    fid     = df_global['future_idx'].max()
-    noise   = sorted(df_global['noise'].unique())
-    cols    = {n: c for n, c in zip(noise, ['#1565c0', '#e65100', '#2e7d32'])}
-    present = set(df_global['assumed_mode'])
-    modes   = [m for m in CFG_MOD.ASSUMED_L_MODES if m in present]
-    xpos    = {m: i for i, m in enumerate(modes)}
+    if categorical:
+        present = set(sub[key])
+        xs = [m for m in CFG_MOD.ASSUMED_L_MODES if m in present]
+        xpos = {m: i for i, m in enumerate(xs)}
+    else:
+        xs = sorted(sub[key].unique())
+        xpos = {v: v for v in xs}
 
-    for ax, metric, ylabel, title in zip(
+    for ax, metric, ylabel, ttl in zip(
             axes,
             ['precision', 'recall', 'mean_gain'],
             ['Precision', 'Recall', 'Mean gain (rich_err - chosen_err)'],
             ['Cascade precision', 'Cascade recall', 'Cascade mean gain']):
-
-        sub = df_global[df_global['future_idx'] == fid]
         for sigma in noise:
-            sv = (sub[sub['noise'] == sigma]
-                    .set_index('assumed_mode').reindex(modes))
-            ax.plot([xpos[m] for m in modes], sv[metric].values,
-                    'o-', color=cols.get(sigma, '#999'),
-                    label=f'σ={sigma}', lw=2, markersize=6)
-
-        if 'oracle' in xpos:
-            ax.axvline(xpos['oracle'], color='black', lw=1, ls='--', alpha=0.5,
-                       label='oracle (L_hat = L_true)')
+            sv = sub[sub['noise'] == sigma].set_index(key).reindex(xs)
+            ax.plot([xpos[v] for v in xs], sv[metric].values, 'o-',
+                    color=cols.get(sigma, '#999'), label=f'σ={sigma}', lw=2, markersize=6)
+        if vline is not None and vline in xpos:
+            ax.axvline(xpos[vline], color='black', lw=1, ls='--', alpha=0.5, label=vline_label)
         if metric == 'precision':
-            ax.axhline(0.80, color='red', lw=0.8, ls=':', alpha=0.6,
-                       label='0.80 target')
+            ax.axhline(0.80, color='red', lw=0.8, ls=':', alpha=0.6, label='0.80 target')
         if metric == 'mean_gain':
             ax.axhline(0, color='black', lw=0.7, alpha=0.4)
-        ax.set_xticks(range(len(modes)))
-        ax.set_xticklabels(modes, fontsize=9)
-        ax.set_xlabel('Assumed asymptote mode (L_hat)', fontsize=9)
+        if categorical:
+            ax.set_xticks(range(len(xs)))
+            ax.set_xticklabels(xs, fontsize=9)
+        ax.set_xlabel(xlabel, fontsize=9)
         ax.set_ylabel(ylabel, fontsize=9)
-        ax.set_title(title, fontsize=10, fontweight='bold')
+        ax.set_title(ttl, fontsize=10, fontweight='bold')
         ax.legend(fontsize=8)
 
-    fig.suptitle(
-        f'Figure P5B-1 — Cascade Robustness to the Assumed Asymptote\n'
-        f'(horizon = {fid}; L_true hidden per regime x seed; oracle mode labelled)',
-        fontsize=10, fontweight='bold')
+    fig.suptitle(f'{title}\n(g = {g:g}; core regimes, capped cells excluded)',
+                 fontsize=10, fontweight='bold')
     fig.tight_layout()
-    path = os.path.join(out_dir, 'figure_p5b_01_linf.png')
+    path = os.path.join(out_dir, fname)
     _save(fig, path)
     return path
 
 
-def fig_p5b_02_window(df_global: pd.DataFrame, out_dir: str) -> str:
+def fig_p5b_01_linf(df_global: pd.DataFrame, out_dir: str, default_g=None) -> str:
+    """Cascade precision / recall / gain vs the assumed-asymptote mode."""
+    return _cascade_fig(df_global, 'assumed_mode', 'Assumed asymptote mode (L_hat)',
+                        'Figure P5B-1 — Cascade Robustness to the Assumed Asymptote '
+                        '(L_true hidden per regime x seed; oracle labelled)',
+                        'figure_p5b_01_linf.png', out_dir, default_g,
+                        categorical=True, vline='oracle', vline_label='oracle (L_hat = L_true)')
+
+
+def fig_p5b_02_window(df_global: pd.DataFrame, out_dir: str, default_g=None) -> str:
     """Cascade precision, recall, gain vs window_len."""
-    fig, axes = plt.subplots(1, 3, figsize=(14, 5))
-    fid   = df_global['future_idx'].max()
-    noise = sorted(df_global['noise'].unique())
-    cols  = {n: c for n, c in zip(noise, ['#1565c0','#e65100','#2e7d32'])}
-
-    for ax, metric, ylabel, title in zip(
-            axes,
-            ['precision', 'recall', 'mean_gain'],
-            ['Precision', 'Recall', 'Mean gain (rich_err - chosen_err)'],
-            ['Cascade precision', 'Cascade recall', 'Cascade mean gain']):
-
-        sub = df_global[df_global['future_idx'] == fid]
-        for sigma in noise:
-            sv = sub[sub['noise'] == sigma].sort_values('window_len')
-            ax.plot(sv['window_len'], sv[metric],
-                    'o-', color=cols.get(sigma, '#999'),
-                    label=f'σ={sigma}', lw=2, markersize=6)
-
-        ax.axvline(60, color='black', lw=1, ls='--', alpha=0.5,
-                   label='Phase 2 default (60)')
-        if metric == 'precision':
-            ax.axhline(0.80, color='red', lw=0.8, ls=':', alpha=0.6,
-                       label='0.80 target')
-        if metric == 'mean_gain':
-            ax.axhline(0, color='black', lw=0.7, alpha=0.4)
-        ax.set_xlabel('Window length', fontsize=9)
-        ax.set_ylabel(ylabel, fontsize=9)
-        ax.set_title(title, fontsize=10, fontweight='bold')
-        ax.legend(fontsize=8)
-
-    fig.suptitle(
-        f'Figure P5B-2 — Cascade Robustness to Window Length Variation\n'
-        f'(horizon = {fid};  obs_idx fixed at 90)',
-        fontsize=10, fontweight='bold')
-    fig.tight_layout()
-    path = os.path.join(out_dir, 'figure_p5b_02_window.png')
-    _save(fig, path)
-    return path
+    return _cascade_fig(df_global, 'window_len', 'Window length',
+                        'Figure P5B-2 — Cascade Robustness to Window Length Variation '
+                        '(obs_idx fixed at 90)',
+                        'figure_p5b_02_window.png', out_dir, default_g,
+                        categorical=False, vline=60, vline_label='Phase 2 default (60)')
 
 
 def fig_p5b_03_catmult(df_champ: pd.DataFrame,
-                        df_concord: pd.DataFrame,
-                        out_dir: str) -> str:
-    """Champion stability and ranking concordance vs CAT_MULT."""
+                       df_concord: pd.DataFrame,
+                       out_dir: str, default_g=None) -> str:
+    """Champion agreement and ranking concordance vs CAT_MULT."""
+    if df_champ.empty or df_concord.empty:
+        print('  Fig P5B-3 skipped: not enough CAT_MULT values or methods.')
+        return ''
     fig, axes = plt.subplots(1, 2, figsize=(13, 6))
-
-    # Left: champion agreement heatmap
-    fid    = df_champ['future_idx'].max()
+    g      = _headline(df_champ, default_g)
     cmults = sorted(df_champ['cat_mult'].unique())
 
     ax = axes[0]
     mat = np.zeros((len(cmults), len(cmults)))
-    for _, row in df_concord[df_concord['future_idx'] == fid].iterrows():
+    for _, row in df_concord[df_concord['target_g'] == g].iterrows():
         i = cmults.index(row['cat_mult_a'])
         j = cmults.index(row['cat_mult_b'])
         mat[i, j] = mat[j, i] = row['champion_agreement']
@@ -805,36 +701,28 @@ def fig_p5b_03_catmult(df_champ: pd.DataFrame,
             ax.text(j, i, f'{mat[i,j]:.2f}', ha='center', va='center',
                     fontsize=11, fontweight='bold',
                     color='white' if mat[i,j] < 0.5 else '#333')
-    plt.colorbar(im, ax=ax, label='Fraction of regime champions agreeing',
-                 shrink=0.7)
-    ax.set_title('Regime Champion Agreement\n(1.0 = all 18 regimes agree)',
+    plt.colorbar(im, ax=ax, label='Fraction of core regime champions agreeing', shrink=0.7)
+    ax.set_title('Regime Champion Agreement\n(1.0 = all core regimes agree)',
                  fontsize=10, fontweight='bold')
 
-    # Right: Kendall tau
     ax2 = axes[1]
-    rows = df_concord[df_concord['future_idx'] == fid]
-    labels = [f'CAT={r["cat_mult_a"]:.0f} vs CAT={r["cat_mult_b"]:.0f}'
-              for _, r in rows.iterrows()]
+    rows = df_concord[df_concord['target_g'] == g]
+    labels = [f'CAT={r["cat_mult_a"]:.0f} vs CAT={r["cat_mult_b"]:.0f}' for _, r in rows.iterrows()]
     taus   = [r['kendall_tau'] for _, r in rows.iterrows()]
-    colours= ['#2e7d32' if t >= 0.9 else '#f57f17' if t >= 0.7 else '#c62828'
-              for t in taus]
+    colours= ['#2e7d32' if t >= 0.9 else '#f57f17' if t >= 0.7 else '#c62828' for t in taus]
     ax2.bar(range(len(labels)), taus, color=colours, edgecolor='white')
     ax2.set_xticks(range(len(labels)))
     ax2.set_xticklabels(labels, fontsize=9)
     ax2.set_ylabel("Kendall's τ (method ranking concordance)", fontsize=9)
-    ax2.axhline(0.9, color='#2e7d32', lw=1.2, ls='--', alpha=0.7,
-                label='τ = 0.90 (high concordance)')
+    ax2.axhline(0.9, color='#2e7d32', lw=1.2, ls='--', alpha=0.7, label='τ = 0.90 (high concordance)')
     ax2.set_ylim(0, 1.05)
-    ax2.set_title("Method Ranking Concordance\n(1.0 = identical ranking)",
-                  fontsize=10, fontweight='bold')
+    ax2.set_title("Method Ranking Concordance\n(1.0 = identical ranking)", fontsize=10, fontweight='bold')
     ax2.legend(fontsize=9)
-    for i, (v, t) in enumerate(zip(range(len(taus)), taus)):
+    for i, t in enumerate(taus):
         ax2.text(i, t + 0.01, f'{t:.3f}', ha='center', va='bottom', fontsize=9)
 
-    fig.suptitle(
-        f'Figure P5B-3 — CAT_MULT Sensitivity\n'
-        f'(horizon = {fid})',
-        fontsize=10, fontweight='bold')
+    fig.suptitle(f'Figure P5B-3 — CAT_MULT Sensitivity\n(g = {g:g}; core regimes, capped excluded)',
+                 fontsize=10, fontweight='bold')
     fig.tight_layout()
     path = os.path.join(out_dir, 'figure_p5b_03_catmult.png')
     _save(fig, path)
@@ -846,28 +734,36 @@ def fig_p5b_03_catmult(df_champ: pd.DataFrame,
 # =============================================================================
 
 def run_all(assumed_modes, window_lengths, catmult_values,
-            obs_idx, window_len_default, noise_list, future_list,
-            n_seeds, out_dir, verbose=True):
+            obs_idx, window_len_default, noise_list, gap_fractions,
+            n_seeds, out_dir, core_regimes=None, holdout_regimes=None,
+            default_g=None, verbose=True):
     os.makedirs(out_dir, exist_ok=True)
+
+    # Ordering guard: the dangerous flag comes from the Phase-1 artifact.
+    dangerous = load_dangerous()
+    print(f'  Dangerous set (Phase-1 artifact): {sorted(dangerous)}')
 
     print('\n  === SWEEP 1: Assumed-Asymptote (L_hat) Sensitivity ===')
     df1g, df1r = sweep1_linf(assumed_modes, obs_idx, window_len_default,
-                              noise_list, future_list, n_seeds, out_dir, verbose)
+                             noise_list, gap_fractions, n_seeds, out_dir,
+                             core_regimes, holdout_regimes, verbose)
 
     print('\n  === SWEEP 2: Window Length Sensitivity ===')
     df2g, df2r = sweep2_window(window_lengths, obs_idx, noise_list,
-                                future_list, n_seeds, out_dir, verbose)
+                               gap_fractions, n_seeds, out_dir,
+                               core_regimes, holdout_regimes, verbose)
 
     print('\n  === SWEEP 3: CAT_MULT Sensitivity ===')
     df3c, df3g, df3cd = sweep3_catmult(catmult_values, obs_idx,
-                                        window_len_default, noise_list,
-                                        future_list, n_seeds, out_dir, verbose)
+                                       window_len_default, noise_list,
+                                       gap_fractions, n_seeds, out_dir, dangerous,
+                                       core_regimes, holdout_regimes, verbose)
 
     print('\n  Generating figures ...')
     paths = [
-        fig_p5b_01_linf(df1g, out_dir),
-        fig_p5b_02_window(df2g, out_dir),
-        fig_p5b_03_catmult(df3c, df3cd, out_dir),
+        fig_p5b_01_linf(df1g, out_dir, default_g),
+        fig_p5b_02_window(df2g, out_dir, default_g),
+        fig_p5b_03_catmult(df3c, df3cd, out_dir, default_g),
     ]
 
     return {
@@ -875,5 +771,6 @@ def run_all(assumed_modes, window_lengths, catmult_values,
         'sweep2_global': df2g, 'sweep2_regime': df2r,
         'sweep3_champions': df3c, 'sweep3_global': df3g,
         'sweep3_concordance': df3cd,
+        'dangerous': dangerous,
         'figures': [p for p in paths if p],
     }

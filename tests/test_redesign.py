@@ -390,7 +390,8 @@ def test_run_phase1_records_carry_horizons_and_skill(tmp_path):
                      verbose=False)
     rec = res["records"]
     for col in ("target_g", "achieved_g", "n_f", "capped", "L_true", "L_hat",
-                "assumed_mode", "skill", "ref_error", "is_oracle", "holdout"):
+                "assumed_mode", "skill", "ref_error", "is_oracle", "is_holdout",
+                "is_trivial"):
         assert col in rec.columns
     assert len(rec) == 3 * 2 * len(METHOD_NAMES)
 
@@ -409,16 +410,23 @@ def test_run_phase1_records_carry_horizons_and_skill(tmp_path):
         ref = cell[cell.method.isin(SKILL_REFERENCE_METHODS)]
         assert ref.skill.min() == pytest.approx(1.0)
         assert (cell.loc[cell.method == "random_knots", :].empty)
-    assert (rec.loc[rec.regime == "random_knots", "holdout"] == 1).all()
-    assert (rec.loc[rec.regime != "random_knots", "holdout"] == 0).all()
+    assert (rec.loc[rec.regime == "random_knots", "is_holdout"] == 1).all()
+    assert (rec.loc[rec.regime != "random_knots", "is_holdout"] == 0).all()
+    assert (rec.loc[rec.method == "window_mean", "is_trivial"] == 1).all()
+    assert (rec.loc[rec.method == "richardson_1", "is_trivial"] == 0).all()
 
     g = res["global"]
-    assert set(g.regime_set) == {"core"} and "random_knots" not in set(res["aggregated"][res["aggregated"].holdout == 0].regime)
+    assert set(g.regime_set) == {"core"} and "random_knots" not in set(res["aggregated"][res["aggregated"].is_holdout == 0].regime)
     assert g.loc[g.is_oracle == 1, "rank"].isna().all()
-    assert g.loc[g.is_oracle == 0, "rank"].notna().all()
+    ranked = g[(g.is_oracle == 0) & g.med_error.notna()]
+    assert ranked["rank"].notna().all()                     # ranks by med_error
+    for _, grp in ranked.groupby("target_g"):
+        assert grp.med_error.is_monotonic_increasing        # sorted by med_error
     assert "constant_oracle" in set(g.method)               # shown, unranked
     assert set(res["global_holdout"].regime_set) == {"holdout"}
-    assert "constant_oracle" not in set(res["regime_best"].best_method)
+    assert "constant_oracle" not in set(res["regime_best"].best_by_skill)
+    assert "constant_oracle" not in set(res["regime_best"].best_by_stability)
+    assert "phase1_capped.csv" in {p.name for p in tmp_path.iterdir()}
 
     for f in ("phase1_records.csv", "phase1_aggregated.csv", "phase1_global.csv",
               "phase1_global_holdout.csv", "phase1_regime_best.csv",

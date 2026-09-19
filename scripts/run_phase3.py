@@ -1,69 +1,64 @@
 """
 run_phase3.py
 =============
-Phase 3 entry point — Adaptive Selector Pipeline.
+Phase 3 entry point — Adaptive Selector Pipeline (redesign v2).
 
-Usage (from inside sequence_accel/)
-------------------------------------
-    python run_phase3.py
+    python scripts/run_phase3.py [--quick | --full]
 
-No --quick / --full modes needed: Phase 3 loads Phase 2 data and
-performs analysis only.  Runtime is 2-5 minutes.
+Phase 3 loads Phase 2 data and performs analysis only; --quick / --full are
+accepted for a uniform pipeline interface and only label the run.
 
 Prerequisites
 -------------
-Phase 2 full run must have completed.  The following files must exist:
-    results/phase2/phase2_sweep_aggregated.csv
+    results/phase2/phase2_sweep_aggregated.csv   (redesign v2, keyed by target_g)
     results/phase2/phase2_features.csv
 
-Optional: scikit-learn for a decision-tree regime classifier.
-If not installed, a scipy-based 1-NN fallback is used automatically.
-
 Output directory: results/phase3/
-
-Key output files
-----------------
-    phase3_selector_comparison.csv   Mean stability per selector per horizon
-    phase3_regime_results.csv        Per-regime stability per selector
-    phase3_cv_results.csv            Leave-one-regime-out CV results
-    phase3_regime_classifier.csv     Regime classification accuracy
-    figure_p3_01 ... figure_p3_05    Five publication figures
 """
 
-import os, sys
+import os, sys, argparse
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.dirname(_HERE)
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
+import src.config as CFG_MOD
 from phases.phase3 import run_phase3
 
-PHASE2_DIR  = os.path.join('results', 'phase2')
-PHASE3_DIR  = os.path.join('results', 'phase3')
-DEFAULT_FID = 5000
+
+def parse_args():
+    p = argparse.ArgumentParser(description='Phase 3 — Adaptive selector pipeline (v2)')
+    mode = p.add_mutually_exclusive_group(required=False)
+    mode.add_argument('--quick', action='store_true')
+    mode.add_argument('--full',  action='store_true')
+    p.add_argument('--phase2-dir', default=os.path.join('results', 'phase2'))
+    p.add_argument('--out-dir', default=os.path.join('results', 'phase3'))
+    return p.parse_args()
 
 
 def main():
-    # Sanity check
+    args = parse_args()
+    mode = 'QUICK' if args.quick else 'FULL'
+
     for fname in ['phase2_sweep_aggregated.csv', 'phase2_features.csv']:
-        path = os.path.join(PHASE2_DIR, fname)
+        path = os.path.join(args.phase2_dir, fname)
         if not os.path.exists(path):
             print(f'ERROR: {path} not found.')
-            print('       Run  python run_phase2.py --full  first.')
+            print('       Run  python scripts/run_phase2.py --full  first.')
             sys.exit(1)
 
     print('=' * 72)
-    print('  PHASE 3 — Adaptive Selector Pipeline')
+    print(f'  PHASE 3 — Adaptive Selector Pipeline  [{mode}, redesign v2]')
     print('=' * 72)
-    print(f'  Phase 2 data : {PHASE2_DIR}')
-    print(f'  Output dir   : {PHASE3_DIR}')
-    print(f'  Default horizon for per-grid figures: {DEFAULT_FID}')
+    print(f'  Phase 2 data : {args.phase2_dir}')
+    print(f'  Output dir   : {args.out_dir}')
+    print(f'  Headline stratum for per-grid figures: g = {CFG_MOD.HEADLINE_G}')
+    print(f'  Evaluations  : 0 (analysis of Phase 2 output; core regimes only)')
     print('=' * 72 + '\n')
 
-    results = run_phase3(PHASE2_DIR, PHASE3_DIR, DEFAULT_FID)
+    results = run_phase3(args.phase2_dir, args.out_dir, CFG_MOD.HEADLINE_G)
 
-    # ── Console summary ────────────────────────────────────────────────────────
     df_comp = results['comparison']
     df_cv   = results['cv']
     df_clf  = results['classifier']
@@ -72,20 +67,19 @@ def main():
     print('  PHASE 3 SUMMARY')
     print('=' * 72)
 
-    # Selector comparison table
-    for fid in sorted(df_comp['future_idx'].unique()):
-        sub = (df_comp[df_comp['future_idx'] == fid]
+    for g in sorted(df_comp['target_g'].unique(), reverse=True):
+        sub = (df_comp[df_comp['target_g'] == g]
                .sort_values('mean_stability', ascending=False))
-        print(f'\n  Global mean stability  (horizon = {fid}):')
-        print(f"  {'Selector':<22} {'Stability':>10}")
-        print('  ' + '─' * 35)
+        n_excl = int(sub['n_capped_excluded'].max()) if len(sub) else 0
+        print(f'\n  Global mean stability  (g = {g:g}; {n_excl} capped cells excluded):')
+        print(f"  {'Selector':<22} {'Stability':>10} {'n':>6}")
+        print('  ' + '─' * 42)
         for _, row in sub.iterrows():
             marker = ' <-- Phase 3' if row['selector'] == 'enhanced_cascade' else \
                      ' <-- Phase 2' if row['selector'] == 'phase2_cascade'   else \
                      ' <-- oracle'  if row['selector'] == 'oracle'           else ''
-            print(f"  {row['selector']:<22} {row['mean_stability']:>10.4f}{marker}")
+            print(f"  {row['selector']:<22} {row['mean_stability']:>10.4f} {int(row['n']):>6}{marker}")
 
-    # CV summary
     print('\n  Leave-one-regime-out CV  (median stability across held-out regimes):')
     print(f"  {'Selector':<22} {'Median':>8} {'Min':>8} {'Max':>8}")
     print('  ' + '─' * 50)
@@ -96,7 +90,6 @@ def main():
             continue
         print(f"  {sel:<22} {sub.median():>8.4f} {sub.min():>8.4f} {sub.max():>8.4f}")
 
-    # Classifier summary
     if not df_clf.empty:
         ov = df_clf[df_clf['regime'] == '__OVERALL__']
         if not ov.empty:
@@ -109,7 +102,7 @@ def main():
             print(f"    {r['regime']:<22}  acc={r['accuracy']:.3f}  "
                   f"confused with {r['top_confusion']}")
 
-    print(f'\n  Files saved to: {PHASE3_DIR}/')
+    print(f'\n  Files saved to: {args.out_dir}/')
     print('=' * 72)
 
 

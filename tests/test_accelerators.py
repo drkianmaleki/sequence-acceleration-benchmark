@@ -45,6 +45,7 @@ for _p in [_PACKAGE_DIR]:
         sys.path.insert(0, _p)
 
 from src.accelerators import METHODS, METHOD_NAMES  # noqa: E402
+from src.trivial import TRIVIAL_METHOD_NAMES         # noqa: E402
 import src.config as CFG_MOD                        # noqa: E402
 
 # ── Configuration ──────────────────────────────────────────────────────────────
@@ -65,7 +66,6 @@ PASS_THRESHOLDS = {
 
 CFG = {
     "L_inf":          TRUE_LIMIT,   # assumed asymptote L_hat (= true limit here)
-    "L_true":         TRUE_LIMIT,   # for the constant_oracle comparator only
     "ridge":          CFG_MOD.RIDGE,
     "min_valid":      CFG_MOD.MIN_VALID,
     "max_valid":      CFG_MOD.MAX_VALID,
@@ -76,6 +76,10 @@ CFG = {
     "W_CAT":          CFG_MOD.W_CAT,
     "W_BEATS":        CFG_MOD.W_BEATS,
 }
+
+# Trivial comparators are not accelerators: excluded from the analytic harness
+# (Report-1 review decision).  Phase 0 tests the 51 accelerators only.
+PHASE0_METHODS = [m for m in METHOD_NAMES if m not in TRIVIAL_METHOD_NAMES]
 
 # ── Analytic sequences ─────────────────────────────────────────────────────────
 
@@ -114,7 +118,7 @@ def run_all_tests():
         curr_err  = abs(curr_val - true_val)
         threshold = PASS_THRESHOLDS[test_name]
 
-        for method_name in METHOD_NAMES:
+        for method_name in PHASE0_METHODS:
             fn = METHODS[method_name]
             try:
                 est = fn(seq_win, idx_win, float(FUTURE_X), CFG)
@@ -281,8 +285,9 @@ def write_report(df, out_dir):
 def test_all_methods_are_exercised():
     """Every registered method must appear in the Phase 0 report."""
     df = run_all_tests()
-    assert df["method"].nunique() == len(METHOD_NAMES)
-    assert len(df) == len(METHOD_NAMES) * len(TEST_CASES)
+    assert df["method"].nunique() == len(PHASE0_METHODS)
+    assert len(df) == len(PHASE0_METHODS) * len(TEST_CASES)
+    assert not set(df["method"]) & set(TRIVIAL_METHOD_NAMES)
 
 
 def test_every_method_produces_at_least_one_valid_estimate():

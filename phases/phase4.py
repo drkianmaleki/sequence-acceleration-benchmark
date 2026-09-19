@@ -1,53 +1,42 @@
 """
 phase4.py
 =========
-Phase 4 — Stability Diagnostic Stress Testing.
+Phase 4 — Stability Diagnostic Stress Testing (redesign v2).
 
 Two diagnostics are tested as real-time trust signals:
 
   shift_IQR   : IQR of estimates across small window-start shifts.
-                Low = consistent = likely reliable.
-
   perturb_IQR : IQR of estimates under tiny multiplicative perturbations
                 of the window values (2% scale).
-                Low = robust = likely reliable.
 
 Four questions answered
 -----------------------
-Q1. Do diagnostics predict actual error?
-    Spearman r between each diagnostic and |estimate - true_val|,
-    globally and per method.
-
+Q1. Do diagnostics predict actual error?  (Spearman r, globally and per method)
 Q2. Can rejection rules built on diagnostics catch bad estimates?
-    Both shift_IQR and perturb_IQR are thresholded.
-    Precision, recall, and mean error saved are reported.
-
 Q3. Does adding a perturb_IQR filter improve the Phase 2 cascade?
-    Apply Phase 2 cascade; if chosen method has perturb_IQR > threshold,
-    fall back to current_value.
-
 Q4. Does the diagnostic-weighted ensemble outperform fixed methods?
-    Weight each method by 1/(perturb_IQR + eps); compare to oracle
-    and Phase 2 cascade.
 
-Changes from v1
----------------
-  * test_rejection_rules loops over both diagnostics.
-  * true_val stored in raw records; ensemble comparison fixed.
-  * obs_reliability reports both diagnostics.
-  * Figure P4-02 shows two panels (one per diagnostic).
-  * Figure P4-03 shows both diagnostics on same axes.
-  * SyntaxWarnings fixed (raw strings for backslash sequences).
+Redesign v2
+-----------
+  * Evaluation points are the three gap strata per (regime, obs_idx); every
+    record carries target_g, achieved_g, n_f, capped, L_true, L_hat and a
+    skill score against the best-of-four trivial reference.
+  * Core and held-out regimes are both evaluated (is_holdout flag).  Pooled
+    analyses (Q1-Q4, reliability) use the core regimes with capped cells
+    excluded; held-out correlations are reported separately; capped cells
+    go to phase4_capped.csv.
+  * The four trivial reference methods are evaluated for skill; diagnostics
+    are computed for the nine accelerators of the diagnostic pool only.
 
 Author : Kian Maleki
-Date   : 2026-05-24
+Date   : 2026-05-24 (v1), 2026-09-19 (redesign v2)
 """
 
 import os, math, warnings
 import numpy as np
 import pandas as pd
 from scipy.stats import spearmanr
-from typing import List
+from typing import List, Optional
 
 import matplotlib
 matplotlib.use('Agg')
@@ -58,8 +47,12 @@ warnings.filterwarnings('ignore')
 
 import src.config as CFG_MOD
 from src.accelerators import METHODS
-from src.generators   import REGIME_NAMES, regime_functions
+from src.generators   import regime_functions
 from src.asymptote    import assumed_asymptote
+from src.pipeline     import (REFERENCE_METHODS, capped_block, exclude_capped,
+                              horizon_meta, is_holdout, method_flags,
+                              resolve_regimes)
+from src.trivial      import best_reference_error, skill_score
 
 # ── Method set ─────────────────────────────────────────────────────────────────
 PHASE4_METHODS = [
@@ -67,6 +60,9 @@ PHASE4_METHODS = [
     'single_exp_fit', 'rational_fit', 'pade_22',
     'log_linear', 'weniger_d2', 'anderson_1',
 ]
+# Evaluated for skill but without diagnostics (they are constants of the window)
+EXTRA_REFERENCES = [m for m in REFERENCE_METHODS if m not in PHASE4_METHODS]
+EVAL_METHODS = PHASE4_METHODS + EXTRA_REFERENCES
 
 METHOD_COLOURS = {
     'current_value':  '#888888', 'richardson_1':   '#f4a261',
@@ -78,6 +74,7 @@ METHOD_COLOURS = {
 
 DIAGNOSTICS = ['shift_iqr', 'perturb_iqr']
 FIG_DPI = 150
+CELL = ['regime', 'obs_idx', 'noise', 'seed', 'target_g']
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -97,6 +94,12 @@ def _save(fig, path):
     fig.savefig(path, dpi=FIG_DPI, bbox_inches='tight')
     plt.close(fig)
     print(f'  Saved: {path}')
+
+
+def _headline(df: pd.DataFrame, default_g: Optional[float]) -> float:
+    gs = set(df['target_g'].unique())
+    g = CFG_MOD.HEADLINE_G if default_g is None else float(default_g)
+    return g if g in gs else float(max(gs))
 
 
 # =============================================================================
@@ -134,17 +137,20 @@ def _perturb_iqr(seq_win, idx_win, future_x, method, cfg,
 # 2.  MAIN EVALUATION LOOP
 # =============================================================================
 
-def run_phase4(obs_idx_list, noise_list, future_list, n_seeds,
+def run_phase4(obs_idx_list, noise_list, gap_fractions, n_seeds,
                window_len, shifts, perturb_trials, perturb_scale,
-               out_dir, verbose=True):
+               out_dir, core_regimes=None, holdout_regimes=None, verbose=True):
     """
-    For every (regime, obs_idx, noise, seed, method, horizon):
-      central estimate, shift_IQR, perturb_IQR, error, catastrophic flag.
-    true_val is stored so ensemble error can be computed later.
+    For every (regime, obs_idx, noise, seed, method, gap stratum):
+      central estimate, shift_IQR, perturb_IQR, error, catastrophic flag,
+      skill, plus the horizon metadata.  true_val is stored so ensemble
+      error can be computed later.
     """
     os.makedirs(out_dir, exist_ok=True)
-    n_arr   = np.arange(max(future_list) + 200, dtype=float)
-    n_total = len(obs_idx_list) * len(noise_list) * n_seeds * len(REGIME_NAMES)
+    regimes = resolve_regimes(core_regimes, holdout_regimes, include_holdout=True)
+    gap_fractions = [float(g) for g in gap_fractions]
+    n_arr   = np.arange(max(obs_idx_list) + 1, dtype=float)
+    n_total = len(obs_idx_list) * len(noise_list) * n_seeds * len(regimes)
     done    = 0
     records = []
 
@@ -157,7 +163,7 @@ def run_phase4(obs_idx_list, noise_list, future_list, n_seeds,
                     seed * 137 + int(sigma * 1e6) % 9973 + obs_idx * 7)
                 rng_p = np.random.RandomState(seed * 999 + obs_idx)
 
-                for regime in REGIME_NAMES:
+                for regime in regimes:
                     # Hidden per-(regime, seed) asymptote; methods never see L_true.
                     gen, truth_fn, L_true = regime_functions(regime, seed)
                     seq_full = gen(n_arr, rng, sigma)
@@ -167,55 +173,68 @@ def run_phase4(obs_idx_list, noise_list, future_list, n_seeds,
                     idx_win  = list(range(w_start, obs_idx + 1))
                     curr_val = float(seq_full[obs_idx])
                     L_hat    = assumed_asymptote(L_true, seq_win)
+                    hold     = is_holdout(regime)
 
-                    for fid in future_list:
-                        true_val = float(truth_fn(fid))
+                    for g in gap_fractions:
+                        hm       = horizon_meta(regime, obs_idx, g, seed)
+                        n_f      = hm['n_f']
+                        true_val = float(truth_fn(n_f))
                         curr_err = abs(curr_val - true_val)
-                        cfg      = _cfg(fid, L_hat)
+                        cfg      = _cfg(n_f, L_hat)
 
-                        for method in PHASE4_METHODS:
-                            fn = METHODS[method]
+                        ests, errs = {}, {}
+                        for method in EVAL_METHODS:
                             try:
-                                est = fn(seq_win, idx_win, float(fid), cfg)
+                                est = float(METHODS[method](seq_win, idx_win, float(n_f), cfg))
                             except Exception:
                                 est = float('nan')
+                            ests[method] = est
+                            errs[method] = abs(est - true_val) if _valid(est, cfg) else float('nan')
+                        ref_err = best_reference_error(errs)
 
-                            valid = _valid(est, cfg)
-                            err   = abs(est - true_val) if valid else float('nan')
+                        for method in EVAL_METHODS:
+                            est, err = ests[method], errs[method]
+                            valid = math.isfinite(err)
                             cat   = (not valid) or (
-                                valid and curr_err > 1e-12
-                                and err > CFG_MOD.CAT_MULT * curr_err)
+                                curr_err > 1e-12 and err > CFG_MOD.CAT_MULT * curr_err)
 
-                            s_iqr = _shift_iqr(seq_win, idx_win,
-                                               float(fid), method, cfg, shifts)
-                            p_iqr = _perturb_iqr(seq_win, idx_win,
-                                                  float(fid), method, cfg,
-                                                  perturb_trials,
-                                                  perturb_scale, rng_p)
+                            if method in PHASE4_METHODS:
+                                s_iqr = _shift_iqr(seq_win, idx_win, float(n_f),
+                                                   method, cfg, shifts)
+                                p_iqr = _perturb_iqr(seq_win, idx_win, float(n_f),
+                                                     method, cfg, perturb_trials,
+                                                     perturb_scale, rng_p)
+                            else:
+                                s_iqr = p_iqr = float('nan')
 
-                            records.append({
+                            rec = {
                                 'regime':      regime,
+                                'is_holdout':  hold,
                                 'obs_idx':     obs_idx,
                                 'noise':       sigma,
                                 'seed':        seed,
                                 'L_true':      L_true,
                                 'L_hat':       L_hat,
                                 'method':      method,
-                                'future_idx':  fid,
                                 'true_val':    true_val,
                                 'estimate':    est if valid else float('nan'),
                                 'error':       err,
                                 'valid':       int(valid),
                                 'catastrophic':int(cat),
                                 'curr_err':    curr_err,
+                                'ref_error':   ref_err,
+                                'skill':       skill_score(err, ref_err) if valid else float('nan'),
                                 'shift_iqr':   s_iqr,
                                 'perturb_iqr': p_iqr,
-                            })
+                            }
+                            rec.update(hm)
+                            rec.update(method_flags(method))
+                            records.append(rec)
 
-                done += 1
-                if verbose and done % max(1, n_total // 20) == 0:
-                    print(f'  [{done:>6}/{n_total}]  {100*done/n_total:5.1f}%'
-                          f'  obs={obs_idx}  sigma={sigma:.3f}', flush=True)
+                    done += 1
+                    if verbose and done % max(1, n_total // 20) == 0:
+                        print(f'  [{done:>6}/{n_total}]  {100*done/n_total:5.1f}%'
+                              f'  obs={obs_idx}  sigma={sigma:.3f}', flush=True)
 
     if verbose:
         print(f'  [{n_total}/{n_total}] 100.0%  Done.\n')
@@ -231,14 +250,10 @@ def run_phase4(obs_idx_list, noise_list, future_list, n_seeds,
 # 3.  Q1 — DIAGNOSTIC CORRELATIONS WITH ERROR
 # =============================================================================
 
-def diagnostic_correlations(df: pd.DataFrame, out_dir: str) -> pd.DataFrame:
-    """
-    Spearman r between each diagnostic and |error|.
-    Computed globally (all methods) and per method.
-    """
+def diagnostic_correlations(df: pd.DataFrame, out_dir: str, suffix: str = '') -> pd.DataFrame:
+    """Spearman r between each diagnostic and |error|, globally and per method."""
     rows = []
     for diag in DIAGNOSTICS:
-        # Global
         mask = df[diag].notna() & df['error'].notna()
         n    = int(mask.sum())
         if n >= 10:
@@ -247,7 +262,6 @@ def diagnostic_correlations(df: pd.DataFrame, out_dir: str) -> pd.DataFrame:
                          'spearman_r': round(float(r), 4),
                          'p_value':    round(float(p), 6), 'n': n})
 
-        # Per method
         for method in PHASE4_METHODS:
             sub  = df[df['method'] == method]
             mask = sub[diag].notna() & sub['error'].notna()
@@ -259,8 +273,8 @@ def diagnostic_correlations(df: pd.DataFrame, out_dir: str) -> pd.DataFrame:
                          'spearman_r': round(float(r), 4),
                          'p_value':    round(float(p), 6), 'n': n})
 
-    df_corr = pd.DataFrame(rows)
-    p = os.path.join(out_dir, 'phase4_diagnostic_correlations.csv')
+    df_corr = pd.DataFrame(rows, columns=['method', 'diagnostic', 'spearman_r', 'p_value', 'n'])
+    p = os.path.join(out_dir, f'phase4_diagnostic_correlations{suffix}.csv')
     df_corr.to_csv(p, index=False)
     print(f'  Saved: {p}  ({len(df_corr)} rows)')
     return df_corr
@@ -275,8 +289,7 @@ def test_rejection_rules(df: pd.DataFrame, out_dir: str) -> pd.DataFrame:
     For each (diagnostic, method, threshold):
       precision = P(catastrophic | diagnostic > threshold)
       recall    = P(diagnostic > threshold | catastrophic)
-      mean_err_saved = mean(curr_err - error) when rule fires;
-                       positive = reject saved error vs keeping estimate.
+      mean_err_saved = mean(curr_err - error) when rule fires
     """
     thresholds = [0.001, 0.002, 0.005, 0.010, 0.020,
                   0.050, 0.100, 0.200, 0.500, 1.000]
@@ -317,7 +330,9 @@ def test_rejection_rules(df: pd.DataFrame, out_dir: str) -> pd.DataFrame:
                                       if math.isfinite(saved) else float('nan'),
                 })
 
-    df_rules = (pd.DataFrame(rows)
+    cols = ['diagnostic', 'method', 'threshold', 'n_fire', 'n_total', 'fire_rate',
+            'precision', 'recall', 'mean_err_saved']
+    df_rules = (pd.DataFrame(rows, columns=cols)
                   .sort_values(['diagnostic', 'method', 'threshold'])
                   .reset_index(drop=True))
     p = os.path.join(out_dir, 'phase4_rejection_rules.csv')
@@ -339,12 +354,13 @@ def _phase2_cascade_choice(slope, r2):
 
 
 def cascade_with_filter(df: pd.DataFrame,
-                         df_feat_path: str,
-                         out_dir: str) -> pd.DataFrame:
+                        df_feat_path: str,
+                        out_dir: str,
+                        default_g: Optional[float] = None) -> pd.DataFrame:
     """
-    Compare Phase 2 cascade with and without a perturb_IQR rejection filter.
-    Filter: if chosen method perturb_IQR > threshold, fall back to
-    current_value.
+    Compare Phase 2 cascade with and without a perturb_IQR rejection filter
+    at the headline stratum.  Filter: if the chosen method's perturb_IQR
+    exceeds the threshold, fall back to current_value.
     """
     try:
         df_feat = pd.read_csv(df_feat_path)
@@ -357,18 +373,17 @@ def cascade_with_filter(df: pd.DataFrame,
                         .mean()
                         .reset_index())
 
-    fid_default = df['future_idx'].max()
-    sub_fid = df[df['future_idx'] == fid_default].copy()
-    merged  = sub_fid.merge(feat_avg, on=['regime', 'obs_idx', 'noise'],
-                            how='left')
+    g = _headline(df, default_g)
+    sub_g  = df[df['target_g'] == g].copy()
+    merged = sub_g.merge(feat_avg, on=['regime', 'obs_idx', 'noise'], how='inner',
+                         suffixes=('', '_feat'))
 
     thresholds = [float('inf'), 1.0, 0.5, 0.2, 0.1, 0.05, 0.02]
     rows = []
 
     for threshold in thresholds:
         errs = []
-        for (regime, obs_idx, sigma, seed), grp in merged.groupby(
-                ['regime', 'obs_idx', 'noise', 'seed']):
+        for _, grp in merged.groupby(['regime', 'obs_idx', 'noise', 'seed']):
             frow   = grp.iloc[0]
             slope  = float(frow.get('log_log_slope', float('nan')))
             r2     = float(frow.get('richardson_r2', float('nan')))
@@ -383,8 +398,7 @@ def cascade_with_filter(df: pd.DataFrame,
                 chosen = 'current_value'
 
             chosen_row = grp[grp['method'] == chosen]
-            if chosen_row.empty or not math.isfinite(
-                    chosen_row['error'].values[0]):
+            if chosen_row.empty or not math.isfinite(chosen_row['error'].values[0]):
                 chosen_row = grp[grp['method'] == 'current_value']
 
             err = (float(chosen_row['error'].values[0])
@@ -394,11 +408,12 @@ def cascade_with_filter(df: pd.DataFrame,
         label = ('no_filter' if threshold == float('inf')
                  else f'perturb_iqr>{threshold}')
         rows.append({
-            'filter':       label,
+            'filter':        label,
             'iqr_threshold': threshold,
-            'mean_error':   round(float(np.nanmean(errs)),   6),
-            'median_error': round(float(np.nanmedian(errs)), 6),
-            'n':            len(errs),
+            'target_g':      g,
+            'mean_error':    round(float(np.nanmean(errs)),   6) if errs else float('nan'),
+            'median_error':  round(float(np.nanmedian(errs)), 6) if errs else float('nan'),
+            'n':             len(errs),
         })
 
     df_filt = pd.DataFrame(rows)
@@ -412,81 +427,75 @@ def cascade_with_filter(df: pd.DataFrame,
 # 6.  Q4 — DIAGNOSTIC-WEIGHTED ENSEMBLE
 # =============================================================================
 
-def ensemble_comparison(df: pd.DataFrame, out_dir: str) -> pd.DataFrame:
+def ensemble_comparison(df: pd.DataFrame, out_dir: str,
+                        default_g: Optional[float] = None) -> pd.DataFrame:
     """
-    Compare selectors using true_val stored in records.
-    Ensemble: weight each method by 1/(perturb_IQR + eps).
+    Compare selectors using true_val stored in records, at the headline
+    stratum.  Ensemble: weight each method by 1/(perturb_IQR + eps).  The
+    four trivial references are reported as fixed selectors, and every
+    selector gets a median skill against the best-of-four reference.
     """
-    eps         = 0.01
-    fid_default = df['future_idx'].max()
-    sub         = df[df['future_idx'] == fid_default].copy()
+    eps = 0.01
+    g   = _headline(df, default_g)
+    sub = df[df['target_g'] == g].copy()
 
+    selectors = (['oracle', 'fixed_rational', 'fixed_richardson',
+                  'phase2_proxy', 'diag_ensemble'] + REFERENCE_METHODS)
+    errs = {s: [] for s in selectors}
+    refs = []
+
+    for _, grp in sub.groupby(['regime', 'obs_idx', 'noise', 'seed']):
+        grp_idx  = grp.set_index('method')
+        true_val = float(grp['true_val'].iloc[0])
+        refs.append(float(grp['ref_error'].iloc[0]))
+
+        def _e(m):
+            return float(grp_idx.loc[m, 'error']) if m in grp_idx.index else float('nan')
+
+        best_err = float('inf')
+        for m in PHASE4_METHODS:
+            e = _e(m)
+            if math.isfinite(e) and e < best_err:
+                best_err = e
+        errs['oracle'].append(best_err if best_err < float('inf') else float('nan'))
+        errs['fixed_rational'].append(_e('rational_fit'))
+        errs['fixed_richardson'].append(_e('richardson_1'))
+        cands = [x for x in (_e('richardson_1'), _e('rational_fit')) if math.isfinite(x)]
+        errs['phase2_proxy'].append(min(cands) if cands else float('nan'))
+
+        ests, ws = [], []
+        for m in PHASE4_METHODS:
+            if m not in grp_idx.index:
+                continue
+            est_val = grp_idx.loc[m, 'estimate']
+            p_iqr   = grp_idx.loc[m, 'perturb_iqr']
+            if math.isfinite(est_val) and math.isfinite(p_iqr):
+                ests.append(est_val)
+                ws.append(1.0 / (p_iqr + eps))
+        if ests:
+            w = np.array(ws); w /= w.sum()
+            errs['diag_ensemble'].append(abs(float(np.dot(w, ests)) - true_val))
+        else:
+            errs['diag_ensemble'].append(float('nan'))
+
+        for m in REFERENCE_METHODS:
+            errs[m].append(_e(m))
+
+    refs = np.asarray(refs, dtype=float)
     summary_rows = []
-
-    for sel_name in ['oracle', 'fixed_rational', 'fixed_richardson',
-                     'phase2_proxy', 'diag_ensemble']:
-        errs = []
-
-        for (regime, obs_idx, sigma, seed), grp in sub.groupby(
-                ['regime', 'obs_idx', 'noise', 'seed']):
-
-            grp_idx  = grp.set_index('method')
-            true_val = float(grp['true_val'].iloc[0])
-
-            if sel_name == 'oracle':
-                best_err = float('inf')
-                for m in PHASE4_METHODS:
-                    if m not in grp_idx.index:
-                        continue
-                    e = grp_idx.loc[m, 'error']
-                    if math.isfinite(e) and e < best_err:
-                        best_err = e
-                errs.append(best_err if best_err < float('inf') else float('nan'))
-
-            elif sel_name == 'fixed_rational':
-                errs.append(float(grp_idx.loc['rational_fit', 'error'])
-                            if 'rational_fit' in grp_idx.index
-                            else float('nan'))
-
-            elif sel_name == 'fixed_richardson':
-                errs.append(float(grp_idx.loc['richardson_1', 'error'])
-                            if 'richardson_1' in grp_idx.index
-                            else float('nan'))
-
-            elif sel_name == 'phase2_proxy':
-                # Proxy: min of rational_fit and richardson_1
-                r1  = (float(grp_idx.loc['richardson_1', 'error'])
-                       if 'richardson_1' in grp_idx.index else float('nan'))
-                rat = (float(grp_idx.loc['rational_fit', 'error'])
-                       if 'rational_fit' in grp_idx.index else float('nan'))
-                best = min(x for x in [r1, rat] if math.isfinite(x)) \
-                       if any(math.isfinite(x) for x in [r1, rat]) \
-                       else float('nan')
-                errs.append(best)
-
-            elif sel_name == 'diag_ensemble':
-                ests, ws = [], []
-                for m in PHASE4_METHODS:
-                    if m not in grp_idx.index:
-                        continue
-                    est_val = grp_idx.loc[m, 'estimate']
-                    p_iqr   = grp_idx.loc[m, 'perturb_iqr']
-                    if math.isfinite(est_val) and math.isfinite(p_iqr):
-                        ests.append(est_val)
-                        ws.append(1.0 / (p_iqr + eps))
-                if ests:
-                    w   = np.array(ws); w /= w.sum()
-                    ens = float(np.dot(w, ests))
-                    errs.append(abs(ens - true_val))
-                else:
-                    errs.append(float('nan'))
-
-        vals = pd.Series(errs).dropna()
+    for sel in selectors:
+        vals = np.asarray(errs[sel], dtype=float)
+        ok = np.isfinite(vals)
+        sk = np.array([skill_score(v, r) for v, r in zip(vals, refs)], dtype=float)
+        sk = sk[~np.isnan(sk)]
         summary_rows.append({
-            'selector':     sel_name,
-            'mean_error':   round(float(vals.mean()),   6),
-            'median_error': round(float(vals.median()), 6),
-            'n':            len(vals),
+            'selector':     sel,
+            'target_g':     g,
+            'is_trivial':   int(sel in REFERENCE_METHODS),
+            'mean_error':   round(float(vals[ok].mean()),   6) if ok.any() else float('nan'),
+            'median_error': round(float(np.median(vals[ok])), 6) if ok.any() else float('nan'),
+            'med_skill':    round(float(np.median(sk)), 4) if sk.size else float('nan'),
+            'n':            int(ok.sum()),
         })
 
     df_sum = pd.DataFrame(summary_rows)
@@ -500,32 +509,30 @@ def ensemble_comparison(df: pd.DataFrame, out_dir: str) -> pd.DataFrame:
 # 7.  RELIABILITY VS OBS_IDX
 # =============================================================================
 
-def obs_reliability(df: pd.DataFrame, out_dir: str) -> pd.DataFrame:
-    """
-    For each (obs_idx, method, diagnostic): Spearman r(diagnostic, error)
-    and precision of high-diagnostic = catastrophic.
-    """
+def obs_reliability(df: pd.DataFrame, out_dir: str,
+                    default_g: Optional[float] = None) -> pd.DataFrame:
+    """For each (obs_idx, method, diagnostic) at the headline stratum:
+    Spearman r(diagnostic, error) and precision of high-diagnostic = catastrophic."""
     rows = []
-    fid  = df['future_idx'].max()
-    sub  = df[df['future_idx'] == fid]
+    g    = _headline(df, default_g)
+    sub  = df[df['target_g'] == g]
 
     for obs_idx in sorted(sub['obs_idx'].unique()):
         for method in PHASE4_METHODS:
-            msub = sub[(sub['obs_idx'] == obs_idx)
-                       & (sub['method'] == method)]
+            msub = sub[(sub['obs_idx'] == obs_idx) & (sub['method'] == method)]
             for diag in DIAGNOSTICS:
                 mask = msub[diag].notna() & msub['error'].notna()
                 n    = int(mask.sum())
                 if n < 5:
                     continue
-                r, p = spearmanr(msub.loc[mask, diag],
-                                  msub.loc[mask, 'error'])
+                r, p = spearmanr(msub.loc[mask, diag], msub.loc[mask, 'error'])
                 hi      = msub[diag] > 0.05
                 cat     = msub['catastrophic'] == 1
                 prec    = (float((hi & cat).sum() / hi.sum())
                            if hi.sum() > 0 else float('nan'))
                 rows.append({
                     'obs_idx':     obs_idx,
+                    'target_g':    g,
                     'method':      method,
                     'diagnostic':  diag,
                     'spearman_r':  round(float(r), 4),
@@ -535,7 +542,9 @@ def obs_reliability(df: pd.DataFrame, out_dir: str) -> pd.DataFrame:
                                    if math.isfinite(prec) else float('nan'),
                 })
 
-    df_rel = pd.DataFrame(rows)
+    cols = ['obs_idx', 'target_g', 'method', 'diagnostic', 'spearman_r', 'p_value',
+            'n', 'hi_iqr_prec']
+    df_rel = pd.DataFrame(rows, columns=cols)
     p = os.path.join(out_dir, 'phase4_obs_reliability.csv')
     df_rel.to_csv(p, index=False)
     print(f'  Saved: {p}  ({len(df_rel)} rows)')
@@ -548,6 +557,8 @@ def obs_reliability(df: pd.DataFrame, out_dir: str) -> pd.DataFrame:
 
 def fig_p4_01_correlations(df_corr: pd.DataFrame, out_dir: str) -> str:
     """Grouped bar chart: Spearman r per (method, diagnostic)."""
+    if df_corr.empty:
+        return ''
     methods_all = ['ALL'] + PHASE4_METHODS
     ds_labels   = {'shift_iqr': 'shift IQR', 'perturb_iqr': 'perturb IQR'}
     ds_colours  = {'shift_iqr': '#1565c0', 'perturb_iqr': '#c62828'}
@@ -576,8 +587,8 @@ def fig_p4_01_correlations(df_corr: pd.DataFrame, out_dir: str) -> str:
     ax.set_ylabel('Spearman r  (diagnostic vs |error|)', fontsize=10)
     ax.set_title(
         'Figure P4-1 — Diagnostic Correlation with Actual Error\n'
-        'Positive r = high diagnostic \u2192 high error  '
-        '(diagnostic is informative)',
+        '(core regimes, capped cells excluded)  Positive r = high diagnostic '
+        '→ high error',
         fontsize=10, fontweight='bold')
     ax.legend(fontsize=9)
     fig.tight_layout()
@@ -592,15 +603,13 @@ def fig_p4_02_rejection_rules(df_rules: pd.DataFrame, out_dir: str) -> str:
         return ''
 
     key_methods = ['richardson_1', 'rational_fit', 'pade_22', 'log_linear']
-    key_methods = [m for m in key_methods
-                   if m in df_rules['method'].unique()]
+    key_methods = [m for m in key_methods if m in df_rules['method'].unique()]
 
     fig, axes = plt.subplots(1, 2, figsize=(14, 6), sharey=True)
     for ax, diag in zip(axes, DIAGNOSTICS):
         sub_d = df_rules[df_rules['diagnostic'] == diag]
         for method in key_methods:
-            sub = sub_d[sub_d['method'] == method].dropna(
-                subset=['precision', 'recall'])
+            sub = sub_d[sub_d['method'] == method].dropna(subset=['precision', 'recall'])
             if sub.empty:
                 continue
             ax.plot(sub['recall'], sub['precision'],
@@ -619,8 +628,7 @@ def fig_p4_02_rejection_rules(df_rules: pd.DataFrame, out_dir: str) -> str:
         ax.set_title(diag.replace('_', ' '), fontsize=10, fontweight='bold')
         ax.legend(fontsize=8)
 
-    axes[0].set_ylabel('Precision  (fraction of rejections that were bad)',
-                        fontsize=9)
+    axes[0].set_ylabel('Precision  (fraction of rejections that were bad)', fontsize=9)
     fig.suptitle(
         'Figure P4-2 — Rejection Rule Precision vs Recall\n'
         'Numbers = IQR threshold; top-right = ideal',
@@ -632,7 +640,7 @@ def fig_p4_02_rejection_rules(df_rules: pd.DataFrame, out_dir: str) -> str:
 
 
 def fig_p4_03_obs_reliability(df_rel: pd.DataFrame, out_dir: str) -> str:
-    """Spearman r vs obs_idx for both diagnostics, richardson_1."""
+    """Spearman r vs obs_idx for both diagnostics."""
     if df_rel.empty:
         return ''
 
@@ -641,8 +649,7 @@ def fig_p4_03_obs_reliability(df_rel: pd.DataFrame, out_dir: str) -> str:
 
     for ax, diag in zip(axes, DIAGNOSTICS):
         sub_d = df_rel[df_rel['diagnostic'] == diag]
-        for method in ['richardson_1', 'rational_fit',
-                        'pade_22', 'anderson_1']:
+        for method in ['richardson_1', 'rational_fit', 'pade_22', 'anderson_1']:
             msub = sub_d[sub_d['method'] == method].sort_values('obs_idx')
             if msub.empty:
                 continue
@@ -651,8 +658,7 @@ def fig_p4_03_obs_reliability(df_rel: pd.DataFrame, out_dir: str) -> str:
                     color=METHOD_COLOURS.get(method, '#999'),
                     lw=2, markersize=6, alpha=0.85)
 
-        ax.axhline(0.30, color='#43a047', lw=1.2, ls='--', alpha=0.8,
-                   label='|r| = 0.30')
+        ax.axhline(0.30, color='#43a047', lw=1.2, ls='--', alpha=0.8, label='|r| = 0.30')
         ax.axhline(0, color='black', lw=0.7)
         ax.set_xlabel('obs_idx  (observation depth)', fontsize=9)
         ax.set_title(diag.replace('_', ' '), fontsize=10, fontweight='bold')
@@ -661,8 +667,9 @@ def fig_p4_03_obs_reliability(df_rel: pd.DataFrame, out_dir: str) -> str:
         ax.legend(fontsize=8)
 
     axes[0].set_ylabel('Spearman r  (diagnostic vs |error|)', fontsize=9)
+    g = float(df_rel['target_g'].iloc[0])
     fig.suptitle(
-        'Figure P4-3 — Diagnostic Reliability vs Observation Depth\n'
+        f'Figure P4-3 — Diagnostic Reliability vs Observation Depth  (g = {g:g})\n'
         'Higher r = diagnostic more informative at this depth',
         fontsize=10, fontweight='bold')
     fig.tight_layout()
@@ -673,27 +680,20 @@ def fig_p4_03_obs_reliability(df_rel: pd.DataFrame, out_dir: str) -> str:
 
 def fig_p4_04_iqr_vs_error(df: pd.DataFrame, out_dir: str) -> str:
     """Scatter: both diagnostics vs |error| for richardson_1 and pade_22."""
-    key_methods = [m for m in ['richardson_1', 'pade_22']
-                   if m in df['method'].unique()]
+    key_methods = [m for m in ['richardson_1', 'pade_22'] if m in df['method'].unique()]
     if not key_methods:
         return ''
 
     fig, axes = plt.subplots(len(DIAGNOSTICS), len(key_methods),
-                              figsize=(6 * len(key_methods),
-                                       5 * len(DIAGNOSTICS)))
-    if len(key_methods) == 1:
-        axes = axes.reshape(-1, 1)
+                              figsize=(6 * len(key_methods), 5 * len(DIAGNOSTICS)))
+    axes = np.asarray(axes).reshape(len(DIAGNOSTICS), len(key_methods))
 
     for row_i, diag in enumerate(DIAGNOSTICS):
         for col_j, method in enumerate(key_methods):
             ax  = axes[row_i, col_j]
-            sub = df[(df['method'] == method)
-                     & df[diag].notna()
-                     & df['error'].notna()].copy()
-            colours = ['#c62828' if c else '#1565c0'
-                       for c in sub['catastrophic']]
-            ax.scatter(sub[diag], sub['error'],
-                       c=colours, alpha=0.25, s=8, linewidths=0)
+            sub = df[(df['method'] == method) & df[diag].notna() & df['error'].notna()].copy()
+            colours = ['#c62828' if c else '#1565c0' for c in sub['catastrophic']]
+            ax.scatter(sub[diag], sub['error'], c=colours, alpha=0.25, s=8, linewidths=0)
             ax.set_xscale('symlog', linthresh=1e-6)
             ax.set_yscale('symlog', linthresh=1e-6)
             ax.set_xlabel(diag.replace('_', ' ') + '  (symlog)', fontsize=8)
@@ -705,9 +705,8 @@ def fig_p4_04_iqr_vs_error(df: pd.DataFrame, out_dir: str) -> str:
             ], fontsize=7)
 
     fig.suptitle(
-        'Figure P4-4 — Diagnostic vs Actual Error\n'
-        'Positive slope = high diagnostic \u2192 high error  '
-        '(diagnostic is useful)',
+        'Figure P4-4 — Diagnostic vs Actual Error (core regimes, capped excluded)\n'
+        'Positive slope = high diagnostic → high error',
         fontsize=10, fontweight='bold')
     fig.tight_layout()
     path = os.path.join(out_dir, 'figure_p4_04_iqr_vs_error.png')
@@ -715,42 +714,40 @@ def fig_p4_04_iqr_vs_error(df: pd.DataFrame, out_dir: str) -> str:
     return path
 
 
-def fig_p4_05_regime_diagnostic(df: pd.DataFrame, out_dir: str) -> str:
-    """
-    For richardson_1: mean perturb_IQR and mean error by regime.
-    If perturb_IQR is useful, high-error regimes should also have high IQR.
-    """
+def fig_p4_05_regime_diagnostic(df: pd.DataFrame, out_dir: str,
+                                default_g: Optional[float] = None) -> str:
+    """richardson_1: mean perturb_IQR and mean error by regime at the headline stratum."""
     sub  = df[(df['method'] == 'richardson_1')
               & df['perturb_iqr'].notna()
               & df['error'].notna()]
     if sub.empty:
         return ''
 
-    fid = sub['future_idx'].max()
-    agg = (sub[sub['future_idx'] == fid]
+    g   = _headline(sub, default_g)
+    agg = (sub[sub['target_g'] == g]
            .groupby('regime')
            .agg(mean_piqr=('perturb_iqr', 'mean'),
                 mean_err=('error',       'mean'),
                 cat_rate=('catastrophic','mean'))
            .reset_index()
            .sort_values('mean_err', ascending=False))
+    if agg.empty:
+        return ''
 
     fig, ax = plt.subplots(figsize=(12, 6))
     x   = np.arange(len(agg))
     ax2 = ax.twinx()
 
-    ax.bar(x, agg['mean_err'], color='#f4a261', alpha=0.7,
-           label='Mean |error|')
-    ax2.plot(x, agg['mean_piqr'], 'o-', color='#c62828',
-             lw=2, markersize=7, label='Mean perturb IQR')
+    ax.bar(x, agg['mean_err'], color='#f4a261', alpha=0.7, label='Mean |error|')
+    ax2.plot(x, agg['mean_piqr'], 'o-', color='#c62828', lw=2, markersize=7,
+             label='Mean perturb IQR')
 
     ax.set_xticks(x)
-    ax.set_xticklabels([r.replace('_', '\n') for r in agg['regime']],
-                       fontsize=7.5)
+    ax.set_xticklabels([r.replace('_', '\n') for r in agg['regime']], fontsize=7.5)
     ax.set_ylabel('Mean |error|', fontsize=9, color='#f4a261')
     ax2.set_ylabel('Mean perturb IQR', fontsize=9, color='#c62828')
     ax.set_title(
-        'Figure P4-5 — richardson_1: Mean Error and perturb IQR by Regime\n'
+        f'Figure P4-5 — richardson_1: Mean Error and perturb IQR by Regime (g = {g:g})\n'
         'If diagnostic is useful: IQR and error should co-vary by regime',
         fontsize=10, fontweight='bold')
 
@@ -767,49 +764,67 @@ def fig_p4_05_regime_diagnostic(df: pd.DataFrame, out_dir: str) -> str:
 # MASTER RUN FUNCTION
 # =============================================================================
 
-def run_all(obs_idx_list, noise_list, future_list, n_seeds,
+def run_all(obs_idx_list, noise_list, gap_fractions, n_seeds,
             window_len, shifts, perturb_trials, perturb_scale,
-            out_dir, phase2_feat_path=None, verbose=True):
+            out_dir, phase2_feat_path=None, core_regimes=None,
+            holdout_regimes=None, default_g=None, verbose=True):
     os.makedirs(out_dir, exist_ok=True)
 
-    df = run_phase4(obs_idx_list, noise_list, future_list,
-                    n_seeds, window_len, shifts,
-                    perturb_trials, perturb_scale, out_dir, verbose)
+    df = run_phase4(obs_idx_list, noise_list, gap_fractions, n_seeds,
+                    window_len, shifts, perturb_trials, perturb_scale,
+                    out_dir, core_regimes, holdout_regimes, verbose)
 
-    print('\n  Computing diagnostic correlations ...')
-    df_corr = diagnostic_correlations(df, out_dir)
+    # Pooled analyses: core regimes, capped cells excluded.
+    df_core = exclude_capped(df[df['is_holdout'] == 0])
+    df_hold = exclude_capped(df[df['is_holdout'] == 1])
+    g_head  = _headline(df, default_g)
+
+    print('\n  Capped block ...')
+    df_cap = capped_block(df, keys=['regime', 'is_holdout', 'obs_idx', 'target_g', 'method'],
+                          value_cols=['error', 'skill'])
+    p = os.path.join(out_dir, 'phase4_capped.csv')
+    df_cap.to_csv(p, index=False)
+    print(f'  Saved: {p}  ({len(df_cap)} rows)')
+
+    print('\n  Computing diagnostic correlations (core) ...')
+    df_corr = diagnostic_correlations(df_core, out_dir)
+    if len(df_hold):
+        print('  Computing diagnostic correlations (held-out) ...')
+        diagnostic_correlations(df_hold, out_dir, suffix='_holdout')
 
     print('\n  Testing rejection rules (both diagnostics) ...')
-    df_rules = test_rejection_rules(df, out_dir)
+    df_rules = test_rejection_rules(df_core, out_dir)
 
     print('\n  Cascade + diagnostic filter ...')
     df_filt = pd.DataFrame()
     if phase2_feat_path and os.path.exists(phase2_feat_path):
-        df_filt = cascade_with_filter(df, phase2_feat_path, out_dir)
+        df_filt = cascade_with_filter(df_core, phase2_feat_path, out_dir, g_head)
     else:
         print('  (Phase 2 features not found; skipping cascade filter)')
 
     print('\n  Ensemble comparison ...')
-    df_ens = ensemble_comparison(df, out_dir)
+    df_ens = ensemble_comparison(df_core, out_dir, g_head)
 
     print('\n  Obs-depth reliability ...')
-    df_rel = obs_reliability(df, out_dir)
+    df_rel = obs_reliability(df_core, out_dir, g_head)
 
     print('\n  Generating figures ...')
     paths = [
         fig_p4_01_correlations(df_corr, out_dir),
         fig_p4_02_rejection_rules(df_rules, out_dir),
         fig_p4_03_obs_reliability(df_rel, out_dir),
-        fig_p4_04_iqr_vs_error(df, out_dir),
-        fig_p4_05_regime_diagnostic(df, out_dir),
+        fig_p4_04_iqr_vs_error(df_core, out_dir),
+        fig_p4_05_regime_diagnostic(df_core, out_dir, g_head),
     ]
 
     return {
-        'raw':         df,
+        'raw':          df,
+        'capped':       df_cap,
         'correlations': df_corr,
-        'rules':       df_rules,
-        'filter':      df_filt,
-        'ensemble':    df_ens,
-        'reliability': df_rel,
-        'figures':     [p for p in paths if p],
+        'rules':        df_rules,
+        'filter':       df_filt,
+        'ensemble':     df_ens,
+        'reliability':  df_rel,
+        'default_g':    g_head,
+        'figures':      [p for p in paths if p],
     }

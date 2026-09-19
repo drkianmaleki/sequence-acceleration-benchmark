@@ -16,6 +16,7 @@ from matplotlib.lines import Line2D
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import src.config as C
+from src.dangerous import load_dangerous
 
 plt.rcParams.update({"font.size": 8.5, "axes.labelsize": 9, "pdf.fonttype": 42})
 OUT = "paper_figures"
@@ -24,7 +25,9 @@ os.makedirs(OUT, exist_ok=True)
 def fig1():
     g = pd.read_csv(os.path.join("results", "phase1", "phase1_global.csv"))
     g = g[g.future_idx == 5000]
-    dang = set(C.DANGEROUS_METHODS)
+    # Redesign v2: the dangerous set comes from the Phase-1 artifact; this
+    # legacy figure falls back to the recorded legacy set when it is absent.
+    dang = set(load_dangerous(required=False)) or set(C.LEGACY_DANGEROUS_METHODS)
     fig, ax = plt.subplots(figsize=(6.0, 4.1))
     for _, r in g.iterrows():
         d = r.method in dang

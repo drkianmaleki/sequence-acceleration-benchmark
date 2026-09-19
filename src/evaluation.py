@@ -3,7 +3,8 @@ evaluation.py
 =============
 Main benchmark loop (Phase 1) under redesign v2.
 
-Grid:  56 methods x (18 core + 6 held-out) regimes x noise levels x seeds
+Grid:  56 methods (51 accelerators + 5 trivial comparators)
+       x (18 core + 6 held-out) regimes x noise levels x seeds
        x gap-stratified horizons g in config.HORIZON_GAP_FRACTIONS
 
 What changed relative to the rejected design
@@ -19,17 +20,23 @@ What changed relative to the rejected design
 * The trivial comparators are methods.  Every record carries a skill score
   err(method) / err(best of {constant_assumed, last_value, window_mean,
   window_min}); the oracle is never in the denominator.
-* Held-out regimes are evaluated but flagged holdout = 1.  The pooled global
-  ranking uses the 18 core regimes and ranks non-oracle methods only; every
-  table still shows the oracle rows.
+* Held-out regimes are evaluated but flagged is_holdout = 1 and pooled
+  separately.  Pooled cross-regime tables exclude capped cells (reported in
+  a separate capped block), sort by median error, and rank non-oracle
+  methods only; every table still shows the oracle rows.
+* The per-regime recommendation column is best_by_skill.
 
 Outputs (out_dir)
 -----------------
     phase1_records.csv          one row per (regime, noise, seed, g, method)
     phase1_aggregated.csv       per (method, regime, noise, g)
-    phase1_global.csv           pooled over the 18 core regimes, per (method, g)
-    phase1_global_holdout.csv   pooled over the 6 held-out regimes
-    phase1_regime_best.csv      best non-oracle method per (regime, g)
+    phase1_global.csv           pooled over the core regimes, per (method, g),
+                                capped cells excluded, sorted by med_error
+    phase1_global_holdout.csv   the same over the held-out regimes
+    phase1_capped.csv           the capped block: capped (regime, g) cells
+                                with achieved_g and per-method medians
+    phase1_regime_best.csv      best_by_skill (primary) and best_by_stability
+                                per (regime, g), oracle excluded
     phase1_horizons.csv         n_f / achieved_g per (regime, g), seed 0 for
                                 seed-dependent shapes
     phase1_heatmap_g{g}.csv     method x regime stability per stratum
@@ -48,12 +55,11 @@ import pandas as pd
 import src.config as CFG_MOD
 from src.accelerators import METHODS, METHOD_NAMES
 from src.asymptote import assumed_asymptote, resolve_mode
-from src.generators import (HOLDOUT, HOLDOUT_REGIME_NAMES, REGIME_NAMES,
-                            regime_functions)
+from src.generators import HOLDOUT, regime_functions
 from src.horizons import horizon_for_gap, horizon_table
-from src.trivial import (ORACLE_METHODS, SKILL_REFERENCE_METHODS,
-                         TRIVIAL_METHOD_NAMES, best_reference_error,
-                         skill_score)
+from src.pipeline import (capped_block, exclude_capped, median_skill,
+                          method_flags, resolve_regimes)
+from src.trivial import ORACLE_METHODS, best_reference_error, skill_score
 
 # ── Method metadata ────────────────────────────────────────────────────────────
 
@@ -110,6 +116,7 @@ METHOD_TYPE = {m: ('trajectory' if USES_FUTURE_X[m] else 'limit')
                for m in METHOD_NAMES}
 
 IS_ORACLE = {m: (m in ORACLE_METHODS) for m in METHOD_NAMES}
+FLAGS = {m: method_flags(m) for m in METHOD_NAMES}
 
 
 # ── Shared accelerator config ──────────────────────────────────────────────────
@@ -175,6 +182,8 @@ def run_phase1(n_seeds:        int,
                asymptote_mode: Optional[str] = None,
                include_holdout: bool = True,
                regimes:        Optional[List[str]] = None,
+               core_regimes:   Optional[List[str]] = None,
+               holdout_regimes: Optional[List[str]] = None,
                verbose:        bool = True) -> Dict[str, pd.DataFrame]:
     """
     Run the Phase 1 grid and return a dict of result DataFrames.
@@ -189,14 +198,15 @@ def run_phase1(n_seeds:        int,
     out_dir         : directory for output CSV files
     assumed_mode    : config.ASSUMED_L_MODES entry (default config.ASSUMED_L_MODE)
     asymptote_mode  : "hetero" | "legacy" (default config.ASYMPTOTE_MODE)
-    include_holdout : evaluate the six held-out regimes as well (flagged)
-    regimes         : explicit regime list (overrides the default set)
+    include_holdout : evaluate the held-out regimes as well (flagged)
+    regimes         : explicit regime list (overrides everything else)
+    core_regimes / holdout_regimes : restrict either group (None = all)
     verbose         : print progress
 
     Returns
     -------
     dict with keys 'records', 'aggregated', 'global', 'global_holdout',
-    'regime_best', 'horizons', 'heatmaps'
+    'capped', 'regime_best', 'horizons', 'heatmaps'
     """
     os.makedirs(out_dir, exist_ok=True)
 
@@ -204,8 +214,7 @@ def run_phase1(n_seeds:        int,
     asymptote_mode = (CFG_MOD.ASYMPTOTE_MODE if asymptote_mode is None
                       else asymptote_mode)
     if regimes is None:
-        regimes = list(REGIME_NAMES) + (list(HOLDOUT_REGIME_NAMES)
-                                        if include_holdout else [])
+        regimes = resolve_regimes(core_regimes, holdout_regimes, include_holdout)
     gap_fractions = [float(g) for g in gap_fractions]
 
     # Only the observed prefix is ever needed: methods see the window and the
@@ -263,7 +272,7 @@ def run_phase1(n_seeds:        int,
                                  else (1.0 if valid else float('nan')))
                         records.append({
                             'regime':        regime,
-                            'holdout':       holdout,
+                            'is_holdout':    holdout,
                             'noise':         sigma,
                             'seed':          seed,
                             'L_true':        L_true,
@@ -276,7 +285,8 @@ def run_phase1(n_seeds:        int,
                             'method':        method,
                             'family':        FAMILY.get(method, 'unknown'),
                             'method_type':   METHOD_TYPE[method],
-                            'is_oracle':     int(IS_ORACLE[method]),
+                            'is_trivial':    FLAGS[method]['is_trivial'],
+                            'is_oracle':     FLAGS[method]['is_oracle'],
                             'true_val':      true_val,
                             'curr_val':      curr_val,
                             'estimate':      est if valid else float('nan'),
@@ -312,14 +322,17 @@ def run_phase1(n_seeds:        int,
             'method':       method,
             'family':       FAMILY.get(method, 'unknown'),
             'method_type':  METHOD_TYPE[method],
-            'is_oracle':    int(IS_ORACLE[method]),
+            'is_trivial':   FLAGS[method]['is_trivial'],
+            'is_oracle':    FLAGS[method]['is_oracle'],
             'regime':       regime,
-            'holdout':      int(regime in HOLDOUT),
+            'is_holdout':   int(regime in HOLDOUT),
             'noise':        sigma,
             'target_g':     g,
             'n_f':          float(grp['n_f'].median()),
             'achieved_g':   _median(grp['achieved_g']),
             'capped':       int(grp['capped'].max()),
+            'L_true':       _median(grp['L_true']),
+            'L_hat':        _median(grp['L_hat']),
             'valid_rate':   round(vr, 4),
             'cat_rate':     round(cr, 4),
             'beats_rate':   round(br, 4),
@@ -331,10 +344,35 @@ def run_phase1(n_seeds:        int,
         })
     df_agg = pd.DataFrame(agg_records)
 
-    # ── Global tables (pooled across regimes), ranks exclude the oracle ────────
+    # ── Global tables (pooled across regimes) ──────────────────────────────────
+    # Capped cells are excluded from every pooled statistic; ranks are by the
+    # configured metric (median error, ascending) over non-oracle methods.
     def _pool(df: pd.DataFrame, label: str) -> pd.DataFrame:
+        cols = ['method', 'family', 'method_type', 'is_trivial', 'is_oracle',
+                'regime_set', 'target_g', 'valid_rate', 'cat_rate', 'beats_rate',
+                'med_error', 'med_improve', 'med_skill', 'stability',
+                'n_regimes', 'n_cells', 'n_capped_excluded', 'rank']
+        if df.empty:
+            return pd.DataFrame(columns=cols)
+        pooled = exclude_capped(df)
         rows = []
-        for (method, g), grp in df.groupby(['method', 'target_g'], sort=False):
+        for (method, g), grp_all in df.groupby(['method', 'target_g'], sort=False):
+            grp = pooled[(pooled['method'] == method) & (pooled['target_g'] == g)]
+            n_excl = int(len(grp_all) - len(grp))
+            if grp.empty:
+                rows.append({
+                    'method': method, 'family': FAMILY.get(method, 'unknown'),
+                    'method_type': METHOD_TYPE[method],
+                    'is_trivial': FLAGS[method]['is_trivial'],
+                    'is_oracle': FLAGS[method]['is_oracle'],
+                    'regime_set': label, 'target_g': g,
+                    'valid_rate': float('nan'), 'cat_rate': float('nan'),
+                    'beats_rate': float('nan'), 'med_error': float('nan'),
+                    'med_improve': float('nan'), 'med_skill': float('nan'),
+                    'stability': float('nan'), 'n_regimes': 0, 'n_cells': 0,
+                    'n_capped_excluded': n_excl,
+                })
+                continue
             vr = float(grp['valid_rate'].mean())
             cr = float(grp['cat_rate'].mean())
             br = float(grp['beats_rate'].mean())
@@ -342,7 +380,8 @@ def run_phase1(n_seeds:        int,
                 'method':      method,
                 'family':      FAMILY.get(method, 'unknown'),
                 'method_type': METHOD_TYPE[method],
-                'is_oracle':   int(IS_ORACLE[method]),
+                'is_trivial':  FLAGS[method]['is_trivial'],
+                'is_oracle':   FLAGS[method]['is_oracle'],
                 'regime_set':  label,
                 'target_g':    g,
                 'valid_rate':  round(vr, 4),
@@ -353,26 +392,28 @@ def run_phase1(n_seeds:        int,
                 'med_skill':   _median(grp['med_skill']),
                 'stability':   round(stability_score(vr, cr, br, cfg_ref), 4),
                 'n_regimes':   int(grp['regime'].nunique()),
-                'capped_frac': round(float(grp['capped'].mean()), 4),
+                'n_cells':     int(len(grp)),
+                'n_capped_excluded': n_excl,
             })
-        cols = ['method', 'family', 'method_type', 'is_oracle', 'regime_set',
-                'target_g', 'valid_rate', 'cat_rate', 'beats_rate', 'med_error',
-                'med_improve', 'med_skill', 'stability', 'n_regimes',
-                'capped_frac', 'rank']
-        if not rows:
-            return pd.DataFrame(columns=cols)
         out = pd.DataFrame(rows)
         out['rank'] = np.nan
+        metric = CFG_MOD.RANK_METRIC
         for g, grp in out.groupby('target_g'):
-            sub = grp[grp['is_oracle'] == 0].sort_values('stability', ascending=False)
+            sub = grp[(grp['is_oracle'] == 0) & grp[metric].notna()]
+            sub = sub.sort_values([metric, 'method'], ascending=True)   # deterministic ties
             out.loc[sub.index, 'rank'] = np.arange(1, len(sub) + 1, dtype=float)
-        return (out.sort_values(['target_g', 'stability'], ascending=[True, False])
+        return (out.sort_values(['target_g', metric, 'method'],
+                                ascending=[True, True, True], na_position='last')
                    .reset_index(drop=True)[cols])
 
-    df_global         = _pool(df_agg[df_agg['holdout'] == 0], 'core')
-    df_global_holdout = _pool(df_agg[df_agg['holdout'] == 1], 'holdout')
+    df_global         = _pool(df_agg[df_agg['is_holdout'] == 0], 'core')
+    df_global_holdout = _pool(df_agg[df_agg['is_holdout'] == 1], 'holdout')
 
-    # ── Per-regime best (non-oracle) method ────────────────────────────────────
+    # ── Capped block: the cells the pooled tables left out ─────────────────────
+    df_capped = capped_block(df_agg, keys=['regime', 'is_holdout', 'target_g', 'method'],
+                             value_cols=['med_error', 'med_skill', 'valid_rate'])
+
+    # ── Per-regime recommendation: best_by_skill (primary), best_by_stability ──
     best_rows = []
     for (regime, g), grp in df_agg.groupby(['regime', 'target_g'], sort=False):
         pool = grp[grp['is_oracle'] == 0]
@@ -387,31 +428,35 @@ def run_phase1(n_seeds:        int,
         per_method['stability'] = [
             stability_score(r.valid_rate, r.cat_rate, r.beats_rate, cfg_ref)
             for r in per_method.itertuples()]
-        best = per_method.sort_values('stability', ascending=False).iloc[0]
         with_skill = per_method[per_method['med_skill'].notna()]
-        by_skill = (with_skill.sort_values('med_skill').iloc[0]
+        by_skill = (with_skill.sort_values(['med_skill', 'med_error']).iloc[0]
                     if len(with_skill) else None)
+        by_stab = per_method.sort_values(['stability', 'med_error'],
+                                         ascending=[False, True]).iloc[0]
         oracle = grp[grp['is_oracle'] == 1]
+        bs_name = by_skill['method'] if by_skill is not None else ''
         best_rows.append({
-            'regime':           regime,
-            'holdout':          int(regime in HOLDOUT),
-            'target_g':         g,
-            'n_f':              float(grp['n_f'].median()),
-            'achieved_g':       _median(grp['achieved_g']),
-            'capped':           int(grp['capped'].max()),
-            'best_method':      best['method'],
-            'family':           FAMILY.get(best['method'], 'unknown'),
-            'method_type':      METHOD_TYPE[best['method']],
-            'stability':        round(float(best['stability']), 4),
-            'valid_rate':       round(float(best['valid_rate']), 4),
-            'cat_rate':         round(float(best['cat_rate']), 4),
-            'med_error':        best['med_error'],
-            'med_improve':      best['med_improve'],
-            'med_skill':        best['med_skill'],
-            'best_by_skill':    by_skill['method'] if by_skill is not None else '',
-            'best_skill':       (float(by_skill['med_skill'])
-                                 if by_skill is not None else float('nan')),
-            'oracle_med_error': _median(oracle['med_error']) if len(oracle) else float('nan'),
+            'regime':                 regime,
+            'is_holdout':             int(regime in HOLDOUT),
+            'target_g':               g,
+            'n_f':                    float(grp['n_f'].median()),
+            'achieved_g':             _median(grp['achieved_g']),
+            'capped':                 int(grp['capped'].max()),
+            'best_by_skill':          bs_name,
+            'best_skill':             (float(by_skill['med_skill'])
+                                       if by_skill is not None else float('nan')),
+            'family':                 FAMILY.get(bs_name, 'unknown'),
+            'method_type':            METHOD_TYPE.get(bs_name, ''),
+            'skill_best_med_error':   (float(by_skill['med_error'])
+                                       if by_skill is not None else float('nan')),
+            'skill_best_valid_rate':  (round(float(by_skill['valid_rate']), 4)
+                                       if by_skill is not None else float('nan')),
+            'skill_best_cat_rate':    (round(float(by_skill['cat_rate']), 4)
+                                       if by_skill is not None else float('nan')),
+            'best_by_stability':      by_stab['method'],
+            'stab_best_stability':    round(float(by_stab['stability']), 4),
+            'stab_best_med_error':    float(by_stab['med_error']),
+            'oracle_med_error':       _median(oracle['med_error']) if len(oracle) else float('nan'),
         })
     df_best = pd.DataFrame(best_rows)
 
@@ -444,6 +489,7 @@ def run_phase1(n_seeds:        int,
     _save(df_agg,            'phase1_aggregated.csv',     index=False)
     _save(df_global,         'phase1_global.csv',         index=False)
     _save(df_global_holdout, 'phase1_global_holdout.csv', index=False)
+    _save(df_capped,         'phase1_capped.csv',         index=False)
     _save(df_best,           'phase1_regime_best.csv',    index=False)
     _save(df_hz,             'phase1_horizons.csv',       index=False)
     for g, hm in heatmaps.items():
@@ -454,6 +500,7 @@ def run_phase1(n_seeds:        int,
         'aggregated':     df_agg,
         'global':         df_global,
         'global_holdout': df_global_holdout,
+        'capped':         df_capped,
         'regime_best':    df_best,
         'horizons':       df_hz,
         'heatmaps':       heatmaps,
