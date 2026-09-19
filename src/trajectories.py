@@ -15,6 +15,8 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import curve_fit
 
+from src.asymptote import assumed_asymptote, resolve_mode
+
 # ── Feature extraction (mirrors phase2._extract_features exactly) ──────────────
 
 FEATURE_COLS = [
@@ -23,7 +25,7 @@ FEATURE_COLS = [
 ]
 
 
-def extract_features(seq: np.ndarray, indices: np.ndarray, L_inf: float) -> dict:
+def extract_features(seq: np.ndarray, indices: np.ndarray, L_hat: float) -> dict:
     """
     Extract six scalar features from an observation window.
     Mirrors phase2._extract_features exactly so results are comparable.
@@ -32,7 +34,7 @@ def extract_features(seq: np.ndarray, indices: np.ndarray, L_inf: float) -> dict
     ----------
     seq     : observed values in the window
     indices : corresponding iteration indices (1-based)
-    L_inf   : assumed asymptotic floor
+    L_hat   : ASSUMED asymptote (src.asymptote.assumed_asymptote); never L_true
 
     Returns
     -------
@@ -45,7 +47,7 @@ def extract_features(seq: np.ndarray, indices: np.ndarray, L_inf: float) -> dict
 
     # Dynamic L0: guarantee shifted values are positive
     win_min = float(np.min(s))
-    L0      = max(0.0, min(L_inf, win_min * 0.5))
+    L0      = max(0.0, min(float(L_hat), win_min * 0.5))
     if win_min <= 0.0:
         L0 = 0.0
 
@@ -145,9 +147,9 @@ def apply_cascade(features: dict) -> str:
 
 # ── Accelerator application ────────────────────────────────────────────────────
 
-# Default cfg matches what evaluation.py uses
+# Default cfg (numerical settings only).  'L_inf' -- the ASSUMED asymptote
+# L_hat -- must be supplied per window; there is deliberately no default.
 _DEFAULT_CFG = dict(
-    L_inf      = 0.01,
     ridge      = 1e-6,
     denom_tol  = 1e-10,
     min_valid  = -0.5,
@@ -182,6 +184,8 @@ def apply_accelerator(
 
     if cfg is None:
         cfg = _DEFAULT_CFG.copy()
+    if 'L_inf' not in cfg:
+        raise ValueError("cfg['L_inf'] (the assumed asymptote L_hat) is required")
 
     fn = METHODS.get(method_name)
     if fn is None:
@@ -226,7 +230,7 @@ def process_curves(
     curves:               dict,
     obs_depths:           list  = [30, 60, 90],
     window_len:           int   = 60,
-    L_inf:                float = 0.01,
+    assumed_mode:         str   = None,
     phase2_features_path: str   = None,
     future_x:             int   = None,
 ) -> pd.DataFrame:
@@ -242,7 +246,9 @@ def process_curves(
     curves               : {dataset_name: np.ndarray of shape (n_rounds,)}
     obs_depths           : observation cutoff points (round indices, 1-based)
     window_len           : number of points in the observation window
-    L_inf                : assumed asymptotic floor
+    assumed_mode         : config.ASSUMED_L_MODES entry (default config value).
+                           L_true is unknown for real curves, so only the
+                           deployable modes 'zero' and 'winmin' are valid here.
     phase2_features_path : path to phase2_features.csv for regime mapping
     future_x             : target round to predict (defaults to n_rounds)
 
@@ -251,7 +257,7 @@ def process_curves(
     DataFrame with one row per (dataset, obs_depth), columns:
         dataset, obs_depth, true_final, current_val,
         predicted_val, cascade_err, current_err,
-        selected_method, nearest_regime,
+        selected_method, nearest_regime, assumed_mode, L_hat,
         log_log_slope, curvature_idx, oscillation_idx,
         noise_var, richardson_r2, diff_ratio_cv
     """
@@ -261,9 +267,8 @@ def process_curves(
         df_feat = pd.read_csv(phase2_features_path)
         regime_centroids = df_feat.groupby('regime')[FEATURE_COLS].mean()
 
-    # Default cfg using the provided L_inf
+    assumed_mode = resolve_mode(assumed_mode)
     cfg = _DEFAULT_CFG.copy()
-    cfg['L_inf'] = L_inf
 
     records = []
     for name, curve in curves.items():
@@ -280,8 +285,12 @@ def process_curves(
             window = curve[start:obs]
             idxs   = np.arange(start + 1, obs + 1, dtype=float)
 
+            # 0. Assumed asymptote for this window (no oracle on real curves)
+            L_hat = assumed_asymptote(None, window, assumed_mode)
+            cfg['L_inf'] = L_hat
+
             # 1. Features
-            feats = extract_features(window, idxs, L_inf)
+            feats = extract_features(window, idxs, L_hat)
 
             # 2. Cascade → method selection
             method = apply_cascade(feats)
@@ -315,6 +324,8 @@ def process_curves(
                 current_err      = current_err,
                 selected_method  = method,
                 nearest_regime   = regime,
+                assumed_mode     = assumed_mode,
+                L_hat            = L_hat,
                 **{f: feats.get(f, np.nan) for f in FEATURE_COLS},
             )
             records.append(row)

@@ -6,16 +6,16 @@ Phase 5B — Sensitivity Analysis.
 Three sweeps test whether the key Phase 1-4 findings are robust to the
 main modelling assumptions.
 
-Sweep 1 — L_inf sensitivity
+Sweep 1 — assumed-asymptote (L_hat) sensitivity
 ----------------------------
 Question: Does the Phase 2 two-rule cascade still work when the assumed
 asymptotic value L_inf differs from the true value?
 
 In real gradient boosting L_inf is unknown and must be guessed.
-The true synthetic L_inf is always 0.01.  We vary the ASSUMED L_inf
+Redesign v2: L_true is hidden and per (regime, seed).  We vary the ASSUMED L_hat mode
 to simulate practitioner misspecification:
 
-  assumed_L_inf in {0.001, 0.005, 0.010, 0.020, 0.050}
+  assumed_mode in config.ASSUMED_L_MODES = {zero, half, oracle, double, winmin}
 
 For each assumed value, trajectory features (log_log_slope, richardson_r2)
 are recomputed with that L_inf, and the cascade is applied with fixed
@@ -53,8 +53,8 @@ fraction of 54 regime-horizon champion slots that change.
 
 Output files
 ------------
-phase5b_sweep1_global.csv      Cascade metrics vs assumed L_inf (global)
-phase5b_sweep1_regime.csv      Cascade metrics vs assumed L_inf (per regime)
+phase5b_sweep1_global.csv      Cascade metrics vs assumed-asymptote mode (global)
+phase5b_sweep1_regime.csv      Cascade metrics vs assumed-asymptote mode (per regime)
 phase5b_sweep2_global.csv      Cascade metrics vs window_len (global)
 phase5b_sweep2_regime.csv      Cascade metrics vs window_len (per regime)
 phase5b_sweep3_champions.csv   Regime champions at each CAT_MULT
@@ -83,7 +83,8 @@ warnings.filterwarnings('ignore')
 
 import src.config as CFG_MOD
 from src.accelerators import METHODS, METHOD_NAMES
-from src.generators   import GENERATORS, REGIME_NAMES, TRUTH
+from src.generators   import REGIME_NAMES, regime_functions
+from src.asymptote    import assumed_asymptote
 
 # ── Method sets ────────────────────────────────────────────────────────────────
 CASCADE_METHODS = [
@@ -101,9 +102,10 @@ FIG_DPI = 150
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
-def _cfg(fid, L_inf=None, cat_mult=None):
+def _cfg(fid, L_hat, cat_mult=None):
+    """L_hat is the ASSUMED asymptote (src.asymptote), never L_true."""
     return {
-        'L_inf':     L_inf     if L_inf     is not None else CFG_MOD.L_INF,
+        'L_inf':     float(L_hat),
         'ridge':     CFG_MOD.RIDGE,
         'min_valid': CFG_MOD.MIN_VALID,
         'max_valid': CFG_MOD.MAX_VALID,
@@ -132,10 +134,10 @@ def _save_csv(df, out_dir, fname):
 
 
 # ── Feature extraction (inline with configurable L_inf) ───────────────────────
-def _cascade_features(seq_win, idx_win, L_inf):
+def _cascade_features(seq_win, idx_win, L_hat):
     s  = np.asarray(seq_win, dtype=float)
     x  = np.asarray(idx_win, dtype=float)
-    L0 = max(0.0, min(L_inf, float(np.min(s)) * 0.5))
+    L0 = max(0.0, min(float(L_hat), float(np.min(s)) * 0.5))
 
     slope = float('nan')
     pos   = (s - L0) > 0
@@ -189,38 +191,41 @@ def _eval_methods(seq_win, idx_win, fid, cfg, methods):
 # SWEEP 1 — L_inf SENSITIVITY
 # =============================================================================
 
-def sweep1_linf(l_inf_values, obs_idx, window_len, noise_list,
+def sweep1_linf(assumed_modes, obs_idx, window_len, noise_list,
                 future_list, n_seeds, out_dir, verbose=True):
     """
-    Test Phase 2 cascade robustness to L_inf misspecification.
-    True L_inf = 0.01 for all synthetic regimes.
-    Assumed L_inf varied in l_inf_values.
+    Test Phase 2 cascade robustness to the assumed asymptote.
+    Redesign v2: L_true is hidden and per (regime, seed); the ASSUMED value
+    L_hat is swept over the config.ASSUMED_L_MODES listed in assumed_modes
+    (oracle = L_true, labelled as such).
     """
     n_arr   = np.arange(max(future_list) + 200, dtype=float)
     wl      = min(window_len, obs_idx)
     records = []
 
-    total = len(l_inf_values) * len(noise_list) * n_seeds * len(REGIME_NAMES)
+    total = len(assumed_modes) * len(noise_list) * n_seeds * len(REGIME_NAMES)
     done  = 0
 
-    print(f'  Sweep 1: {len(l_inf_values)} L_inf values × '
+    print(f'  Sweep 1: {len(assumed_modes)} assumed-L modes × '
           f'{len(noise_list)} noise × {n_seeds} seeds × '
           f'{len(REGIME_NAMES)} regimes')
 
-    for L_inf_assumed in l_inf_values:
+    for assumed_mode in assumed_modes:
         for sigma in noise_list:
             for seed in range(n_seeds):
                 rng = np.random.RandomState(seed * 137 + int(sigma*1e6) % 9973)
 
                 for regime in REGIME_NAMES:
-                    seq_full = GENERATORS[regime](n_arr, rng, sigma)
-                    truth_fn = TRUTH[regime]
+                    # Hidden per-(regime, seed) asymptote; methods never see L_true.
+                    gen, truth_fn, L_true = regime_functions(regime, seed)
+                    seq_full = gen(n_arr, rng, sigma)
 
                     w_start  = max(0, obs_idx - wl + 1)
                     seq_win  = list(seq_full[w_start : obs_idx + 1])
                     idx_win  = list(range(w_start, obs_idx + 1))
 
-                    slope, r2 = _cascade_features(seq_win, idx_win, L_inf_assumed)
+                    L_hat     = assumed_asymptote(L_true, seq_win, assumed_mode)
+                    slope, r2 = _cascade_features(seq_win, idx_win, L_hat)
                     chosen    = _phase2_cascade(slope, r2)
                     cascade_fired = (chosen == 'rational_fit')
 
@@ -228,7 +233,7 @@ def sweep1_linf(l_inf_values, obs_idx, window_len, noise_list,
                         true_val = float(truth_fn(fid))
                         curr_val = float(seq_full[obs_idx])
                         curr_err = abs(curr_val - true_val)
-                        cfg      = _cfg(fid, L_inf=L_inf_assumed)
+                        cfg      = _cfg(fid, L_hat)
 
                         ests = _eval_methods(seq_win, idx_win, fid, cfg,
                                              ['richardson_1','rational_fit'])
@@ -254,7 +259,9 @@ def sweep1_linf(l_inf_values, obs_idx, window_len, noise_list,
                                         and rat_err < rich_err)
 
                         records.append({
-                            'L_inf_assumed': L_inf_assumed,
+                            'assumed_mode':  assumed_mode,
+                            'L_hat':         L_hat,
+                            'L_true':        L_true,
                             'regime':        regime,
                             'noise':         sigma,
                             'seed':          seed,
@@ -272,7 +279,7 @@ def sweep1_linf(l_inf_values, obs_idx, window_len, noise_list,
                 done += 1
                 if verbose and done % max(1, total // 10) == 0:
                     print(f'    [{done:>5}/{total}]  {100*done/total:5.1f}%'
-                          f'  L_inf={L_inf_assumed:.3f}  sigma={sigma:.3f}',
+                          f'  mode={assumed_mode}  sigma={sigma:.3f}',
                           flush=True)
 
     df = pd.DataFrame(records)
@@ -280,10 +287,10 @@ def sweep1_linf(l_inf_values, obs_idx, window_len, noise_list,
     # ── Aggregate globally and per regime ─────────────────────────────────────
     global_rows, regime_rows = [], []
 
-    for L_inf_v in l_inf_values:
+    for mode_v in assumed_modes:
         for fid in future_list:
             for sigma in noise_list:
-                sub = df[(df['L_inf_assumed'] == L_inf_v)
+                sub = df[(df['assumed_mode'] == mode_v)
                          & (df['future_idx']  == fid)
                          & (df['noise']       == sigma)]
                 if sub.empty:
@@ -304,7 +311,7 @@ def sweep1_linf(l_inf_values, obs_idx, window_len, noise_list,
                        else float('nan')
 
                 global_rows.append({
-                    'L_inf_assumed': L_inf_v,
+                    'assumed_mode':  mode_v,
                     'future_idx':    fid,
                     'noise':         sigma,
                     'fire_rate':     round(float(fire.mean()), 4),
@@ -328,7 +335,7 @@ def sweep1_linf(l_inf_values, obs_idx, window_len, noise_list,
                                    - rsub.loc[rmask,'chosen_err']).mean()) \
                             if rmask.sum() > 0 else float('nan')
                     regime_rows.append({
-                        'L_inf_assumed': L_inf_v,
+                        'assumed_mode': mode_v,
                         'regime': regime, 'future_idx': fid, 'noise': sigma,
                         'precision': round(rp, 4) if math.isfinite(rp) else float('nan'),
                         'mean_gain': round(rgain, 6) if math.isfinite(rgain) else float('nan'),
@@ -353,7 +360,6 @@ def sweep2_window(window_lengths, obs_idx, noise_list, future_list,
     Fixed Phase 2 thresholds applied without re-fitting.
     """
     n_arr   = np.arange(max(future_list) + 200, dtype=float)
-    L_inf   = CFG_MOD.L_INF
     records = []
 
     total = len(window_lengths) * len(noise_list) * n_seeds * len(REGIME_NAMES)
@@ -372,14 +378,16 @@ def sweep2_window(window_lengths, obs_idx, noise_list, future_list,
                                             + wl * 11)
 
                 for regime in REGIME_NAMES:
-                    seq_full = GENERATORS[regime](n_arr, rng, sigma)
-                    truth_fn = TRUTH[regime]
+                    # Hidden per-(regime, seed) asymptote; methods never see L_true.
+                    gen, truth_fn, L_true = regime_functions(regime, seed)
+                    seq_full = gen(n_arr, rng, sigma)
 
                     w_start  = max(0, obs_idx - actual_wl + 1)
                     seq_win  = list(seq_full[w_start : obs_idx + 1])
                     idx_win  = list(range(w_start, obs_idx + 1))
 
-                    slope, r2 = _cascade_features(seq_win, idx_win, L_inf)
+                    L_hat     = assumed_asymptote(L_true, seq_win)
+                    slope, r2 = _cascade_features(seq_win, idx_win, L_hat)
                     chosen    = _phase2_cascade(slope, r2)
                     cascade_fired = (chosen == 'rational_fit')
 
@@ -387,7 +395,7 @@ def sweep2_window(window_lengths, obs_idx, noise_list, future_list,
                         true_val = float(truth_fn(fid))
                         curr_val = float(seq_full[obs_idx])
                         curr_err = abs(curr_val - true_val)
-                        cfg      = _cfg(fid)
+                        cfg      = _cfg(fid, L_hat)
 
                         ests = _eval_methods(seq_win, idx_win, fid, cfg,
                                              ['richardson_1','rational_fit'])
@@ -511,7 +519,7 @@ def sweep3_catmult(catmult_values, obs_idx, window_len, noise_list,
 
     print(f'  Sweep 3: {len(catmult_values)} CAT_MULT × '
           f'{len(noise_list)} noise × {n_seeds} seeds × '
-          f'{len(REGIME_NAMES)} regimes  (all 51 methods)')
+          f'{len(REGIME_NAMES)} regimes  (all {len(ALL_METHODS)} methods)')
 
     for cat_mult in catmult_values:
         for sigma in noise_list:
@@ -519,18 +527,20 @@ def sweep3_catmult(catmult_values, obs_idx, window_len, noise_list,
                 rng = np.random.RandomState(seed * 137 + int(sigma*1e6) % 9973)
 
                 for regime in REGIME_NAMES:
-                    seq_full = GENERATORS[regime](n_arr, rng, sigma)
-                    truth_fn = TRUTH[regime]
+                    # Hidden per-(regime, seed) asymptote; methods never see L_true.
+                    gen, truth_fn, L_true = regime_functions(regime, seed)
+                    seq_full = gen(n_arr, rng, sigma)
 
                     w_start  = max(0, obs_idx - wl + 1)
                     seq_win  = list(seq_full[w_start : obs_idx + 1])
                     idx_win  = list(range(w_start, obs_idx + 1))
                     curr_val = float(seq_full[obs_idx])
+                    L_hat    = assumed_asymptote(L_true, seq_win)
 
                     for fid in future_list:
                         true_val = float(truth_fn(fid))
                         curr_err = abs(curr_val - true_val)
-                        cfg      = _cfg(fid, cat_mult=cat_mult)
+                        cfg      = _cfg(fid, L_hat, cat_mult=cat_mult)
 
                         for method in ALL_METHODS:
                             fn = METHODS[method]
@@ -571,7 +581,7 @@ def sweep3_catmult(catmult_values, obs_idx, window_len, noise_list,
     champ_rows, global_rows, concord_rows = [], [], []
 
     # Reference cfg for W_CAT/W_BEATS
-    cfg_ref = _cfg(future_list[0])
+    cfg_ref = _cfg(future_list[0], 0.0)   # weights only
 
     for cat_mult in catmult_values:
         for fid in future_list:
@@ -672,14 +682,19 @@ def sweep3_catmult(catmult_values, obs_idx, window_len, noise_list,
 # =============================================================================
 
 def fig_p5b_01_linf(df_global: pd.DataFrame, out_dir: str) -> str:
-    """Cascade precision and recall vs assumed L_inf."""
+    """Cascade precision / recall / gain vs the assumed-asymptote mode.
+
+    Redesign v2: L_true is hidden and differs per (regime, seed); the x-axis
+    is the ASSUMED_L_MODE handed to the cascade, with the oracle labelled.
+    """
     fig, axes = plt.subplots(1, 3, figsize=(14, 5))
 
-    fid   = df_global['future_idx'].max()
-    noise = sorted(df_global['noise'].unique())
-    cols  = {n: c for n, c in zip(noise, ['#1565c0','#e65100','#2e7d32'])}
-
-    true_L = 0.01  # true synthetic L_inf
+    fid     = df_global['future_idx'].max()
+    noise   = sorted(df_global['noise'].unique())
+    cols    = {n: c for n, c in zip(noise, ['#1565c0', '#e65100', '#2e7d32'])}
+    present = set(df_global['assumed_mode'])
+    modes   = [m for m in CFG_MOD.ASSUMED_L_MODES if m in present]
+    xpos    = {m: i for i, m in enumerate(modes)}
 
     for ax, metric, ylabel, title in zip(
             axes,
@@ -689,27 +704,30 @@ def fig_p5b_01_linf(df_global: pd.DataFrame, out_dir: str) -> str:
 
         sub = df_global[df_global['future_idx'] == fid]
         for sigma in noise:
-            sv = sub[sub['noise'] == sigma].sort_values('L_inf_assumed')
-            ax.plot(sv['L_inf_assumed'], sv[metric],
+            sv = (sub[sub['noise'] == sigma]
+                    .set_index('assumed_mode').reindex(modes))
+            ax.plot([xpos[m] for m in modes], sv[metric].values,
                     'o-', color=cols.get(sigma, '#999'),
                     label=f'σ={sigma}', lw=2, markersize=6)
 
-        ax.axvline(true_L, color='black', lw=1, ls='--', alpha=0.5,
-                   label='True L_inf')
+        if 'oracle' in xpos:
+            ax.axvline(xpos['oracle'], color='black', lw=1, ls='--', alpha=0.5,
+                       label='oracle (L_hat = L_true)')
         if metric == 'precision':
             ax.axhline(0.80, color='red', lw=0.8, ls=':', alpha=0.6,
                        label='0.80 target')
         if metric == 'mean_gain':
             ax.axhline(0, color='black', lw=0.7, alpha=0.4)
-        ax.set_xlabel('Assumed L_inf', fontsize=9)
+        ax.set_xticks(range(len(modes)))
+        ax.set_xticklabels(modes, fontsize=9)
+        ax.set_xlabel('Assumed asymptote mode (L_hat)', fontsize=9)
         ax.set_ylabel(ylabel, fontsize=9)
         ax.set_title(title, fontsize=10, fontweight='bold')
-        ax.set_xscale('log')
         ax.legend(fontsize=8)
 
     fig.suptitle(
-        f'Figure P5B-1 — Cascade Robustness to L_inf Misspecification\n'
-        f'(horizon = {fid};  true synthetic L_inf = {true_L})',
+        f'Figure P5B-1 — Cascade Robustness to the Assumed Asymptote\n'
+        f'(horizon = {fid}; L_true hidden per regime x seed; oracle mode labelled)',
         fontsize=10, fontweight='bold')
     fig.tight_layout()
     path = os.path.join(out_dir, 'figure_p5b_01_linf.png')
@@ -827,13 +845,13 @@ def fig_p5b_03_catmult(df_champ: pd.DataFrame,
 # MASTER RUN FUNCTION
 # =============================================================================
 
-def run_all(l_inf_values, window_lengths, catmult_values,
+def run_all(assumed_modes, window_lengths, catmult_values,
             obs_idx, window_len_default, noise_list, future_list,
             n_seeds, out_dir, verbose=True):
     os.makedirs(out_dir, exist_ok=True)
 
-    print('\n  === SWEEP 1: L_inf Sensitivity ===')
-    df1g, df1r = sweep1_linf(l_inf_values, obs_idx, window_len_default,
+    print('\n  === SWEEP 1: Assumed-Asymptote (L_hat) Sensitivity ===')
+    df1g, df1r = sweep1_linf(assumed_modes, obs_idx, window_len_default,
                               noise_list, future_list, n_seeds, out_dir, verbose)
 
     print('\n  === SWEEP 2: Window Length Sensitivity ===')

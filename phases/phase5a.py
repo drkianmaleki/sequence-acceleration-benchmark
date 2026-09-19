@@ -40,7 +40,8 @@ warnings.filterwarnings('ignore')
 
 import src.config as CFG_MOD
 from src.accelerators import METHODS, METHOD_NAMES
-from src.generators   import GENERATORS, REGIME_NAMES, TRUTH
+from src.generators   import REGIME_NAMES, regime_functions
+from src.asymptote    import assumed_asymptote
 
 PHASE2_METHODS = [
     'current_value', 'richardson_1', 'richardson_a10',
@@ -57,8 +58,9 @@ FIG_DPI = 150
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
-def _cfg(fid):
-    return {'L_inf': CFG_MOD.L_INF, 'ridge': CFG_MOD.RIDGE,
+def _cfg(fid, L_hat):
+    # L_hat is the ASSUMED asymptote (src.asymptote); never L_true.
+    return {'L_inf': float(L_hat), 'ridge': CFG_MOD.RIDGE,
             'min_valid': CFG_MOD.MIN_VALID, 'max_valid': CFG_MOD.MAX_VALID,
             'denom_tol': CFG_MOD.DENOM_TOL}
 
@@ -93,10 +95,10 @@ def _perturb_iqr(seq_win, idx_win, future_x, method, cfg,
 
 
 # ── Phase 2 cascade features ──────────────────────────────────────────────────
-def _cascade_features(seq_win, idx_win):
+def _cascade_features(seq_win, idx_win, L_hat):
     s  = np.asarray(seq_win, dtype=float)
     x  = np.asarray(idx_win, dtype=float)
-    L0 = max(0.0, min(CFG_MOD.L_INF, float(np.min(s)) * 0.5))
+    L0 = max(0.0, min(float(L_hat), float(np.min(s)) * 0.5))
 
     slope = float('nan')
     pos   = (s - L0) > 0
@@ -164,19 +166,21 @@ def run_phase5a(obs_idx_list, noise_list, future_list, n_seeds,
                 rng_p = np.random.RandomState(seed * 999 + obs_idx)
 
                 for regime in REGIME_NAMES:
-                    seq_full = GENERATORS[regime](n_arr, rng, sigma)
-                    truth_fn = TRUTH[regime]
+                    # Hidden per-(regime, seed) asymptote; methods never see L_true.
+                    gen, truth_fn, L_true = regime_functions(regime, seed)
+                    seq_full = gen(n_arr, rng, sigma)
 
                     w_start  = max(0, obs_idx - wl + 1)
                     seq_win  = list(seq_full[w_start : obs_idx + 1])
                     idx_win  = list(range(w_start, obs_idx + 1))
                     curr_val = float(seq_full[obs_idx])
-                    slope, r2 = _cascade_features(seq_win, idx_win)
+                    L_hat    = assumed_asymptote(L_true, seq_win)
+                    slope, r2 = _cascade_features(seq_win, idx_win, L_hat)
 
                     for fid in future_list:
                         true_val = float(truth_fn(fid))
                         curr_err = abs(curr_val - true_val)
-                        cfg      = _cfg(fid)
+                        cfg      = _cfg(fid, L_hat)
 
                         for method in all_methods:
                             fn = METHODS[method]

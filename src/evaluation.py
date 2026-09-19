@@ -1,34 +1,59 @@
 """
 evaluation.py
 =============
-Phase 1 evaluation loop for the sequence acceleration study.
+Main benchmark loop (Phase 1) under redesign v2.
 
-Runs the full grid:
-    51 methods  x  18 regimes  x  noise levels  x  seeds  x  horizons
+Grid:  56 methods x (18 core + 6 held-out) regimes x noise levels x seeds
+       x gap-stratified horizons g in config.HORIZON_GAP_FRACTIONS
 
-Produces two output artefacts:
-    phase1_aggregated.csv   Per (method, regime, noise, horizon) statistics.
-                            ~8 K rows in full mode; the primary data file.
-    phase1_raw_sample.csv   Full per-seed records for the noiseless case only.
-                            Used for diagnostic plots and error distributions.
+What changed relative to the rejected design
+--------------------------------------------
+* Each (regime, seed) has a hidden asymptote L_true (src.generators).  The
+  prediction target is truth(n_f) = L_true + gap(n_f).
+* Methods receive L_hat = assumed_asymptote(L_true, window, ASSUMED_L_MODE)
+  under cfg['L_inf'], never L_true.  cfg['L_true'] exists solely for the
+  constant_oracle comparator (tests enforce that nothing else reads it).
+* Horizons are per regime: n_f(regime, g) is the first n > obs_idx with
+  gap(n) <= g * gap(obs_idx), capped at 50,000 (src.horizons).  Every record
+  carries (target_g, achieved_g, n_f, capped).
+* The trivial comparators are methods.  Every record carries a skill score
+  err(method) / err(best of {constant_assumed, last_value, window_mean,
+  window_min}); the oracle is never in the denominator.
+* Held-out regimes are evaluated but flagged holdout = 1.  The pooled global
+  ranking uses the 18 core regimes and ranks non-oracle methods only; every
+  table still shows the oracle rows.
 
-Usage (from within sequence_accel/):
-    python run_phase1.py --quick    # 5 seeds, sigma=0, horizon 5000 only
-    python run_phase1.py --full     # 30 seeds, 3 noise levels, 3 horizons
+Outputs (out_dir)
+-----------------
+    phase1_records.csv          one row per (regime, noise, seed, g, method)
+    phase1_aggregated.csv       per (method, regime, noise, g)
+    phase1_global.csv           pooled over the 18 core regimes, per (method, g)
+    phase1_global_holdout.csv   pooled over the 6 held-out regimes
+    phase1_regime_best.csv      best non-oracle method per (regime, g)
+    phase1_horizons.csv         n_f / achieved_g per (regime, g), seed 0 for
+                                seed-dependent shapes
+    phase1_heatmap_g{g}.csv     method x regime stability per stratum
 
 Author : Kian Maleki
-Date   : 2026-05-24
+Date   : 2026-05-24 (v1), 2026-09-19 (redesign v2)
 """
 
-import os
 import math
+import os
+from typing import Dict, List, Optional
+
 import numpy as np
 import pandas as pd
-from typing import List, Dict
 
 import src.config as CFG_MOD
 from src.accelerators import METHODS, METHOD_NAMES
-from src.generators   import GENERATORS, REGIME_NAMES, TRUTH
+from src.asymptote import assumed_asymptote, resolve_mode
+from src.generators import (HOLDOUT, HOLDOUT_REGIME_NAMES, REGIME_NAMES,
+                            regime_functions)
+from src.horizons import horizon_for_gap, horizon_table
+from src.trivial import (ORACLE_METHODS, SKILL_REFERENCE_METHODS,
+                         TRIVIAL_METHOD_NAMES, best_reference_error,
+                         skill_score)
 
 # ── Method metadata ────────────────────────────────────────────────────────────
 
@@ -60,6 +85,10 @@ FAMILY = {
     'anderson_3': 'anderson',
     'median_ensemble': 'ensemble',   'stability_weighted': 'ensemble',
     'best_shanks_wynn': 'ensemble',
+    # Redesign v2 — trivial comparators
+    'constant_assumed': 'trivial', 'constant_oracle': 'trivial',
+    'window_mean': 'trivial',      'window_min': 'trivial',
+    'last_value': 'trivial',
 }
 
 # Whether the method explicitly evaluates at future_x (trajectory extrapolator)
@@ -80,12 +109,25 @@ for _m in [
 METHOD_TYPE = {m: ('trajectory' if USES_FUTURE_X[m] else 'limit')
                for m in METHOD_NAMES}
 
+IS_ORACLE = {m: (m in ORACLE_METHODS) for m in METHOD_NAMES}
+
 
 # ── Shared accelerator config ──────────────────────────────────────────────────
 
-def build_cfg(future_idx: int) -> dict:
-    return {
-        'L_inf':          CFG_MOD.L_INF,
+def build_cfg(future_idx: int, L_hat: float, L_true: Optional[float] = None) -> dict:
+    """
+    Accelerator config for one evaluation cell.
+
+    L_hat  : the ASSUMED asymptote (src.asymptote.assumed_asymptote); this is
+             what every method sees under cfg['L_inf'].
+    L_true : the hidden asymptote; stored under cfg['L_true'] for the
+             constant_oracle comparator only.  No other method reads it.
+    """
+    if L_hat is None:
+        raise ValueError("build_cfg needs L_hat; compute it with "
+                         "src.asymptote.assumed_asymptote()")
+    cfg = {
+        'L_inf':          float(L_hat),
         'ridge':          CFG_MOD.RIDGE,
         'min_valid':      CFG_MOD.MIN_VALID,
         'max_valid':      CFG_MOD.MAX_VALID,
@@ -97,6 +139,9 @@ def build_cfg(future_idx: int) -> dict:
         'W_BEATS':        CFG_MOD.W_BEATS,
         'future_idx':     future_idx,
     }
+    if L_true is not None:
+        cfg['L_true'] = float(L_true)
+    return cfg
 
 
 def is_valid(v: float, cfg: dict) -> bool:
@@ -111,112 +156,138 @@ def stability_score(valid_r: float, cat_r: float,
             + cfg['W_BEATS'] * beats_r)
 
 
+def _median(values) -> float:
+    """Median ignoring NaN (inf is kept: an infinite skill is a real value)."""
+    arr = np.asarray(values, dtype=float)
+    arr = arr[~np.isnan(arr)]
+    return float(np.median(arr)) if arr.size else float('nan')
+
+
 # ── Core evaluation loop ───────────────────────────────────────────────────────
 
-def run_phase1(n_seeds:      int,
-               noise_levels: List[float],
-               future_idxs:  List[int],
-               obs_idx:      int,
-               window_len:   int,
-               out_dir:      str,
-               verbose:      bool = True) -> Dict[str, pd.DataFrame]:
+def run_phase1(n_seeds:        int,
+               noise_levels:   List[float],
+               gap_fractions:  List[float],
+               obs_idx:        int,
+               window_len:     int,
+               out_dir:        str,
+               assumed_mode:   Optional[str] = None,
+               asymptote_mode: Optional[str] = None,
+               include_holdout: bool = True,
+               regimes:        Optional[List[str]] = None,
+               verbose:        bool = True) -> Dict[str, pd.DataFrame]:
     """
-    Run the full Phase 1 grid and return a dict of result DataFrames.
+    Run the Phase 1 grid and return a dict of result DataFrames.
 
     Parameters
     ----------
-    n_seeds      : replicates per (regime, noise) pair
-    noise_levels : list of sigma values
-    future_idxs  : list of prediction horizons
-    obs_idx      : last observed index (0-based)
-    window_len   : terms fed to each accelerator
-    out_dir      : directory for output CSV files
-    verbose      : print progress
+    n_seeds         : replicates per (regime, noise) pair
+    noise_levels    : list of sigma values
+    gap_fractions   : target remaining-gap fractions g (horizons per regime)
+    obs_idx         : last observed index (0-based) = observation depth n_obs
+    window_len      : terms fed to each accelerator
+    out_dir         : directory for output CSV files
+    assumed_mode    : config.ASSUMED_L_MODES entry (default config.ASSUMED_L_MODE)
+    asymptote_mode  : "hetero" | "legacy" (default config.ASYMPTOTE_MODE)
+    include_holdout : evaluate the six held-out regimes as well (flagged)
+    regimes         : explicit regime list (overrides the default set)
+    verbose         : print progress
 
     Returns
     -------
-    dict with keys 'aggregated', 'global', 'regime_best', 'raw_sample'
+    dict with keys 'records', 'aggregated', 'global', 'global_holdout',
+    'regime_best', 'horizons', 'heatmaps'
     """
     os.makedirs(out_dir, exist_ok=True)
 
-    n_arr     = np.arange(max(future_idxs) + 100, dtype=float)
-    total_seq = len(REGIME_NAMES) * n_seeds * len(noise_levels)
+    assumed_mode   = resolve_mode(assumed_mode)
+    asymptote_mode = (CFG_MOD.ASYMPTOTE_MODE if asymptote_mode is None
+                      else asymptote_mode)
+    if regimes is None:
+        regimes = list(REGIME_NAMES) + (list(HOLDOUT_REGIME_NAMES)
+                                        if include_holdout else [])
+    gap_fractions = [float(g) for g in gap_fractions]
+
+    # Only the observed prefix is ever needed: methods see the window and the
+    # target comes from the noiseless truth at n_f.
+    n_arr   = np.arange(obs_idx + 1, dtype=float)
+    w_start = max(0, obs_idx - window_len + 1)
+    idx_win = list(range(w_start, obs_idx + 1))
+
+    total_seq = len(regimes) * n_seeds * len(noise_levels)
     done      = 0
+    records   = []
 
-    raw_records  = []   # noiseless only, for diagnostic plots
-    agg_records  = []   # per (method, regime, noise, horizon) aggregated
-
-    # ── Per-(regime, noise, horizon) accumulators ──────────────────────────────
-    # Key: (regime, noise, future_idx, method)
-    # Value: dict of lists accumulating per-seed stats
-    from collections import defaultdict
-    buckets: Dict = defaultdict(lambda: defaultdict(list))
-
-    # ── Main loop ──────────────────────────────────────────────────────────────
-    for regime in REGIME_NAMES:
-        gen   = GENERATORS[regime]
-        truth = TRUTH[regime]
+    for regime in regimes:
+        holdout = int(regime in HOLDOUT)
 
         for sigma in noise_levels:
             for seed in range(n_seeds):
+                gen, truth, L_true = regime_functions(regime, seed, asymptote_mode)
                 rng      = np.random.RandomState(seed * 137 + int(sigma * 1e6) % 9973)
                 seq_full = gen(n_arr, rng, sigma)
 
-                # Window
-                w_start  = max(0, obs_idx - window_len + 1)
                 seq_win  = list(seq_full[w_start : obs_idx + 1])
-                idx_win  = list(range(w_start, obs_idx + 1))
                 curr_val = float(seq_full[obs_idx])
 
-                for future_idx in future_idxs:
-                    true_val  = float(truth(future_idx))
-                    curr_err  = abs(curr_val - true_val)
-                    cfg       = build_cfg(future_idx)
+                # What the methods are told about the asymptote.
+                L_hat = assumed_asymptote(L_true, seq_win, assumed_mode)
 
+                for g in gap_fractions:
+                    hz       = horizon_for_gap(regime, obs_idx, g, seed=seed)
+                    n_f      = hz.n_f
+                    true_val = float(truth(n_f))
+                    curr_err = abs(curr_val - true_val)
+                    cfg      = build_cfg(n_f, L_hat, L_true)
+
+                    ests: Dict[str, float] = {}
+                    errs: Dict[str, float] = {}
                     for method in METHOD_NAMES:
-                        fn = METHODS[method]
                         try:
-                            est = fn(seq_win, idx_win, float(future_idx), cfg)
+                            est = float(METHODS[method](seq_win, idx_win, float(n_f), cfg))
                         except Exception:
                             est = float('nan')
+                        ests[method] = est
+                        errs[method] = (abs(est - true_val) if is_valid(est, cfg)
+                                        else float('nan'))
+                    ref_err = best_reference_error(errs)
 
-                        valid = is_valid(est, cfg)
-                        err   = abs(est - true_val) if valid else float('nan')
+                    for method in METHOD_NAMES:
+                        est, err = ests[method], errs[method]
+                        valid = math.isfinite(err)
                         cat   = (not valid) or (
-                                    valid and curr_err > 1e-12
+                                    curr_err > 1e-12
                                     and err > CFG_MOD.CAT_MULT * curr_err)
                         beats = valid and curr_err > 1e-12 and err < curr_err
                         impv  = ((curr_err / err) if (valid and err > 1e-12)
                                  else (1.0 if valid else float('nan')))
-
-                        key = (regime, sigma, future_idx, method)
-                        b   = buckets[key]
-                        b['valid'].append(int(valid))
-                        b['cat'].append(int(cat))
-                        b['beats'].append(int(beats))
-                        if valid:
-                            b['error'].append(err)
-                            b['impv'].append(impv if math.isfinite(impv)
-                                             else float('nan'))
-
-                        # Raw sample: noiseless + first seed only
-                        if sigma == 0.0 and seed == 0:
-                            raw_records.append({
-                                'regime':        regime,
-                                'future_idx':    future_idx,
-                                'method':        method,
-                                'family':        FAMILY.get(method, 'unknown'),
-                                'method_type':   METHOD_TYPE[method],
-                                'true_val':      round(true_val, 8),
-                                'curr_val':      round(curr_val, 8),
-                                'estimate':      round(est, 8) if valid else float('nan'),
-                                'error':         round(err, 8) if valid else float('nan'),
-                                'valid':         int(valid),
-                                'catastrophic':  int(cat),
-                                'beats_current': int(beats),
-                                'improve_ratio': round(impv, 6)
-                                                 if math.isfinite(impv) else float('nan'),
-                            })
+                        records.append({
+                            'regime':        regime,
+                            'holdout':       holdout,
+                            'noise':         sigma,
+                            'seed':          seed,
+                            'L_true':        L_true,
+                            'L_hat':         L_hat,
+                            'assumed_mode':  assumed_mode,
+                            'target_g':      g,
+                            'achieved_g':    hz.achieved_g,
+                            'n_f':           n_f,
+                            'capped':        int(hz.capped),
+                            'method':        method,
+                            'family':        FAMILY.get(method, 'unknown'),
+                            'method_type':   METHOD_TYPE[method],
+                            'is_oracle':     int(IS_ORACLE[method]),
+                            'true_val':      true_val,
+                            'curr_val':      curr_val,
+                            'estimate':      est if valid else float('nan'),
+                            'error':         err if valid else float('nan'),
+                            'ref_error':     ref_err,
+                            'skill':         skill_score(err, ref_err) if valid else float('nan'),
+                            'valid':         int(valid),
+                            'catastrophic':  int(cat),
+                            'beats_current': int(beats),
+                            'improve_ratio': impv if math.isfinite(impv) else float('nan'),
+                        })
 
                 done += 1
                 if verbose and done % max(1, total_seq // 20) == 0:
@@ -227,132 +298,163 @@ def run_phase1(n_seeds:      int,
     if verbose:
         print(f'  [{total_seq}/{total_seq}] 100.0%  Done.\n')
 
-    # ── Aggregate ──────────────────────────────────────────────────────────────
-    cfg_ref = build_cfg(future_idxs[0])
-    for (regime, sigma, future_idx, method), b in buckets.items():
-        n       = len(b['valid'])
-        vr      = float(np.mean(b['valid']))
-        cr      = float(np.mean(b['cat']))
-        br      = float(np.mean(b['beats']))
-        errors  = [e for e in b.get('error', []) if math.isfinite(e)]
-        impvs   = [v for v in b.get('impv',  []) if math.isfinite(v)]
-        me      = float(np.median(errors)) if errors else float('nan')
-        mi      = float(np.median(impvs))  if impvs  else float('nan')
-        sc      = stability_score(vr, cr, br, cfg_ref)
+    df_rec  = pd.DataFrame(records)
+    cfg_ref = build_cfg(0, 0.0)
 
+    # ── Aggregate per (method, regime, noise, g) ───────────────────────────────
+    agg_records = []
+    for (method, regime, sigma, g), grp in df_rec.groupby(
+            ['method', 'regime', 'noise', 'target_g'], sort=False):
+        vr = float(grp['valid'].mean())
+        cr = float(grp['catastrophic'].mean())
+        br = float(grp['beats_current'].mean())
         agg_records.append({
             'method':       method,
             'family':       FAMILY.get(method, 'unknown'),
             'method_type':  METHOD_TYPE[method],
+            'is_oracle':    int(IS_ORACLE[method]),
             'regime':       regime,
+            'holdout':      int(regime in HOLDOUT),
             'noise':        sigma,
-            'future_idx':   future_idx,
+            'target_g':     g,
+            'n_f':          float(grp['n_f'].median()),
+            'achieved_g':   _median(grp['achieved_g']),
+            'capped':       int(grp['capped'].max()),
             'valid_rate':   round(vr, 4),
             'cat_rate':     round(cr, 4),
             'beats_rate':   round(br, 4),
-            'med_error':    me,
-            'med_improve':  mi,
-            'stability':    round(sc, 4),
-            'n_seeds':      n,
+            'med_error':    _median(grp['error']),
+            'med_improve':  _median(grp['improve_ratio']),
+            'med_skill':    _median(grp['skill']),
+            'stability':    round(stability_score(vr, cr, br, cfg_ref), 4),
+            'n_seeds':      int(len(grp)),
         })
+    df_agg = pd.DataFrame(agg_records)
 
-    df_agg    = pd.DataFrame(agg_records)
-    df_raw    = pd.DataFrame(raw_records)
+    # ── Global tables (pooled across regimes), ranks exclude the oracle ────────
+    def _pool(df: pd.DataFrame, label: str) -> pd.DataFrame:
+        rows = []
+        for (method, g), grp in df.groupby(['method', 'target_g'], sort=False):
+            vr = float(grp['valid_rate'].mean())
+            cr = float(grp['cat_rate'].mean())
+            br = float(grp['beats_rate'].mean())
+            rows.append({
+                'method':      method,
+                'family':      FAMILY.get(method, 'unknown'),
+                'method_type': METHOD_TYPE[method],
+                'is_oracle':   int(IS_ORACLE[method]),
+                'regime_set':  label,
+                'target_g':    g,
+                'valid_rate':  round(vr, 4),
+                'cat_rate':    round(cr, 4),
+                'beats_rate':  round(br, 4),
+                'med_error':   _median(grp['med_error']),
+                'med_improve': _median(grp['med_improve']),
+                'med_skill':   _median(grp['med_skill']),
+                'stability':   round(stability_score(vr, cr, br, cfg_ref), 4),
+                'n_regimes':   int(grp['regime'].nunique()),
+                'capped_frac': round(float(grp['capped'].mean()), 4),
+            })
+        cols = ['method', 'family', 'method_type', 'is_oracle', 'regime_set',
+                'target_g', 'valid_rate', 'cat_rate', 'beats_rate', 'med_error',
+                'med_improve', 'med_skill', 'stability', 'n_regimes',
+                'capped_frac', 'rank']
+        if not rows:
+            return pd.DataFrame(columns=cols)
+        out = pd.DataFrame(rows)
+        out['rank'] = np.nan
+        for g, grp in out.groupby('target_g'):
+            sub = grp[grp['is_oracle'] == 0].sort_values('stability', ascending=False)
+            out.loc[sub.index, 'rank'] = np.arange(1, len(sub) + 1, dtype=float)
+        return (out.sort_values(['target_g', 'stability'], ascending=[True, False])
+                   .reset_index(drop=True)[cols])
 
-    # ── Global table (pooled across all regimes) ───────────────────────────────
-    global_rows = []
-    for (method, future_idx), grp in df_agg.groupby(['method', 'future_idx']):
-        vr = grp['valid_rate'].mean()
-        cr = grp['cat_rate'].mean()
-        br = grp['beats_rate'].mean()
-        me = grp['med_error'].median()
-        mi = grp['med_improve'].median()
-        sc = stability_score(vr, cr, br, cfg_ref)
-        global_rows.append({
-            'method':      method,
-            'family':      FAMILY.get(method, 'unknown'),
-            'method_type': METHOD_TYPE[method],
-            'future_idx':  future_idx,
-            'valid_rate':  round(vr, 4),
-            'cat_rate':    round(cr, 4),
-            'beats_rate':  round(br, 4),
-            'med_error':   me,
-            'med_improve': mi,
-            'stability':   round(sc, 4),
-        })
-    df_global = (pd.DataFrame(global_rows)
-                   .sort_values(['future_idx', 'stability'], ascending=[True, False])
-                   .reset_index(drop=True))
+    df_global         = _pool(df_agg[df_agg['holdout'] == 0], 'core')
+    df_global_holdout = _pool(df_agg[df_agg['holdout'] == 1], 'holdout')
 
-    # ── Per-regime best method ─────────────────────────────────────────────────
+    # ── Per-regime best (non-oracle) method ────────────────────────────────────
     best_rows = []
-    for (regime, future_idx), grp in df_agg.groupby(['regime', 'future_idx']):
-        # Pool across noise levels for regime recommendation
-        per_method = (grp.groupby('method')
-                        .agg(valid_rate=('valid_rate','mean'),
-                             cat_rate=('cat_rate','mean'),
-                             beats_rate=('beats_rate','mean'),
-                             med_error=('med_error','median'),
-                             med_improve=('med_improve','median'))
-                        .reset_index())
-        per_method['stability'] = per_method.apply(
-            lambda r: stability_score(r.valid_rate, r.cat_rate,
-                                      r.beats_rate, cfg_ref), axis=1)
+    for (regime, g), grp in df_agg.groupby(['regime', 'target_g'], sort=False):
+        pool = grp[grp['is_oracle'] == 0]
+        per_method = (pool.groupby('method')
+                          .agg(valid_rate=('valid_rate', 'mean'),
+                               cat_rate=('cat_rate', 'mean'),
+                               beats_rate=('beats_rate', 'mean'),
+                               med_error=('med_error', 'median'),
+                               med_improve=('med_improve', 'median'),
+                               med_skill=('med_skill', 'median'))
+                          .reset_index())
+        per_method['stability'] = [
+            stability_score(r.valid_rate, r.cat_rate, r.beats_rate, cfg_ref)
+            for r in per_method.itertuples()]
         best = per_method.sort_values('stability', ascending=False).iloc[0]
+        with_skill = per_method[per_method['med_skill'].notna()]
+        by_skill = (with_skill.sort_values('med_skill').iloc[0]
+                    if len(with_skill) else None)
+        oracle = grp[grp['is_oracle'] == 1]
         best_rows.append({
-            'regime':      regime,
-            'future_idx':  future_idx,
-            'best_method': best['method'],
-            'family':      FAMILY.get(best['method'], 'unknown'),
-            'method_type': METHOD_TYPE[best['method']],
-            'stability':   round(best['stability'], 4),
-            'valid_rate':  round(best['valid_rate'], 4),
-            'cat_rate':    round(best['cat_rate'], 4),
-            'med_error':   best['med_error'],
-            'med_improve': best['med_improve'],
+            'regime':           regime,
+            'holdout':          int(regime in HOLDOUT),
+            'target_g':         g,
+            'n_f':              float(grp['n_f'].median()),
+            'achieved_g':       _median(grp['achieved_g']),
+            'capped':           int(grp['capped'].max()),
+            'best_method':      best['method'],
+            'family':           FAMILY.get(best['method'], 'unknown'),
+            'method_type':      METHOD_TYPE[best['method']],
+            'stability':        round(float(best['stability']), 4),
+            'valid_rate':       round(float(best['valid_rate']), 4),
+            'cat_rate':         round(float(best['cat_rate']), 4),
+            'med_error':        best['med_error'],
+            'med_improve':      best['med_improve'],
+            'med_skill':        best['med_skill'],
+            'best_by_skill':    by_skill['method'] if by_skill is not None else '',
+            'best_skill':       (float(by_skill['med_skill'])
+                                 if by_skill is not None else float('nan')),
+            'oracle_med_error': _median(oracle['med_error']) if len(oracle) else float('nan'),
         })
     df_best = pd.DataFrame(best_rows)
 
-    # ── Heatmaps (one per horizon) ─────────────────────────────────────────────
+    # ── Horizon table (seed 0 for seed-dependent shapes) ───────────────────────
+    df_hz = horizon_table(regimes, obs_idx, gap_fractions, seed=0)
+
+    # ── Heatmaps (one per stratum) ─────────────────────────────────────────────
     heatmaps = {}
-    for fid in future_idxs:
-        sub = df_agg[df_agg['future_idx'] == fid]
-        hm  = (sub.groupby(['method', 'regime'])
-                  .apply(lambda g: stability_score(
-                      g['valid_rate'].mean(),
-                      g['cat_rate'].mean(),
-                      g['beats_rate'].mean(), cfg_ref))
-                  .unstack(fill_value=float('nan')))
-        heatmaps[fid] = hm
+    for g in gap_fractions:
+        sub = df_agg[df_agg['target_g'] == g]
+        pooled = (sub.groupby(['method', 'regime'])
+                     .agg(vr=('valid_rate', 'mean'),
+                          cr=('cat_rate', 'mean'),
+                          br=('beats_rate', 'mean'))
+                     .reset_index())
+        pooled['stability'] = (pooled['vr']
+                               - CFG_MOD.W_CAT * pooled['cr']
+                               + CFG_MOD.W_BEATS * pooled['br'])
+        heatmaps[g] = pooled.pivot(index='method', columns='regime',
+                                   values='stability')
 
     # ── Save ───────────────────────────────────────────────────────────────────
-    paths = {}
+    def _save(df: pd.DataFrame, name: str, **kw):
+        p = os.path.join(out_dir, name)
+        df.to_csv(p, **kw)
+        if verbose:
+            print(f'  Saved: {p}  ({len(df)} rows)')
 
-    p = os.path.join(out_dir, 'phase1_aggregated.csv')
-    df_agg.to_csv(p, index=False);  paths['aggregated'] = p
-    print(f'  Saved: {p}  ({len(df_agg)} rows)')
-
-    p = os.path.join(out_dir, 'phase1_global.csv')
-    df_global.to_csv(p, index=False);  paths['global'] = p
-    print(f'  Saved: {p}  ({len(df_global)} rows)')
-
-    p = os.path.join(out_dir, 'phase1_regime_best.csv')
-    df_best.to_csv(p, index=False);  paths['regime_best'] = p
-    print(f'  Saved: {p}  ({len(df_best)} rows)')
-
-    p = os.path.join(out_dir, 'phase1_raw_sample.csv')
-    df_raw.to_csv(p, index=False);  paths['raw_sample'] = p
-    print(f'  Saved: {p}  ({len(df_raw)} rows)')
-
-    for fid, hm in heatmaps.items():
-        p = os.path.join(out_dir, f'phase1_heatmap_n{fid}.csv')
-        hm.round(4).to_csv(p);  paths[f'heatmap_{fid}'] = p
-        print(f'  Saved: {p}')
+    _save(df_rec,            'phase1_records.csv',        index=False)
+    _save(df_agg,            'phase1_aggregated.csv',     index=False)
+    _save(df_global,         'phase1_global.csv',         index=False)
+    _save(df_global_holdout, 'phase1_global_holdout.csv', index=False)
+    _save(df_best,           'phase1_regime_best.csv',    index=False)
+    _save(df_hz,             'phase1_horizons.csv',       index=False)
+    for g, hm in heatmaps.items():
+        _save(hm.round(4), f'phase1_heatmap_g{g:g}.csv')
 
     return {
-        'aggregated':  df_agg,
-        'global':      df_global,
-        'regime_best': df_best,
-        'raw_sample':  df_raw,
-        'heatmaps':    heatmaps,
+        'records':        df_rec,
+        'aggregated':     df_agg,
+        'global':         df_global,
+        'global_holdout': df_global_holdout,
+        'regime_best':    df_best,
+        'horizons':       df_hz,
+        'heatmaps':       heatmaps,
     }

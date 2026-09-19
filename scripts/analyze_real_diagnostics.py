@@ -47,6 +47,9 @@ def main():
     res = pd.read_csv(os.path.join(RD, "real_data_results.csv"))
     synth = pd.read_csv(os.path.join("results", "phase2", "phase2_features.csv"))
     cent = synth.groupby("regime")[FEATURE_COLS].mean()
+    # Fidelity check against the STORED real-data run, which predates the
+    # redesign and used the legacy assumed asymptote 0.01 (kept explicit here;
+    # new real-data runs use config.ASSUMED_L_MODE via process_curves).
     cfg = _DEFAULT_CFG.copy(); cfg["L_inf"] = 0.01
 
     rows = []

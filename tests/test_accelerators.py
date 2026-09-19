@@ -64,7 +64,8 @@ PASS_THRESHOLDS = {
 }
 
 CFG = {
-    "L_inf":          TRUE_LIMIT,
+    "L_inf":          TRUE_LIMIT,   # assumed asymptote L_hat (= true limit here)
+    "L_true":         TRUE_LIMIT,   # for the constant_oracle comparator only
     "ridge":          CFG_MOD.RIDGE,
     "min_valid":      CFG_MOD.MIN_VALID,
     "max_valid":      CFG_MOD.MAX_VALID,

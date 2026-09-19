@@ -54,7 +54,8 @@ warnings.filterwarnings('ignore')
 
 import src.config as CFG_MOD
 from src.accelerators import METHODS
-from src.generators   import GENERATORS, REGIME_NAMES, TRUTH
+from src.generators   import REGIME_NAMES, regime_functions
+from src.asymptote    import assumed_asymptote
 
 # ── Reduced method set ─────────────────────────────────────────────────────────
 PHASE2_METHODS = [
@@ -84,9 +85,10 @@ METHOD_COLOURS = {
 FIG_DPI = 150
 
 # ── Config builder ─────────────────────────────────────────────────────────────
-def _cfg(future_idx: int) -> dict:
+def _cfg(future_idx: int, L_hat: float) -> dict:
+    """L_hat is the ASSUMED asymptote (src.asymptote); never L_true."""
     return {
-        'L_inf':          CFG_MOD.L_INF,
+        'L_inf':          float(L_hat),
         'ridge':          CFG_MOD.RIDGE,
         'min_valid':      CFG_MOD.MIN_VALID,
         'max_valid':      CFG_MOD.MAX_VALID,
@@ -280,8 +282,8 @@ def run_sweep(obs_idx_list: List[int],
                     seed * 137 + int(sigma * 1e6) % 9973 + obs_idx * 7)
 
                 for regime in REGIME_NAMES:
-                    gen      = GENERATORS[regime]
-                    truth    = TRUTH[regime]
+                    # Hidden per-(regime, seed) asymptote; methods never see L_true.
+                    gen, truth, L_true = regime_functions(regime, seed)
                     seq_full = gen(n_arr_max, rng, sigma)
 
                     # Observation window
@@ -290,14 +292,16 @@ def run_sweep(obs_idx_list: List[int],
                     idx_win  = list(range(w_start, obs_idx + 1))
                     curr_val = float(seq_full[obs_idx])
 
-                    # Feature extraction with dynamic L0 fix
-                    feats    = _extract_features(seq_win, idx_win,
-                                                 CFG_MOD.L_INF)
+                    # Assumed asymptote handed to features and methods
+                    L_hat    = assumed_asymptote(L_true, seq_win)
+                    feats    = _extract_features(seq_win, idx_win, L_hat)
                     feat_row = {
                         'regime':  regime,
                         'obs_idx': obs_idx,
                         'noise':   sigma,
                         'seed':    seed,
+                        'L_true':  L_true,
+                        'L_hat':   L_hat,
                     }
                     feat_row.update(feats)
                     feature_records.append(feat_row)
@@ -306,7 +310,7 @@ def run_sweep(obs_idx_list: List[int],
                     for fid in future_list:
                         true_val = float(truth(fid))
                         curr_err = abs(curr_val - true_val)
-                        cfg      = _cfg(fid)
+                        cfg      = _cfg(fid, L_hat)
 
                         for method in PHASE2_METHODS:
                             fn = METHODS[method]

@@ -6,7 +6,7 @@ Phase 1 figure generation.
 Six publication-quality figures:
     Fig 1  Global stability ranking (default horizon)
     Fig 2  Method x Regime heatmap  (default horizon)
-    Fig 3  Horizon sensitivity — top-15 method ranks across horizons
+    Fig 3  Stratum sensitivity — top-15 method ranks across gap strata
     Fig 4  Limit estimator vs Trajectory extrapolator split
     Fig 5  Per-regime best method summary
     Fig 6  Richardson failure profile across regimes
@@ -40,6 +40,7 @@ FAMILY_COLOURS = {
     'neville':    '#00bcd4',
     'anderson':   '#795548',
     'ensemble':   '#607d8b',
+    'trivial':    '#212121',
     'unknown':    '#cccccc',
 }
 
@@ -49,6 +50,14 @@ METHOD_TYPE_COLOURS = {
 }
 
 FIG_DPI = 150
+
+# Redesign v2: horizons are gap strata (column 'target_g'), not fixed indices.
+HORIZON_COL = 'target_g'
+
+
+def _no_oracle(df: pd.DataFrame) -> pd.DataFrame:
+    """Drop the oracle reference rows from ranking figures (tables keep them)."""
+    return df[df['is_oracle'] == 0] if 'is_oracle' in df.columns else df
 
 
 def _save(fig, path):
@@ -64,7 +73,8 @@ def _save(fig, path):
 def fig1_stability_ranking(df_global: pd.DataFrame,
                             default_horizon: int,
                             out_dir: str) -> str:
-    sub = (df_global[df_global['future_idx'] == default_horizon]
+    df_global = _no_oracle(df_global)
+    sub = (df_global[df_global[HORIZON_COL] == default_horizon]
              .sort_values('stability', ascending=True))
 
     labels   = sub['method'].tolist()
@@ -94,7 +104,7 @@ def fig1_stability_ranking(df_global: pd.DataFrame,
         'Stability Score  =  valid_rate − 2·cat_rate + 0.4·beats_rate',
         fontsize=9)
     ax.set_title(
-        f'Figure 1 — Global Stability Ranking  (horizon = {default_horizon})\n'
+        f'Figure 1 — Global Stability Ranking  (gap stratum g = {default_horizon})\n'
         'V = valid rate, C = catastrophic rate; '
         '● blue = trajectory extrapolator, ● red = limit estimator',
         fontsize=10, fontweight='bold')
@@ -153,7 +163,7 @@ def fig2_heatmap(heatmap_df: pd.DataFrame,
     plt.colorbar(im, ax=ax, label='Stability Score', shrink=0.5)
     ax.set_title(
         f'Figure 2 — Method × Regime Stability Heatmap  '
-        f'(horizon = {default_horizon})\n'
+        f'(gap stratum g = {default_horizon})\n'
         'Green = stable & accurate, Red = dangerous or invalid',
         fontsize=10, fontweight='bold')
     fig.tight_layout()
@@ -170,6 +180,7 @@ def fig3_horizon_sensitivity(df_global: pd.DataFrame,
                               horizons: list,
                               out_dir: str,
                               top_n: int = 15) -> str:
+    df_global = _no_oracle(df_global)
     if len(horizons) < 2:
         print('  Fig 3 skipped: only one horizon.')
         return ''
@@ -186,7 +197,7 @@ def fig3_horizon_sensitivity(df_global: pd.DataFrame,
 
     rank_data = {}
     for fid in horizons:
-        sub = (df_global[df_global['future_idx'] == fid]
+        sub = (df_global[df_global[HORIZON_COL] == fid]
                  .sort_values('stability', ascending=False)
                  .reset_index(drop=True))
         sub['rank'] = sub.index + 1
@@ -194,7 +205,7 @@ def fig3_horizon_sensitivity(df_global: pd.DataFrame,
 
     for ax_idx, fid in enumerate(horizons):
         ax  = axes[ax_idx]
-        sub = (df_global[df_global['future_idx'] == fid]
+        sub = (df_global[df_global[HORIZON_COL] == fid]
                  .set_index('method'))
 
         for rank_pos, method in enumerate(top_methods):
@@ -210,14 +221,14 @@ def fig3_horizon_sensitivity(df_global: pd.DataFrame,
         ax.set_yticks(range(len(top_methods)))
         ax.set_yticklabels(top_methods if ax_idx == 0 else [],
                            fontsize=7.5)
-        ax.set_title(f'Horizon = {fid}', fontsize=9, fontweight='bold')
+        ax.set_title(f'g = {fid}', fontsize=9, fontweight='bold')
         ax.axvline(0, color='black', lw=0.6)
         ax.set_xlabel('Stability', fontsize=8)
         ax.invert_yaxis()
 
     fig.suptitle(
         f'Figure 3 — Horizon Sensitivity: Top-{top_n} Methods\n'
-        'Rankings can shift substantially across prediction horizons',
+        'Rankings can shift substantially across gap strata',
         fontsize=10, fontweight='bold')
     fig.tight_layout()
     path = os.path.join(out_dir, 'figure_03_horizon_sensitivity.png')
@@ -232,13 +243,14 @@ def fig3_horizon_sensitivity(df_global: pd.DataFrame,
 def fig4_method_type(df_global: pd.DataFrame,
                      horizons: list,
                      out_dir: str) -> str:
+    df_global = _no_oracle(df_global)
     fig, axes = plt.subplots(1, len(horizons),
                               figsize=(5 * len(horizons), 6), sharey=True)
     if len(horizons) == 1:
         axes = [axes]
 
     for ax, fid in zip(axes, horizons):
-        sub = df_global[df_global['future_idx'] == fid]
+        sub = df_global[df_global[HORIZON_COL] == fid]
         for mtype, colour in METHOD_TYPE_COLOURS.items():
             vals = sub[sub['method_type'] == mtype]['stability'].dropna()
             pos  = 0 if mtype == 'limit' else 1
@@ -259,7 +271,7 @@ def fig4_method_type(df_global: pd.DataFrame,
         ax.set_xticks([0, 1])
         ax.set_xticklabels(['Limit\nEstimator', 'Trajectory\nExtrapolator'],
                            fontsize=9)
-        ax.set_title(f'Horizon = {fid}', fontsize=9, fontweight='bold')
+        ax.set_title(f'g = {fid}', fontsize=9, fontweight='bold')
         ax.set_ylabel('Stability Score', fontsize=8)
         ax.axhline(0, color='grey', lw=0.5, ls='--')
 
@@ -281,7 +293,7 @@ def fig4_method_type(df_global: pd.DataFrame,
 def fig5_regime_recommendations(df_best: pd.DataFrame,
                                  default_horizon: int,
                                  out_dir: str) -> str:
-    sub = (df_best[df_best['future_idx'] == default_horizon]
+    sub = (df_best[df_best[HORIZON_COL] == default_horizon]
              .copy()
              .reset_index(drop=True))
 
@@ -304,7 +316,7 @@ def fig5_regime_recommendations(df_best: pd.DataFrame,
     ax.set_xticklabels(regime_labels, fontsize=7.5)
     ax.set_ylabel('Best Stability Score', fontsize=9)
     ax.set_title(
-        f'Figure 5 — Per-Regime Best Method  (horizon = {default_horizon})\n'
+        f'Figure 5 — Per-Regime Best Method  (gap stratum g = {default_horizon})\n'
         'Method name shown above each bar; V = valid rate, C = cat rate',
         fontsize=10, fontweight='bold')
     ax.axhline(0, color='black', lw=0.6)
@@ -333,13 +345,14 @@ def fig6_richardson_profile(df_agg: pd.DataFrame,
     For each regime, show Richardson_1 stability vs the best-method stability.
     Highlights where Richardson is weak and which family fills the gap.
     """
+    df_agg = _no_oracle(df_agg)
     rich_rows  = []
     best_rows  = []
     regime_order = []
 
     for regime in sorted(df_agg['regime'].unique()):
         sub = df_agg[(df_agg['regime'] == regime)
-                     & (df_agg['future_idx'] == default_horizon)]
+                     & (df_agg[HORIZON_COL] == default_horizon)]
         if sub.empty:
             continue
 
@@ -387,7 +400,7 @@ def fig6_richardson_profile(df_agg: pd.DataFrame,
     ax.set_ylabel('Stability Score', fontsize=9)
     ax.set_title(
         f'Figure 6 — Richardson vs Best-Method Per Regime  '
-        f'(horizon = {default_horizon})\n'
+        f'(gap stratum g = {default_horizon})\n'
         'Regimes where bars differ most are Richardson failure conditions',
         fontsize=10, fontweight='bold')
     ax.legend(fontsize=8)

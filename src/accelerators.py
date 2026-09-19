@@ -1,7 +1,8 @@
 """
 accelerators.py
 ===============
-All 51 sequence-acceleration methods organised by family.
+All 51 sequence-acceleration methods organised by family, plus the five
+trivial comparators of redesign v2 (src/trivial.py): 56 registered methods.
 
 Each accelerator has the unified signature:
     method(seq, indices, future_x, cfg) -> float
@@ -11,6 +12,7 @@ where
     indices  : corresponding integer indices (same length as seq)
     future_x : int, the far-future index to predict
     cfg      : dict with at least keys 'ridge', 'L_inf', 'denom_tol'
+               ('L_inf' is the ASSUMED asymptote L_hat; there is no default)
 
 Return value is the scalar prediction, or np.nan on failure.
 
@@ -58,6 +60,21 @@ def _to_arrays(seq, indices):
     return np.asarray(seq, dtype=float), np.asarray(indices, dtype=float)
 
 
+def _assumed_L(cfg: dict) -> float:
+    """The ASSUMED asymptote L_hat handed to the method under cfg['L_inf'].
+
+    Redesign v2: there is no default.  The rejected design silently fell back
+    to 0.01, which was also the true shared asymptote; a missing key now
+    fails loudly.  L_hat comes from src.asymptote.assumed_asymptote(); methods
+    never receive L_true except in the labelled oracle mode.
+    """
+    try:
+        return float(cfg["L_inf"])
+    except KeyError:
+        raise KeyError("cfg['L_inf'] (the assumed asymptote L_hat) is required; "
+                       "build cfg via src.evaluation.build_cfg or set it explicitly")
+
+
 def _normalise_x(x_raw: np.ndarray, future_x: float):
     """Map x_raw to [0,1] and scale future_x accordingly."""
     x0, x1 = x_raw[0], x_raw[-1]
@@ -94,7 +111,7 @@ def accel_log_linear(seq, indices, future_x: float, cfg: dict) -> float:
     Fits log(s - L_est) vs log(n) and returns L + exp(fit) at future_x.
     """
     y, x = _to_arrays(seq, indices)
-    L_est = cfg.get("L_inf", 0.01)
+    L_est = _assumed_L(cfg)
     shifted = y - L_est
     if np.any(shifted <= 0):
         return np.nan
@@ -142,7 +159,7 @@ def _fit_richardson(x: np.ndarray, y: np.ndarray, n_terms: int,
     """
     Fit s(n) = L + c1/n^a1 [+ c2/n^a2 [+ c3/n^a3]] by nonlinear LS.
     """
-    L0 = cfg.get("L_inf", 0.01)
+    L0 = _assumed_L(cfg)
     x_safe = np.maximum(x, 1.0)
 
     if n_terms == 1:
@@ -198,7 +215,7 @@ def _richardson_fixed(seq, indices, future_x: float, cfg: dict,
                       alpha: float) -> float:
     """Richardson with fixed exponent: fits L + c/n^alpha by linear LS."""
     y, x = _to_arrays(seq, indices)
-    L0 = cfg.get("L_inf", 0.01)
+    L0 = _assumed_L(cfg)
     x_s = np.maximum(x, 1.0)
     phi = 1.0 / x_s ** alpha
     A = np.column_stack([np.ones_like(phi), phi])
@@ -246,7 +263,7 @@ def _parametric_fit(seq, indices, future_x: float, cfg: dict,
 
 def accel_single_exp_fit(seq, indices, future_x: float, cfg: dict) -> float:
     """Fit L + A*exp(-lambda*n) by nonlinear LS."""
-    L0 = cfg.get("L_inf", 0.01)
+    L0 = _assumed_L(cfg)
     def model(n, L, A, lam): return L + A * np.exp(-lam * n)
     return _parametric_fit(seq, indices, future_x, cfg, model,
                            p0=[L0, 0.5, 0.05],
@@ -255,7 +272,7 @@ def accel_single_exp_fit(seq, indices, future_x: float, cfg: dict) -> float:
 
 def accel_double_exp_fit(seq, indices, future_x: float, cfg: dict) -> float:
     """Fit L + A1*exp(-l1*n) + A2*exp(-l2*n) by nonlinear LS."""
-    L0 = cfg.get("L_inf", 0.01)
+    L0 = _assumed_L(cfg)
     def model(n, L, A1, l1, A2, l2):
         return L + A1 * np.exp(-l1 * n) + A2 * np.exp(-l2 * n)
     return _parametric_fit(seq, indices, future_x, cfg, model,
@@ -265,7 +282,7 @@ def accel_double_exp_fit(seq, indices, future_x: float, cfg: dict) -> float:
 
 def accel_rational_fit(seq, indices, future_x: float, cfg: dict) -> float:
     """Fit L + A/(1 + B*n) by nonlinear LS."""
-    L0 = cfg.get("L_inf", 0.01)
+    L0 = _assumed_L(cfg)
     def model(n, L, A, B): return L + A / (1.0 + B * n)
     return _parametric_fit(seq, indices, future_x, cfg, model,
                            p0=[L0, 0.5, 0.05],
@@ -274,7 +291,7 @@ def accel_rational_fit(seq, indices, future_x: float, cfg: dict) -> float:
 
 def accel_log_fit(seq, indices, future_x: float, cfg: dict) -> float:
     """Fit L + A/log(n + e) by nonlinear LS."""
-    L0 = cfg.get("L_inf", 0.01)
+    L0 = _assumed_L(cfg)
     def model(n, L, A): return L + A / np.log(n + np.e)
     return _parametric_fit(seq, indices, future_x, cfg, model,
                            p0=[L0, 0.5],
@@ -1083,5 +1100,12 @@ METHODS = {
     "stability_weighted": accel_stability_weighted,
     "best_shanks_wynn":   accel_best_shanks_wynn,
 }
+
+# Family 14 — Trivial comparators (redesign v2, src/trivial.py).  last_value
+# is registered as the current_value function object itself: a literal alias.
+from src.trivial import TRIVIAL_METHODS as _TRIVIAL_METHODS, ORACLE_METHODS  # noqa: E402,F401
+
+METHODS.update(_TRIVIAL_METHODS)
+METHODS["last_value"] = accel_current_value
 
 METHOD_NAMES = list(METHODS.keys())

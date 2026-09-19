@@ -51,6 +51,7 @@ import matplotlib.colors as mcolors
 
 from src.datasets     import run_real_data_experiment, DATASET_IDS
 from src.trajectories import process_curves, FEATURE_COLS
+import src.config as CFG_MOD
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 
@@ -58,7 +59,7 @@ OUT_DIR      = os.path.join('results', 'real_data')
 PHASE2_FEATS = os.path.join('results', 'phase2', 'phase2_features.csv')
 OBS_DEPTHS   = [30, 60, 90]
 WINDOW_LEN   = 60
-L_INF        = 0.01
+ASSUMED_MODE = CFG_MOD.ASSUMED_L_MODE   # redesign v2: L_hat mode; real curves have no oracle
 N_ROUNDS     = 500
 
 METHOD_COLOURS = {
@@ -310,7 +311,7 @@ def main():
     print(f'  Rounds     : {N_ROUNDS}')
     print(f'  Obs depths : {OBS_DEPTHS}')
     print(f'  Window len : {WINDOW_LEN}')
-    print(f'  L_inf      : {L_INF}')
+    print(f'  L_hat mode : {ASSUMED_MODE}')
     print(f'  Output dir : {OUT_DIR}')
 
     if not os.path.exists(PHASE2_FEATS):
@@ -333,7 +334,7 @@ def main():
         curves               = curves,
         obs_depths           = OBS_DEPTHS,
         window_len           = WINDOW_LEN,
-        L_inf                = L_INF,
+        assumed_mode         = ASSUMED_MODE,
         phase2_features_path = PHASE2_FEATS,
         future_x             = N_ROUNDS,
     )

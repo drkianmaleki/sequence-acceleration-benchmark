@@ -26,7 +26,8 @@ still correct:
 python scripts/check_dangerous.py
 ```
 
-Four large intermediate files are deliberately excluded from version
-control (see `.gitignore`): `phase2/phase2_features.csv`,
+Five large intermediate files are deliberately excluded from version
+control (see `.gitignore`): `phase1/phase1_records.csv` (per-seed records
+of the redesign-v2 main run), `phase2/phase2_features.csv`,
 `phase2/phase2_sweep_aggregated.csv`, `phase4/phase4_raw.csv`, and
 `phase5a/phase5a_raw.csv`. They are regenerated on each run.

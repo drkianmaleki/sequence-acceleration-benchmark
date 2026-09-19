@@ -125,7 +125,7 @@ def extract_features(seq: List[float], indices: List[int],
     ----------
     seq     : observed sequence values (the window)
     indices : corresponding integer indices
-    cfg     : must contain 'L_inf' and 'ridge'
+    cfg     : must contain 'L_inf' (the assumed asymptote L_hat) and 'ridge'
 
     Returns
     -------
@@ -135,7 +135,8 @@ def extract_features(seq: List[float], indices: List[int],
     """
     s   = np.asarray(seq, dtype=float)
     x   = np.asarray(indices, dtype=float)
-    L0 = min(cfg.get("L_inf", 0.01), float(np.min(s)) * 0.9)
+    # cfg["L_inf"] is the ASSUMED asymptote L_hat (redesign v2: no default)
+    L0 = min(float(cfg["L_inf"]), float(np.min(s)) * 0.9)
     out: Dict[str, float] = {}
 
     # 1. log-log slope (Richardson exponent estimate)

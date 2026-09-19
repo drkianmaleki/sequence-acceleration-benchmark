@@ -10,7 +10,7 @@ Usage (from inside sequence_accel/)
 
 Quick mode
 ----------
-    L_inf values   : [0.001, 0.010, 0.050]  (3 of 5)
+    L_hat modes    : ['zero', 'winmin', 'oracle']  (3 of 5)
     window lengths : [20, 60, 100]           (3 of 5)
     CAT_MULT       : [2, 10]                 (2 of 3)
     noise          : [0.0, 0.005]
@@ -19,7 +19,7 @@ Quick mode
 
 Full mode
 ---------
-    L_inf values   : [0.001, 0.005, 0.010, 0.020, 0.050]
+    L_hat modes    : ['zero', 'half', 'oracle', 'double', 'winmin']
     window lengths : [20, 40, 60, 80, 100]
     CAT_MULT       : [2, 5, 10]
     noise          : [0.0, 0.005, 0.020]
@@ -30,7 +30,7 @@ Output directory: results/phase5b/
 
 Key output files
 ----------------
-    phase5b_sweep1_global.csv    Cascade precision/recall vs assumed L_inf
+    phase5b_sweep1_global.csv    Cascade precision/recall vs assumed-asymptote mode
     phase5b_sweep2_global.csv    Cascade precision/recall vs window length
     phase5b_sweep3_champions.csv Regime champions at each CAT_MULT
     phase5b_sweep3_concordance.csv  Ranking concordance between CAT_MULT
@@ -60,7 +60,7 @@ def parse_args():
 
 
 QUICK = dict(
-    l_inf_values       = [0.001, 0.010, 0.050],
+    assumed_modes      = ['zero', 'winmin', 'oracle'],
     window_lengths     = [20, 60, 100],
     catmult_values     = [2.0, 10.0],
     obs_idx            = 90,
@@ -71,7 +71,7 @@ QUICK = dict(
 )
 
 FULL = dict(
-    l_inf_values       = [0.001, 0.005, 0.010, 0.020, 0.050],
+    assumed_modes      = ['zero', 'half', 'oracle', 'double', 'winmin'],
     window_lengths     = [20, 40, 60, 80, 100],
     catmult_values     = [2.0, 5.0, 10.0],
     obs_idx            = 90,
@@ -84,7 +84,7 @@ FULL = dict(
 
 def _n_evals(cfg):
     from src.accelerators import METHOD_NAMES
-    n1  = (len(cfg['l_inf_values'])   * len(cfg['noise_list'])
+    n1  = (len(cfg['assumed_modes'])   * len(cfg['noise_list'])
            * cfg['n_seeds'] * 18 * 2 * len(cfg['future_list']))
     n2  = (len(cfg['window_lengths']) * len(cfg['noise_list'])
            * cfg['n_seeds'] * 18 * 2 * len(cfg['future_list']))
@@ -105,7 +105,7 @@ def main():
     print('=' * 72)
     print(f'  PHASE 5B — Sensitivity Analysis  [{mode}]')
     print('=' * 72)
-    print(f'  Sweep 1 (L_inf):    {cfg["l_inf_values"]}')
+    print(f'  Sweep 1 (L_hat mode): {cfg["assumed_modes"]}')
     print(f'  Sweep 2 (window):   {cfg["window_lengths"]}')
     print(f'  Sweep 3 (CAT_MULT): {cfg["catmult_values"]}')
     print(f'  noise:   {cfg["noise_list"]}')
@@ -132,14 +132,14 @@ def main():
     fid  = df1g['future_idx'].max()
     sig0 = df1g['noise'].min()
     sub1 = df1g[(df1g['future_idx'] == fid) & (df1g['noise'] == sig0)]
-    print(f'\n  SWEEP 1 — Cascade metrics vs assumed L_inf '
+    print(f'\n  SWEEP 1 — Cascade metrics vs assumed-asymptote mode '
           f'(horizon={fid}, sigma={sig0}):')
-    print(f"  {'L_inf':>8} {'Precision':>10} {'Recall':>8} {'Gain':>10}  Robust?")
+    print(f"  {'mode':>8} {'Precision':>10} {'Recall':>8} {'Gain':>10}  Robust?")
     print('  ' + '-' * 55)
-    for _, row in sub1.sort_values('L_inf_assumed').iterrows():
+    for _, row in sub1.sort_values('assumed_mode').iterrows():
         prec = row['precision']
         robust = 'YES' if (math.isfinite(prec) and prec >= 0.70) else 'NO'
-        print(f"  {row['L_inf_assumed']:>8.3f} {prec:>10.3f} "
+        print(f"  {row['assumed_mode']:>8} {prec:>10.3f} "
               f"{row['recall']:>8.3f} {row['mean_gain']:>10.4f}  {robust}")
 
     # Sweep 2 — window length
