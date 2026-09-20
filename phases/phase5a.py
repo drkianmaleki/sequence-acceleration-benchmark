@@ -368,7 +368,12 @@ def run_phase5a(obs_idx_list, noise_list, gap_fractions, n_seeds,
     if verbose:
         print(f'  Saved: {p}  ({len(df):,} rows,  {sz} MB; {n_blocks} shards concatenated)')
     if not keep_shards:
-        shutil.rmtree(shard_dir, ignore_errors=True)
+        # A file-sync client can hold the folder open briefly on Windows.
+        for _ in range(5):
+            shutil.rmtree(shard_dir, ignore_errors=True)
+            if not os.path.isdir(shard_dir):
+                break
+            time.sleep(0.5)
     return df
 
 
