@@ -62,3 +62,5 @@ desktop.ini
 *.log
 tmp/
 temp/
+# Phase 5a per-block shards (concatenated into phase5a_raw.csv)
+results/phase5a/shards/

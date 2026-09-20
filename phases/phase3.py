@@ -28,9 +28,10 @@ Redesign v2
     horizon; each carries n_f, achieved_g and capped.
   * Capped cells are excluded from every pooled comparison and from the
     cross-validation; they are listed in phase3_capped_cells.csv.
-  * Selector candidates are the Phase-2 RANK_POOL (9 methods +
-    constant_assumed); the constant_oracle comparator never enters the
-    "oracle" selector (which is the best available *candidate* per cell).
+  * Selector candidates are the Phase-2 RANK_POOL (the original 9 methods;
+    Report-2 review, decision 4).  constant_assumed and constant_oracle get
+    the same treatment: evaluated in Phase 2, never a candidate, never in
+    the "oracle" selector (which is the best available *candidate* per cell).
   * The enhanced cascade's horizon-aware default uses the cell's actual
     n_f (rational_fit when n_f <= 300, single_exp_fit otherwise).
   * Training data are the core 18 regimes only (Phase 2 output).

@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import curve_fit
 
+import src.config as C
 from src.asymptote import assumed_asymptote, resolve_mode
 
 # ── Feature extraction (mirrors phase2._extract_features exactly) ──────────────
@@ -338,6 +339,40 @@ def process_curves(
 REAL_EVAL_METHODS = ['richardson_1', 'rational_fit']
 
 
+def perturb_seed(dataset: str, depth: int) -> int:
+    """Deterministic perturbation seed, crc32 of "dataset:depth" (the seeding
+    of scripts/analyze_real_diagnostics_legacy.py).  The window is a property
+    of (dataset, depth), so every target round of a window shares its draws."""
+    import zlib
+    return zlib.crc32(f"{dataset}:{depth}".encode()) % 2 ** 31
+
+
+def perturb_iqr_real(window, idxs, method: str, future_x: float, cfg: dict,
+                     seed: int, n_trials: int = None, scale: float = None) -> float:
+    """
+    Perturbation IQR of one method on one real window: n_trials evaluations
+    on windows multiplied by 1 + scale * U(-1, 1) noise (config.PERTURB_TRIALS
+    = 5, config.PERTURB_SCALE = 0.02), seeded deterministically.  The IQR of
+    the finite estimates; NaN with fewer than three.  Identical draws and
+    rule to scripts/analyze_real_diagnostics_legacy.py.
+    """
+    n_trials = C.PERTURB_TRIALS if n_trials is None else int(n_trials)
+    scale = C.PERTURB_SCALE if scale is None else float(scale)
+    window = np.asarray(window, dtype=float)
+    rng = np.random.RandomState(seed)
+    ests = []
+    for _ in range(n_trials):
+        pert = window * (1.0 + scale * rng.uniform(-1, 1, size=len(window)))
+        e = apply_accelerator(method_name=method, seq=pert, indices=idxs,
+                              future_x=future_x, cfg=cfg)
+        if np.isfinite(e):
+            ests.append(e)
+    if len(ests) < 3:
+        return float('nan')
+    q75, q25 = np.percentile(ests, [75, 25])
+    return float(q75 - q25)
+
+
 def evaluate_recorded_curves(
     curves:               dict,
     depths:               list,
@@ -357,6 +392,15 @@ def evaluate_recorded_curves(
     choice and the four trivial reference methods.  Skill is
     err / err(best of the four trivial references).
 
+    Report-2 review (decision 5): every cell also carries ``perturb_iqr``,
+    the perturbation IQR of the routed method (``selected_method``) at that
+    target round: config.PERTURB_TRIALS evaluations on 2%-perturbed windows,
+    crc32-seeded per (dataset, depth) (perturb_iqr_real).  It is a cell-level
+    quantity and is repeated on every row of the cell in df_long.  The
+    summary records the provenance of the regime centroids:
+    ``phase2_features_path``, ``phase2_features_rows`` (0 when the file was
+    absent and the mapping is 'unknown') and ``git_head``.
+
     Returns
     -------
     (df_long, df_summary)
@@ -364,14 +408,21 @@ def evaluate_recorded_curves(
         df_summary : one row per (dataset, obs_depth, target_round)
     """
     from src.accelerators import METHODS
+    from src.pipeline import git_head
     from src.trivial import (SKILL_REFERENCE_METHODS, best_reference_error,
                              skill_score)
 
     assumed_mode = resolve_mode(assumed_mode)
     regime_centroids = None
+    feat_rows = 0
+    feat_path = str(phase2_features_path) if phase2_features_path else ''
     if phase2_features_path and os.path.exists(phase2_features_path):
         df_feat = pd.read_csv(phase2_features_path)
         regime_centroids = df_feat.groupby('regime')[FEATURE_COLS].mean()
+        feat_rows = int(len(df_feat))
+    provenance = dict(phase2_features_path=feat_path,
+                      phase2_features_rows=feat_rows,
+                      git_head=git_head())
 
     cfg = _DEFAULT_CFG.copy()
     long_rows, summary_rows = [], []
@@ -419,6 +470,10 @@ def evaluate_recorded_curves(
                                 if np.isfinite(errs[m])),
                                key=lambda m: errs[m], default='')
 
+                # perturb_iqr of the routed method at this target (cell-level)
+                p_iqr = perturb_iqr_real(window, idxs, selected, fx, cfg,
+                                         perturb_seed(name, depth))
+
                 for m, p in preds.items():
                     e = errs[m]
                     long_rows.append(dict(
@@ -429,6 +484,7 @@ def evaluate_recorded_curves(
                         prediction=p, true_val=true_val, error=e,
                         current_err=current_err, ref_error=ref_err,
                         skill=(skill_score(e, ref_err) if np.isfinite(e) else float('nan')),
+                        perturb_iqr=p_iqr,
                         L_hat=L_hat, assumed_mode=assumed_mode,
                         nearest_regime=regime,
                     ))
@@ -447,8 +503,10 @@ def evaluate_recorded_curves(
                     improvement=((current_err - casc_err) / current_err
                                  if (np.isfinite(casc_err) and current_err > 1e-10)
                                  else float('nan')),
+                    perturb_iqr=p_iqr,
                     L_hat=L_hat, assumed_mode=assumed_mode, nearest_regime=regime,
                     **{f: feats.get(f, np.nan) for f in FEATURE_COLS},
+                    **provenance,
                 ))
 
     return pd.DataFrame(long_rows), pd.DataFrame(summary_rows)

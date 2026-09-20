@@ -160,8 +160,8 @@ Three defects found during internal review were corrected before the reported ru
 Two standalone scripts support the real-curve diagnostic experiment reported in the paper and provide optional summary visualizations (the submitted manuscript itself is table-only and contains no figures):
 
 ```bash
-python scripts/make_paper_figures.py        # optional: summary figures to paper_figures/
-python scripts/analyze_real_diagnostics.py  # perturb_IQR on all 18 real windows + standardized regime mapping
+python scripts/make_paper_figures.py               # optional: summary figures to paper_figures/
+python scripts/analyze_real_diagnostics_legacy.py  # LEGACY: perturb_IQR on the stored 18 real windows + standardized regime mapping
 ```
 
-`analyze_real_diagnostics.py` reproduces the stored real-data routings and predictions exactly, then reports the perturbation-diagnostic AUC and the scaling-sensitivity of the nearest-regime mapping (both negative results are reported in the paper). Extended appendix tables (S1–S9) live in the paper's Online Resource; the in-repo table generator `scripts/make_paper_tables.py` is unchanged.
+`analyze_real_diagnostics_legacy.py` verifies the stored pre-redesign real-data run (18 cells, legacy assumed asymptote 0.01): it reproduces the stored routings and predictions exactly, then reports the perturbation-diagnostic AUC and the scaling-sensitivity of the nearest-regime mapping (both negative results are reported in the paper). Under redesign v2 the real-data re-evaluation (`scripts/run_real_data.py`) writes a `perturb_iqr` of the routed method for every (dataset, depth, target) cell into `real_data_results_v2.csv`. Extended appendix tables (S1–S9) live in the paper's Online Resource; the in-repo table generator `scripts/make_paper_tables.py` is unchanged.

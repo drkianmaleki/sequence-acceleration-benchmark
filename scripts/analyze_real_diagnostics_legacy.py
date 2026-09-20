@@ -1,11 +1,21 @@
 """Real-curve diagnostic experiments reported in the paper (Section 9).
 
+LEGACY (redesign v2, Report-2 review decision 6).  This script verifies the
+STORED pre-redesign real-data run (results/real_data/real_data_results.csv,
+18 cells at target round 500) at the legacy assumed asymptote L_inf = 0.01.
+It is kept, renamed, so the numbers quoted in the submitted paper remain
+reproducible; it is not part of reproduce_all.py and does not use
+config.ASSUMED_L_MODE.  The redesign-v2 real-data path is
+scripts/run_real_data.py (evaluate_recorded_curves), whose
+real_data_results_v2.csv carries a perturb_iqr of the routed method on
+every (dataset, depth, target) cell with the same crc32 seeding rule.
+
 E1: perturb_IQR computed for all 18 (dataset, obs_depth) real windows,
     using the released pipeline's own feature/cascade/accelerator code.
 E2: nearest-regime mapping under raw and z-scored features.
 
 Run from the repository root:
-    python scripts/analyze_real_diagnostics.py
+    python scripts/analyze_real_diagnostics_legacy.py
 
 Fidelity is asserted before any new number is reported: the recomputed
 routings and predictions must reproduce results/real_data/real_data_results.csv.

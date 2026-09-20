@@ -25,12 +25,19 @@ Redesign v2
   * Core and held-out regimes are evaluated; pooled comparisons use the core
     regimes with capped cells excluded; held-out and capped blocks are
     written separately.  Every selector row carries a median skill.
+  * The evaluation grid is chunked over (obs_idx x noise) blocks
+    (evaluate_block) and can run in a process pool (run_phase5a(jobs=N),
+    scripts/run_phase5a.py --jobs N).  Blocks are independent by
+    construction (RNG streams are seeded per (obs_idx, sigma, seed); the
+    generated sequence length is fixed by the grid's largest obs_idx), so the
+    per-block shards concatenated in serial order give a phase5a_raw.csv
+    that is byte-identical for any job count.
 
 Author : Kian Maleki
 Date   : 2026-05-24 (v1), 2026-09-19 (redesign v2)
 """
 
-import os, math, warnings
+import os, math, shutil, time, warnings
 import numpy as np
 import pandas as pd
 from scipy.optimize import curve_fit
@@ -160,116 +167,208 @@ def _phase2_cascade(slope, r2):
 # 1.  MAIN EVALUATION LOOP
 # =============================================================================
 
+def evaluate_block(obs_idx, sigma, n_max, n_seeds, regimes, gap_fractions,
+                   window_len, perturb_trials, perturb_scale, dangerous):
+    """
+    One (obs_idx, sigma) block of the grid: every seed x regime x stratum x
+    method, in the serial loop order.  Self-contained so it can run in a
+    worker process: the two RNG streams are created per (obs_idx, sigma, seed)
+    exactly as the serial loop did, and n_max (the largest obs_idx of the
+    whole grid) fixes the generated sequence length so the noise draws do
+    not depend on which blocks share the process.  Returns the block's
+    records as a DataFrame.
+    """
+    regimes       = list(regimes)
+    gap_fractions = [float(g) for g in gap_fractions]
+    dangerous     = set(dangerous)
+    n_arr   = np.arange(int(n_max) + 1, dtype=float)
+    wl      = min(window_len, obs_idx)
+    records = []
+
+    for seed in range(n_seeds):
+        rng   = np.random.RandomState(
+            seed * 137 + int(sigma * 1e6) % 9973 + obs_idx * 7)
+        rng_p = np.random.RandomState(seed * 999 + obs_idx)
+
+        for regime in regimes:
+            # Hidden per-(regime, seed) asymptote; methods never see L_true.
+            gen, truth_fn, L_true = regime_functions(regime, seed)
+            seq_full = gen(n_arr, rng, sigma)
+
+            w_start  = max(0, obs_idx - wl + 1)
+            seq_win  = list(seq_full[w_start : obs_idx + 1])
+            idx_win  = list(range(w_start, obs_idx + 1))
+            curr_val = float(seq_full[obs_idx])
+            L_hat    = assumed_asymptote(L_true, seq_win)
+            slope, r2 = _cascade_features(seq_win, idx_win, L_hat)
+            hold     = is_holdout(regime)
+
+            for g in gap_fractions:
+                hm       = horizon_meta(regime, obs_idx, g, seed)
+                n_f      = hm['n_f']
+                true_val = float(truth_fn(n_f))
+                curr_err = abs(curr_val - true_val)
+                cfg      = _cfg(n_f, L_hat, L_true)
+
+                ests, errs = {}, {}
+                for method in EVAL_METHODS:
+                    try:
+                        est = float(METHODS[method](seq_win, idx_win, float(n_f), cfg))
+                    except Exception:
+                        est = float('nan')
+                    ests[method] = est
+                    errs[method] = abs(est - true_val) if _valid(est, cfg) else float('nan')
+                ref_err = best_reference_error(errs)
+
+                for method in EVAL_METHODS:
+                    est, err = ests[method], errs[method]
+                    valid = math.isfinite(err)
+                    cat   = (not valid) or (
+                        curr_err > 1e-12 and err > CFG_MOD.CAT_MULT * curr_err)
+                    p_iqr = (_perturb_iqr(seq_win, idx_win, float(n_f), method, cfg,
+                                          perturb_trials, perturb_scale, rng_p)
+                             if method in POOL else float('nan'))
+                    rec = {
+                        'regime':       regime,
+                        'is_holdout':   hold,
+                        'obs_idx':      obs_idx,
+                        'noise':        sigma,
+                        'seed':         seed,
+                        'L_true':       L_true,
+                        'L_hat':        L_hat,
+                        'method':       method,
+                        'true_val':     true_val,
+                        'estimate':     est if valid else float('nan'),
+                        'error':        err,
+                        'valid':        int(valid),
+                        'catastrophic': int(cat),
+                        'curr_err':     curr_err,
+                        'ref_error':    ref_err,
+                        'skill':        skill_score(err, ref_err) if valid else float('nan'),
+                        'perturb_iqr':  p_iqr,
+                        'is_dangerous': int(method in dangerous),
+                        'casc_slope':   slope,
+                        'casc_r2':      r2,
+                    }
+                    rec.update(hm)
+                    rec.update(method_flags(method))
+                    records.append(rec)
+
+    return pd.DataFrame(records)
+
+
+def _block_task(args):
+    """Worker entry point: evaluate one block, write its shard, return the frame."""
+    idx, obs_idx, sigma, kw, shard_path = args
+    t0 = time.perf_counter()
+    df = evaluate_block(obs_idx, sigma, **kw)
+    df.to_csv(shard_path, index=False)
+    return idx, df, time.perf_counter() - t0
+
+
+def default_jobs() -> int:
+    """cpu_count() - 1, at least 1."""
+    return max(1, (os.cpu_count() or 2) - 1)
+
+
+def _fmt_secs(t: float) -> str:
+    if t < 90:
+        return f'{t:.1f} s'
+    if t < 5400:
+        return f'{t / 60:.1f} min'
+    return f'{t / 3600:.2f} h'
+
+
 def run_phase5a(obs_idx_list, noise_list, gap_fractions, n_seeds,
                 window_len, perturb_trials, perturb_scale,
                 out_dir, dangerous, core_regimes=None, holdout_regimes=None,
-                verbose=True):
+                verbose=True, jobs=1, keep_shards=False):
+    """
+    Evaluate the grid as (obs_idx x noise) blocks, serially (jobs=1) or in a
+    process pool (jobs>1).  Each block writes a shard to out_dir/shards/; the
+    shards are concatenated in serial block order into phase5a_raw.csv, so the
+    raw table is byte-identical for any job count.  Prints the first
+    completed block's timing and the projected wall time of the evaluation
+    stage at the chosen job count (equal-cost blocks assumed; the aggregation
+    and figures that follow are not included).
+    """
     os.makedirs(out_dir, exist_ok=True)
     regimes = resolve_regimes(core_regimes, holdout_regimes, include_holdout=True)
     gap_fractions = [float(g) for g in gap_fractions]
     dangerous = set(dangerous)
+    jobs = int(jobs) if jobs else default_jobs()
 
-    n_arr   = np.arange(max(obs_idx_list) + 1, dtype=float)
-    n_total = (len(obs_idx_list) * len(noise_list) * n_seeds * len(regimes))
-    done    = 0
-    records = []
-
-    print(f'  Pool (ensembles): {len(POOL)} accelerators  '
-          f'({len(dangerous & set(POOL))} dangerous per artifact)')
-    print(f'  Reference rows  : {len(TRIVIAL_METHOD_NAMES)} trivial comparators '
-          f'(oracle labelled, never pooled)')
-    print(f'  Progress updates: every {max(1, n_total // 20)} '
-          f'regime-groups  (~5% increments)\n')
-
-    for obs_idx in obs_idx_list:
-        wl = min(window_len, obs_idx)
-
-        for sigma in noise_list:
-            for seed in range(n_seeds):
-                rng   = np.random.RandomState(
-                    seed * 137 + int(sigma * 1e6) % 9973 + obs_idx * 7)
-                rng_p = np.random.RandomState(seed * 999 + obs_idx)
-
-                for regime in regimes:
-                    # Hidden per-(regime, seed) asymptote; methods never see L_true.
-                    gen, truth_fn, L_true = regime_functions(regime, seed)
-                    seq_full = gen(n_arr, rng, sigma)
-
-                    w_start  = max(0, obs_idx - wl + 1)
-                    seq_win  = list(seq_full[w_start : obs_idx + 1])
-                    idx_win  = list(range(w_start, obs_idx + 1))
-                    curr_val = float(seq_full[obs_idx])
-                    L_hat    = assumed_asymptote(L_true, seq_win)
-                    slope, r2 = _cascade_features(seq_win, idx_win, L_hat)
-                    hold     = is_holdout(regime)
-
-                    for g in gap_fractions:
-                        hm       = horizon_meta(regime, obs_idx, g, seed)
-                        n_f      = hm['n_f']
-                        true_val = float(truth_fn(n_f))
-                        curr_err = abs(curr_val - true_val)
-                        cfg      = _cfg(n_f, L_hat, L_true)
-
-                        ests, errs = {}, {}
-                        for method in EVAL_METHODS:
-                            try:
-                                est = float(METHODS[method](seq_win, idx_win, float(n_f), cfg))
-                            except Exception:
-                                est = float('nan')
-                            ests[method] = est
-                            errs[method] = abs(est - true_val) if _valid(est, cfg) else float('nan')
-                        ref_err = best_reference_error(errs)
-
-                        for method in EVAL_METHODS:
-                            est, err = ests[method], errs[method]
-                            valid = math.isfinite(err)
-                            cat   = (not valid) or (
-                                curr_err > 1e-12 and err > CFG_MOD.CAT_MULT * curr_err)
-                            p_iqr = (_perturb_iqr(seq_win, idx_win, float(n_f), method, cfg,
-                                                  perturb_trials, perturb_scale, rng_p)
-                                     if method in POOL else float('nan'))
-                            rec = {
-                                'regime':       regime,
-                                'is_holdout':   hold,
-                                'obs_idx':      obs_idx,
-                                'noise':        sigma,
-                                'seed':         seed,
-                                'L_true':       L_true,
-                                'L_hat':        L_hat,
-                                'method':       method,
-                                'true_val':     true_val,
-                                'estimate':     est if valid else float('nan'),
-                                'error':        err,
-                                'valid':        int(valid),
-                                'catastrophic': int(cat),
-                                'curr_err':     curr_err,
-                                'ref_error':    ref_err,
-                                'skill':        skill_score(err, ref_err) if valid else float('nan'),
-                                'perturb_iqr':  p_iqr,
-                                'is_dangerous': int(method in dangerous),
-                                'casc_slope':   slope,
-                                'casc_r2':      r2,
-                            }
-                            rec.update(hm)
-                            rec.update(method_flags(method))
-                            records.append(rec)
-
-                    done += 1
-                    if verbose and done % max(1, n_total // 20) == 0:
-                        print(f'  [{done:>6}/{n_total}]  '
-                              f'{100*done/n_total:5.1f}%  '
-                              f'regime={regime:<20}  '
-                              f'obs={obs_idx}  sigma={sigma:.3f}',
-                              flush=True)
+    blocks = [(obs_idx, sigma) for obs_idx in obs_idx_list for sigma in noise_list]
+    n_blocks = len(blocks)
+    jobs = max(1, min(jobs, n_blocks))
+    cells_per_block = n_seeds * len(regimes) * len(gap_fractions)
+    kw = dict(n_max=max(obs_idx_list), n_seeds=n_seeds, regimes=regimes,
+              gap_fractions=gap_fractions, window_len=window_len,
+              perturb_trials=perturb_trials, perturb_scale=perturb_scale,
+              dangerous=sorted(dangerous))
+    shard_dir = os.path.join(out_dir, 'shards')
+    os.makedirs(shard_dir, exist_ok=True)
+    tasks = [(i, obs_idx, sigma, kw,
+              os.path.join(shard_dir, f'phase5a_raw_part{i:03d}_obs{obs_idx}_sigma{sigma:g}.csv'))
+             for i, (obs_idx, sigma) in enumerate(blocks)]
 
     if verbose:
-        print(f'\n  [{n_total}/{n_total}] 100.0%  Done.\n')
+        print(f'  Pool (ensembles): {len(POOL)} accelerators  '
+              f'({len(dangerous & set(POOL))} dangerous per artifact)')
+        print(f'  Reference rows  : {len(TRIVIAL_METHOD_NAMES)} trivial comparators '
+              f'(oracle labelled, never pooled)')
+        print(f'  Chunking        : {n_blocks} (obs_idx x noise) blocks of '
+              f'{cells_per_block:,} cells, {jobs} job(s); shards in {shard_dir}\n')
 
-    df = pd.DataFrame(records)
+    frames  = [None] * n_blocks
+    t_start = time.perf_counter()
+    n_done  = 0
+
+    def _on_result(idx, df, t_block):
+        nonlocal n_done
+        n_done += 1
+        frames[idx] = df
+        obs_idx, sigma = blocks[idx]
+        wall = time.perf_counter() - t_start
+        if verbose:
+            print(f'  [{n_done:>3}/{n_blocks}] block obs={obs_idx:<4} sigma={sigma:<6g} '
+                  f'{len(df):>8,} rows  compute {_fmt_secs(t_block):>9}  '
+                  f'wall {_fmt_secs(wall):>9}', flush=True)
+        if n_done == 1 and verbose:
+            rounds = math.ceil(n_blocks / jobs)
+            print(f'\n  FIRST CHUNK: obs={obs_idx} sigma={sigma:g}: {cells_per_block:,} cells, '
+                  f'{len(df):,} rows in {_fmt_secs(t_block)} compute '
+                  f'({1000 * t_block / cells_per_block:.1f} ms/cell), '
+                  f'{_fmt_secs(wall)} wall since start')
+            print(f'  PROJECTION  : {n_blocks} chunks / {jobs} jobs = {rounds} round(s) '
+                  f'x {_fmt_secs(wall)} = {_fmt_secs(rounds * wall)} evaluation wall time '
+                  f'at --jobs {jobs}  (serial equivalent {_fmt_secs(n_blocks * t_block)}; '
+                  f'equal-cost chunks assumed; aggregation and figures extra)\n',
+                  flush=True)
+
+    if jobs == 1:
+        for task in tasks:
+            _on_result(*_block_task(task))
+    else:
+        import multiprocessing as mp
+        ctx = mp.get_context('spawn')
+        with ctx.Pool(processes=jobs) as pool:
+            for idx, df, t_block in pool.imap_unordered(_block_task, tasks):
+                _on_result(idx, df, t_block)
+
+    if verbose:
+        print(f'\n  [{n_blocks}/{n_blocks}] 100.0%  Done in '
+              f'{_fmt_secs(time.perf_counter() - t_start)}.\n')
+
+    # Concatenate the shards in serial block order.
+    df = pd.concat(frames, ignore_index=True)
     p  = os.path.join(out_dir, 'phase5a_raw.csv')
     df.to_csv(p, index=False)
     sz = os.path.getsize(p) // 1024 // 1024
-    print(f'  Saved: {p}  ({len(df):,} rows,  {sz} MB)')
+    if verbose:
+        print(f'  Saved: {p}  ({len(df):,} rows,  {sz} MB; {n_blocks} shards concatenated)')
+    if not keep_shards:
+        shutil.rmtree(shard_dir, ignore_errors=True)
     return df
 
 
@@ -751,7 +850,7 @@ def fig_p5a_04_obs_gap(df_gap, out_dir, default_g=None):
 def run_all(obs_idx_list, noise_list, gap_fractions, n_seeds,
             window_len, perturb_trials, perturb_scale,
             out_dir, core_regimes=None, holdout_regimes=None,
-            default_g=None, verbose=True):
+            default_g=None, verbose=True, jobs=1, keep_shards=False):
     os.makedirs(out_dir, exist_ok=True)
 
     # Ordering guard: the dangerous set comes from the Phase-1 artifact.
@@ -760,7 +859,8 @@ def run_all(obs_idx_list, noise_list, gap_fractions, n_seeds,
 
     df = run_phase5a(obs_idx_list, noise_list, gap_fractions, n_seeds,
                      window_len, perturb_trials, perturb_scale, out_dir,
-                     dangerous, core_regimes, holdout_regimes, verbose)
+                     dangerous, core_regimes, holdout_regimes, verbose,
+                     jobs=jobs, keep_shards=keep_shards)
 
     print('\n  Aggregating ensemble results ...')
     (df_ens, df_comp, df_sigma, df_regime, df_abl,

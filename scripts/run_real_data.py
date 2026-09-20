@@ -19,9 +19,18 @@ Output directory: results/real_data/
 
 New files
 ---------
-    real_data_results_v2.csv    one row per (dataset, obs_depth, target_round, method)
-    real_data_summary_v2.csv    one row per (dataset, obs_depth, target_round)
+    real_data_results_v2.csv    one row per (dataset, obs_depth, target_round, method);
+                                perturb_iqr = perturbation IQR of the routed method
+                                for the cell (repeated on every row of the cell)
+    real_data_summary_v2.csv    one row per (dataset, obs_depth, target_round) with
+                                perturb_iqr and the provenance of the regime
+                                centroids (phase2_features_path,
+                                phase2_features_rows, git_head)
     figure_rd_v2_01_skill.png   cascade skill heatmaps (dataset x depth, per target)
+
+The legacy 18-cell diagnostics (perturb_IQR AUC, z-scored regime mapping) are
+verified by scripts/analyze_real_diagnostics_legacy.py against the stored
+pre-redesign run; they are not part of the v2 pipeline.
 """
 
 import os
@@ -129,6 +138,23 @@ def print_summary_v2(df_long: pd.DataFrame, df_sum: pd.DataFrame):
 
     print(f'\n  Cascade method selection: {dict(df_sum["selected_method"].value_counts())}')
     print(f'  Best trivial reference:   {dict(df_sum["ref_best_method"].value_counts())}')
+
+    piqr = df_sum['perturb_iqr']
+    print(f'\n  perturb_iqr of the routed method ({CFG_MOD.PERTURB_TRIALS} trials, '
+          f'{100 * CFG_MOD.PERTURB_SCALE:g}% perturbation, crc32 seed per (dataset, depth)): '
+          f'finite = {int(piqr.notna().sum())}/{len(piqr)}, median = {piqr.median():.5f}, '
+          f'range = [{piqr.min():.5f}, {piqr.max():.5f}]')
+    for m, sub in df_sum.groupby('selected_method'):
+        print(f'    routed {m:<14} n = {len(sub):>3}  median perturb_iqr = '
+              f'{sub["perturb_iqr"].median():.5f}')
+
+    prov = df_sum.iloc[0]
+    print(f'\n  Provenance (recorded on every summary row):')
+    print(f'    phase2_features_path = {prov["phase2_features_path"]!r}')
+    print(f'    phase2_features_rows = {int(prov["phase2_features_rows"])}'
+          + ('   (file absent: regime mapping = unknown)'
+             if int(prov["phase2_features_rows"]) == 0 else ''))
+    print(f'    git_head             = {prov["git_head"]}')
     print()
 
 

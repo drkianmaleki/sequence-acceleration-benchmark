@@ -418,10 +418,16 @@ def test_run_phase1_records_carry_horizons_and_skill(tmp_path):
     g = res["global"]
     assert set(g.regime_set) == {"core"} and "random_knots" not in set(res["aggregated"][res["aggregated"].is_holdout == 0].regime)
     assert g.loc[g.is_oracle == 1, "rank"].isna().all()
-    ranked = g[(g.is_oracle == 0) & g.med_error.notna()]
-    assert ranked["rank"].notna().all()                     # ranks by med_error
+    # ranks by med_error over the rank-eligible methods: non-oracle, finite
+    # med_error, valid_rate >= RANK_MIN_VALID (Report-2 review, decision 3)
+    eligible = (g.is_oracle == 0) & g.med_error.notna() & (g.valid_rate >= CFG_MOD.RANK_MIN_VALID)
+    assert (g.rank_eligible == eligible.astype(int)).all()
+    ranked = g[eligible]
+    assert ranked["rank"].notna().all()
+    assert g.loc[~eligible, "rank"].isna().all()            # below the floor: unranked
     for _, grp in ranked.groupby("target_g"):
         assert grp.med_error.is_monotonic_increasing        # sorted by med_error
+        assert list(grp["rank"]) == list(range(1, len(grp) + 1))
     assert "constant_oracle" in set(g.method)               # shown, unranked
     assert set(res["global_holdout"].regime_set) == {"holdout"}
     assert "constant_oracle" not in set(res["regime_best"].best_by_skill)

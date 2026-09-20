@@ -28,7 +28,10 @@ Redesign v2
     (regime_set = 'core'); held-out regimes get their own pooled rows
     (regime_set = 'holdout'); per-regime rows flag capped cells.
   * Sweep 3 ranks the 51 accelerators plus the four non-oracle trivial
-    comparators; the oracle never enters a ranking.  The dangerous flag
+    comparators; the oracle never enters a ranking.  A method takes a rank
+    only with valid_rate >= config.RANK_MIN_VALID (rank / rank_eligible
+    columns); below-floor methods are listed in phase5b_sweep3_unranked.csv
+    and the concordance is computed over ranked methods.  The dangerous flag
     comes from the Phase-1 artifact.
 
 Output files
@@ -39,6 +42,7 @@ phase5b_sweep2_global.csv      Cascade metrics vs window_len (pooled)
 phase5b_sweep2_regime.csv      Cascade metrics vs window_len (per regime)
 phase5b_sweep3_champions.csv   Regime champions at each CAT_MULT
 phase5b_sweep3_global.csv      Global stability rankings at each CAT_MULT
+phase5b_sweep3_unranked.csv    Below-floor methods (unranked, valid_rate shown)
 phase5b_sweep3_concordance.csv Kendall tau between CAT_MULT rankings
 figure_p5b_01_linf.png / figure_p5b_02_window.png / figure_p5b_03_catmult.png
 
@@ -64,9 +68,9 @@ from src.accelerators import METHODS
 from src.generators   import regime_functions
 from src.asymptote    import assumed_asymptote
 from src.dangerous    import load_dangerous
-from src.pipeline     import (ACCEL_METHODS, TRIVIAL_NON_ORACLE, exclude_capped,
-                              horizon_meta, is_holdout, method_flags,
-                              resolve_regimes)
+from src.pipeline     import (ACCEL_METHODS, TRIVIAL_NON_ORACLE, assign_ranks,
+                              exclude_capped, horizon_meta, is_holdout,
+                              method_flags, resolve_regimes, unranked_block)
 
 # ── Method sets ────────────────────────────────────────────────────────────────
 CASCADE_METHODS = [
@@ -550,20 +554,30 @@ def sweep3_catmult(catmult_values, obs_idx, window_len, noise_list,
                 })
 
     df_champ  = pd.DataFrame(champ_rows)
-    df_global = pd.DataFrame(global_rows)
+    # Global ranking per (cat_mult, g) by stability, descending; the validity
+    # floor applies (src.pipeline.assign_ranks): below-floor methods are shown
+    # unranked and collected in the unranked block.
+    df_global = assign_ranks(pd.DataFrame(global_rows), 'stability',
+                             group_cols=['cat_mult', 'target_g'], ascending=False)
+    df_global = (df_global.sort_values(['cat_mult', 'target_g', 'rank', 'method'],
+                                       na_position='last')
+                          .reset_index(drop=True))
+    df_unranked = unranked_block(df_global, ['cat_mult', 'target_g', 'method', 'is_trivial',
+                                             'valid_rate', 'cat_rate', 'stability',
+                                             'med_error', 'n_cells'])
 
-    # ── Concordance between CAT_MULT settings ─────────────────────────────────
+    # ── Concordance between CAT_MULT settings (ranked methods only) ────────────
     for g in gap_fractions:
-        sub_g = df_global[df_global['target_g'] == g]
+        sub_g = df_global[(df_global['target_g'] == g) & (df_global['rank_eligible'] == 1)]
         pairs = [(catmult_values[i], catmult_values[j])
                  for i in range(len(catmult_values))
                  for j in range(i+1, len(catmult_values))]
         for cm_a, cm_b in pairs:
             a_rank = (sub_g[sub_g['cat_mult'] == cm_a]
-                      .sort_values('stability', ascending=False)
+                      .sort_values('rank')
                       .reset_index()['method'])
             b_rank = (sub_g[sub_g['cat_mult'] == cm_b]
-                      .sort_values('stability', ascending=False)
+                      .sort_values('rank')
                       .reset_index()['method'])
             common = list(set(a_rank) & set(b_rank))
             if len(common) < 5:
@@ -596,6 +610,7 @@ def sweep3_catmult(catmult_values, obs_idx, window_len, noise_list,
 
     _save_csv(df_champ,  out_dir, 'phase5b_sweep3_champions.csv')
     _save_csv(df_global, out_dir, 'phase5b_sweep3_global.csv')
+    _save_csv(df_unranked, out_dir, 'phase5b_sweep3_unranked.csv')
     _save_csv(df_concord,out_dir, 'phase5b_sweep3_concordance.csv')
     return df_champ, df_global, df_concord
 

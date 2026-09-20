@@ -11,14 +11,21 @@ are applied in exactly one way:
     horizon_meta         (target_g, achieved_g, n_f, capped) for one cell
     exclude_capped       the capped-exclusion rule for pooled statistics
     capped_block         the separate "capped" report block with achieved_g
+    assign_ranks         rank eligibility (oracle excluded, finite metric,
+                         valid_rate >= config.RANK_MIN_VALID) and the rank
+    unranked_block       the separate block of below-floor methods
     skill_table          best-of-four trivial reference and per-method skill
     method_flags         is_trivial / is_oracle for output schemas
+    git_head             short commit hash for provenance fields
     ACCEL_METHODS        the 51 accelerators (ensemble / pool candidates)
 """
 
 import math
+import os
+import subprocess
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
+import numpy as np
 import pandas as pd
 
 import src.config as CFG_MOD
@@ -120,6 +127,80 @@ def capped_block(df: pd.DataFrame, keys: Sequence[str],
         row["n"] = int(len(grp))
         rows.append(row)
     return pd.DataFrame(rows)[cols]
+
+
+def assign_ranks(df: pd.DataFrame, metric: Optional[str] = None,
+                 group_cols: Sequence[str] = ("target_g",),
+                 ascending: bool = True,
+                 min_valid: Optional[float] = None,
+                 valid_col: str = "valid_rate") -> pd.DataFrame:
+    """
+    The rank rule for every ranked table (Report-2 review, decision 3).
+
+    A row is rank-eligible when it is not the oracle comparator, its metric
+    is finite and its valid_rate is at least config.RANK_MIN_VALID.  Ranks
+    (1 = best) are assigned within each group over the eligible rows, sorted
+    by the metric with the method name as a deterministic tie-break.  Returns
+    a copy with two columns: ``rank`` (float, NaN when ineligible) and
+    ``rank_eligible`` (int).  Ineligible rows stay in the table; the ones
+    below the validity floor are what unranked_block() reports.
+    """
+    metric = CFG_MOD.RANK_METRIC if metric is None else metric
+    floor = CFG_MOD.RANK_MIN_VALID if min_valid is None else float(min_valid)
+    out = df.copy()
+    out["rank"] = np.nan
+    if out.empty:
+        out["rank_eligible"] = pd.Series(dtype=int)
+        return out
+    eligible = out[metric].notna() & np.isfinite(out[metric].astype(float))
+    if "is_oracle" in out.columns:
+        eligible &= out["is_oracle"] == 0
+    if valid_col in out.columns:
+        eligible &= out[valid_col].notna() & (out[valid_col] >= floor)
+    out["rank_eligible"] = eligible.astype(int)
+    keys = list(group_cols) if group_cols else []
+    groups = out[eligible].groupby(keys, sort=False) if keys else [(None, out[eligible])]
+    for _, grp in groups:
+        sub = grp.sort_values([metric, "method"], ascending=[ascending, True], kind="mergesort")
+        out.loc[sub.index, "rank"] = np.arange(1, len(sub) + 1, dtype=float)
+    return out
+
+
+def unranked_block(df: pd.DataFrame, keep_cols: Optional[Sequence[str]] = None,
+                   valid_col: str = "valid_rate") -> pd.DataFrame:
+    """
+    The separate block of methods that a ranked table shows unranked because
+    they sit below the validity floor (oracle rows are excluded: they are
+    unranked by design, not by validity).  Sorted by valid_rate descending
+    within the table's groups; ``valid_rate`` is always among the columns.
+    """
+    if df.empty or "rank_eligible" not in df.columns:
+        return pd.DataFrame(columns=list(keep_cols) if keep_cols else [])
+    sub = df[df["rank_eligible"] == 0]
+    if "is_oracle" in sub.columns:
+        sub = sub[sub["is_oracle"] == 0]
+    if valid_col in sub.columns:
+        sub = sub[sub[valid_col].notna() & (sub[valid_col] < CFG_MOD.RANK_MIN_VALID)]
+    if keep_cols:
+        cols = [c for c in keep_cols if c in sub.columns]
+        sub = sub[cols]
+    sort_by = [c for c in ("target_g", "cat_mult") if c in sub.columns]
+    if valid_col in sub.columns:
+        return sub.sort_values(sort_by + [valid_col, "method"],
+                               ascending=[True] * len(sort_by) + [False, True]
+                               ).reset_index(drop=True)
+    return sub.reset_index(drop=True)
+
+
+def git_head() -> str:
+    """Short hash of the checked-out commit (\"unknown\" outside a git checkout)."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    try:
+        return subprocess.check_output(["git", "rev-parse", "--short", "HEAD"],
+                                       cwd=root, stderr=subprocess.DEVNULL
+                                       ).decode().strip()
+    except Exception:
+        return "unknown"
 
 
 def skill_table(errors: Dict[str, float]) -> Tuple[float, Dict[str, float]]:

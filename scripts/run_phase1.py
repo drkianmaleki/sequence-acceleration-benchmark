@@ -22,9 +22,12 @@ Key output files
     phase1_aggregated.csv       Per (method, regime, noise, g) stats.
     phase1_global.csv           Pooled over the core regimes, capped cells
                                 excluded, sorted by med_error; rank column
-                                excludes the oracle comparator.
+                                excludes the oracle comparator and methods
+                                below the validity floor (rank_eligible = 0).
     phase1_global_holdout.csv   The same over the held-out regimes.
     phase1_capped.csv           The capped block (achieved_g per cell).
+    phase1_unranked.csv         The unranked block: methods below the rank
+                                validity floor (valid_rate < RANK_MIN_VALID).
     phase1_regime_best.csv      best_by_skill (primary) per (regime, g).
     phase1_horizons.csv         n_f(regime, g) table with achieved-g flags.
     phase1_heatmap_g{g}.csv     Stability score matrix per stratum.
@@ -138,21 +141,44 @@ def main():
     print()
 
     # ── Top-20 global table (core regimes, sorted by median error) ─────────────
+    # Rows below the validity floor are not in this block (they are unranked
+    # and listed separately below); the oracle is shown unranked.
     df_g   = results['global']
-    df_top = df_g[df_g['target_g'] == headline_g].head(20)
+    df_h   = df_g[df_g['target_g'] == headline_g]
+    df_top = df_h[(df_h['rank_eligible'] == 1) | (df_h['is_oracle'] == 1)].head(20)
 
     print(f'\n  TOP-20 GLOBAL BY MEDIAN ERROR  (core regimes, g = {headline_g}, '
-          f'capped cells excluded, L_hat mode = {assumed_mode})')
+          f'capped cells excluded, L_hat mode = {assumed_mode}, '
+          f'rank floor valid_rate >= {CFG_MOD.RANK_MIN_VALID})')
     print('  ' + '─' * 92)
     print(f"  {'Method':<24} {'Type':<12} {'MedErr':>9} {'Skill':>7} {'Valid':>6} "
           f"{'Cat':>6} {'Stab':>7} {'Cells':>6} {'Rank':>5}")
     print('  ' + '─' * 92)
     for _, row in df_top.iterrows():
-        rank = '-' if row['is_oracle'] else f"{int(row['rank'])}"
+        rank = '-' if not row['rank_eligible'] else f"{int(row['rank'])}"
         print(f"  {row['method']:<24} {row['method_type']:<12} "
               f"{row['med_error']:>9.5f} {row['med_skill']:>7.3f} "
               f"{row['valid_rate']:>6.3f} {row['cat_rate']:>6.3f} "
               f"{row['stability']:>7.3f} {int(row['n_cells']):>6} {rank:>5}")
+    print()
+
+    # ── Unranked block: below the validity floor ───────────────────────────────
+    unr = results['unranked']
+    unr = unr[(unr['target_g'] == headline_g) & (unr['regime_set'] == 'core')]
+    print(f'  UNRANKED — BELOW VALIDITY FLOOR  (g = {headline_g}, core; '
+          f'valid_rate < {CFG_MOD.RANK_MIN_VALID}; shown, never ranked; '
+          f'{len(unr)} methods)')
+    print('  ' + '─' * 92)
+    if len(unr):
+        print(f"  {'Method':<24} {'Type':<12} {'Valid':>6} {'Cat':>6} {'MedErr':>9} "
+              f"{'Skill':>7} {'Stab':>7} {'Cells':>6}")
+        for _, row in unr.iterrows():
+            print(f"  {row['method']:<24} {row['method_type']:<12} "
+                  f"{row['valid_rate']:>6.3f} {row['cat_rate']:>6.3f} "
+                  f"{row['med_error']:>9.5f} {row['med_skill']:>7.3f} "
+                  f"{row['stability']:>7.3f} {int(row['n_cells']):>6}")
+    else:
+        print('  (none)')
     print()
 
     # ── Trivial comparators at the headline stratum ────────────────────────────

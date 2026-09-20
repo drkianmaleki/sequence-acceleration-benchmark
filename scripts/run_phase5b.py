@@ -138,6 +138,27 @@ def main():
         print(f"  CAT={row['cat_mult_a']:.0f} vs CAT={row['cat_mult_b']:.0f}"
               f"{'':>10} {row['kendall_tau']:>12.4f} {row['champion_agreement']:>13.4f}")
 
+    df3g = results['sweep3_global']
+    if len(df3g):
+        cm0 = float(sorted(df3g['cat_mult'].unique())[0])
+        sub3g = df3g[(df3g['target_g'] == g_head) & (df3g['cat_mult'] == cm0)]
+        top = sub3g[sub3g['rank_eligible'] == 1].sort_values('rank').head(5)
+        print(f'\n  SWEEP 3 — top-5 global stability ranking (g={g_head:g}, CAT_MULT={cm0:g}, '
+              f'core, capped excluded, rank floor valid_rate >= {CFG_MOD.RANK_MIN_VALID}):')
+        for _, row in top.iterrows():
+            print(f"    {int(row['rank']):>3}  {row['method']:<22} S={row['stability']:.3f}  "
+                  f"valid={row['valid_rate']:.3f}")
+        unr = sub3g[(sub3g['rank_eligible'] == 0)
+                    & (sub3g['valid_rate'] < CFG_MOD.RANK_MIN_VALID)]
+        print(f'  SWEEP 3 — unranked, below the validity floor (g={g_head:g}, '
+              f'CAT_MULT={cm0:g}; {len(unr)} methods):')
+        if len(unr):
+            for _, row in unr.sort_values('valid_rate', ascending=False).iterrows():
+                print(f"       -  {row['method']:<22} S={row['stability']:.3f}  "
+                      f"valid={row['valid_rate']:.3f}")
+        else:
+            print('       (none)')
+
     if len(df3ch):
         sub3ch = df3ch[(df3ch['target_g'] == g_head) & (df3ch['is_holdout'] == 0)]
         pivot  = sub3ch.pivot_table(index='regime', columns='cat_mult',

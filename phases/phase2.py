@@ -23,7 +23,14 @@ Redesign v2
     are keyed by target_g; capped cells are flagged and excluded from every
     pooled cross-regime statistic (phase diagram mean, correlations, rules).
   * The pool is the existing 9 methods + constant_assumed + constant_oracle.
-    The oracle is evaluation-only: it never enters a rank or a "best other".
+    The Richardson rank is computed over the original 9 methods (Report-2
+    review, decision 4); constant_assumed and constant_oracle are evaluated
+    and reported alongside every phase-diagram cell but never enter a rank,
+    a "best other" or the Phase-3 candidate set.
+  * Rank eligibility within a cell needs valid_rate >= config.RANK_MIN_VALID
+    (decision 3): a below-floor method takes no rank slot; when richardson_1
+    itself is below the floor the cell's richardson_rank is NaN and the cell
+    is flagged richardson_below_floor = 1 (listed by the runner).
   * Core 18 regimes only (this phase feeds selector / cascade training).
   * Methods receive L_hat (ASSUMED_L_MODE "zero"); L_true is hidden.
   * Every record carries L_true, L_hat, target_g, achieved_g, n_f, capped,
@@ -78,8 +85,13 @@ PHASE2_BASE_METHODS = [
 ]
 # Redesign v2: the trivial constant predictors are first-class comparators.
 PHASE2_METHODS = PHASE2_BASE_METHODS + ['constant_assumed', 'constant_oracle']
-# Ranks, "best other" and selector candidates never include the oracle.
-RANK_POOL = [m for m in PHASE2_METHODS if m not in ORACLE_METHODS]
+# Ranks, "best other" and selector candidates are the original 9 methods;
+# constant_assumed gets the oracle's treatment: evaluated, reported alongside,
+# unranked (Report-2 review, decision 4).
+RANK_POOL = list(PHASE2_BASE_METHODS)
+UNRANKED_COMPARATORS = [m for m in PHASE2_METHODS if m not in RANK_POOL]
+assert set(UNRANKED_COMPARATORS) == {'constant_assumed', 'constant_oracle'}
+assert not set(RANK_POOL) & ORACLE_METHODS
 
 METHOD_COLOURS = {
     'current_value':    '#888888',
@@ -451,30 +463,55 @@ def build_phase_diagrams(df_agg:  pd.DataFrame,
                          out_dir: str) -> pd.DataFrame:
     """
     For each (regime, obs_idx, noise) at stratum g, determine Richardson's
-    rank among the RANK_POOL (oracle excluded) and the best alternative.
-    Cells carry n_f / achieved_g / capped so pooled views can drop capped cells.
+    rank among the RANK_POOL (the original 9 methods) and the best
+    alternative.  Only methods with valid_rate >= config.RANK_MIN_VALID take
+    a rank slot; a cell where richardson_1 itself is below the floor has
+    richardson_rank / richardson_err_rank = NaN and richardson_below_floor = 1.
+    constant_assumed and constant_oracle are reported alongside (stability,
+    med_error, valid_rate) and never ranked.  Cells carry n_f / achieved_g /
+    capped so pooled views can drop capped cells.
     """
     rows = []
-    sub  = df_agg[(df_agg['target_g'] == g) & (df_agg['method'].isin(RANK_POOL))]
+    floor = CFG_MOD.RANK_MIN_VALID
+    keys  = ['regime', 'obs_idx', 'noise']
+    sub   = df_agg[(df_agg['target_g'] == g) & (df_agg['method'].isin(RANK_POOL))]
+    side  = df_agg[(df_agg['target_g'] == g) & (df_agg['method'].isin(UNRANKED_COMPARATORS))]
+    side  = side.set_index(keys + ['method']).sort_index()
 
-    for (regime, obs_idx, sigma), grp in sub.groupby(['regime', 'obs_idx', 'noise']):
-        ranked = (grp.sort_values(['stability', 'med_error'], ascending=[False, True])
-                     .reset_index(drop=True))
+    def _side(cell, method, col):
+        try:
+            return float(side.loc[cell + (method,), col])
+        except KeyError:
+            return float('nan')
+
+    for cell, grp in sub.groupby(keys):
+        regime, obs_idx, sigma = cell
+        elig = grp[grp['valid_rate'] >= floor]
+        ranked = (elig.sort_values(['stability', 'med_error', 'method'],
+                                   ascending=[False, True, True])
+                      .reset_index(drop=True))
         ranked['rank'] = ranked.index + 1
-        by_err = (grp[grp['med_error'].notna()].sort_values('med_error')
-                     .reset_index(drop=True))
+        by_err = (elig[elig['med_error'].notna()]
+                      .sort_values(['med_error', 'method'])
+                      .reset_index(drop=True))
         by_err['err_rank'] = by_err.index + 1
 
-        r1 = ranked[ranked['method'] == 'richardson_1']
+        r1_all = grp[grp['method'] == 'richardson_1']
+        r1  = ranked[ranked['method'] == 'richardson_1']
         r1e = by_err[by_err['method'] == 'richardson_1']
-        best = ranked.iloc[0]
 
-        r1_stab  = float(r1['stability'].values[0]) if not r1.empty else float('nan')
-        r1_rank  = int(r1['rank'].values[0])         if not r1.empty else 99
-        r1_erank = int(r1e['err_rank'].values[0])    if not r1e.empty else 99
-        best_sc  = float(best['stability'])
-        best_m   = str(best['method'])
-        margin   = round(best_sc - r1_stab, 4)
+        r1_stab  = float(r1_all['stability'].values[0])  if not r1_all.empty else float('nan')
+        r1_vr    = float(r1_all['valid_rate'].values[0]) if not r1_all.empty else float('nan')
+        r1_below = int((not r1_all.empty) and r1_vr < floor)
+        r1_rank  = float(r1['rank'].values[0])      if not r1.empty  else float('nan')
+        r1_erank = float(r1e['err_rank'].values[0]) if not r1e.empty else float('nan')
+        if not ranked.empty:
+            best    = ranked.iloc[0]
+            best_sc = float(best['stability'])
+            best_m  = str(best['method'])
+        else:                                   # no method above the floor
+            best_sc, best_m = float('nan'), ''
+        margin = round(best_sc - r1_stab, 4)
 
         rows.append({
             'regime':                 regime,
@@ -485,12 +522,22 @@ def build_phase_diagrams(df_agg:  pd.DataFrame,
             'achieved_g':             float(grp['achieved_g'].iloc[0]),
             'capped':                 int(grp['capped'].max()),
             'richardson_stability':   round(r1_stab, 4),
+            'richardson_valid_rate':  round(r1_vr, 4),
+            'richardson_below_floor': r1_below,
             'richardson_rank':        r1_rank,
             'richardson_err_rank':    r1_erank,
+            'n_rank_pool':            int(len(grp)),
+            'n_rank_eligible':        int(len(elig)),
             'best_method':            best_m,
             'best_stability':         round(best_sc, 4),
             'stability_margin':       margin,
             'richardson_wins':        int(r1_rank == 1),
+            # reported alongside, unranked (same treatment as the oracle)
+            'constant_assumed_stability':  _side(cell, 'constant_assumed', 'stability'),
+            'constant_assumed_med_error':  _side(cell, 'constant_assumed', 'med_error'),
+            'constant_assumed_valid_rate': _side(cell, 'constant_assumed', 'valid_rate'),
+            'constant_oracle_stability':   _side(cell, 'constant_oracle', 'stability'),
+            'constant_oracle_med_error':   _side(cell, 'constant_oracle', 'med_error'),
         })
 
     df_pd = pd.DataFrame(rows)
@@ -751,9 +798,10 @@ def fig_p2_01_phase_diagram(df_pd:   pd.DataFrame,
     axes_flat[7].axis('off')
     axes_flat[7].text(0.5, 0.5,
         f'Richardson Rank\n(1 = best of {n_methods}, {n_methods} = worst;\n'
-        'oracle comparator excluded)\n\n'
+        'constant_assumed and the oracle\ncomparator reported alongside, unranked)\n\n'
         'Green = Richardson wins\n'
-        'Red   = Richardson fails\n\n'
+        'Red   = Richardson fails\n'
+        f'Blank = below the validity floor\n(valid_rate < {CFG_MOD.RANK_MIN_VALID}, unranked)\n\n'
         'Rows    = noise level\n'
         'Columns = obs_idx\n'
         '[CAP] = some cells hit the horizon cap',

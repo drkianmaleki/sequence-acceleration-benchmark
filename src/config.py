@@ -83,6 +83,13 @@ PHASE5B_GAP_FRACTIONS = [0.5, 0.1]   # sensitivity sweeps run at these strata
 EXCLUDE_CAPPED_FROM_POOLED: bool = True   # the capped-exclusion rule
 RANK_METRIC: str = "med_error"            # sorts global tables (ascending)
 
+# Report-2 review: a method is eligible for a rank in a pooled ranked table
+# only when its pooled valid_rate is at least this floor.  Below-floor
+# methods are still shown (unranked, in a separate block with valid_rate)
+# so a rarely-valid method cannot take a rank slot on the cells where it
+# happened to return a value.  Applied by src.pipeline.assign_ranks.
+RANK_MIN_VALID: float = 0.9
+
 # Fixed-index horizons of the rejected design.  Retained only for the flaw
 # regression test; no phase evaluates at them any more.
 FUTURE_IDX_DEFAULT: int = 5000

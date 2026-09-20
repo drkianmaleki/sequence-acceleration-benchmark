@@ -27,7 +27,7 @@ Key output files
     figure_p2_01 ... figure_p2_05  Five figures at the headline stratum.
 """
 
-import os, sys, argparse
+import os, sys, math, argparse
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.dirname(_HERE)
@@ -77,7 +77,9 @@ def main():
     print(f'  seeds         : {cfg["n_seeds"]}')
     print(f'  regimes       : {len(regimes)} core (selector training data; no holdout)')
     print(f'  methods       : {len(PHASE2_METHODS)}  {PHASE2_METHODS}')
-    print(f'  rank pool     : {len(RANK_POOL)} (oracle excluded from ranks)')
+    print(f'  rank pool     : {len(RANK_POOL)} (the original 9; constant_assumed and '
+          f'constant_oracle reported alongside, unranked)')
+    print(f'  rank floor    : valid_rate >= {CFG_MOD.RANK_MIN_VALID} per cell')
     print(f'  L_hat mode    : {CFG_MOD.ASSUMED_L_MODE}')
     print(f'  total evals   : {n_evaluations(cfg):,}')
     print(f'  output dir    : {out_dir}')
@@ -116,16 +118,38 @@ def main():
     print('  PHASE 2 SUMMARY  (headline stratum g = %g)' % g_head)
     print('=' * 72)
 
-    print('\n  Richardson rank by regime (mean across obs_idx and noise; capped cells flagged):')
-    print(f"  {'Regime':<22} {'Mean rank':>10} {'Min rank':>10} {'Wins':>8} {'Capped':>8}")
-    print('  ' + '─' * 65)
+    print(f'\n  Richardson rank by regime (rank pool = {len(RANK_POOL)}; mean across '
+          f'obs_idx and noise over ranked cells; capped and below-floor cells flagged):')
+    print(f"  {'Regime':<22} {'Mean rank':>10} {'Min rank':>10} {'Wins':>8} {'Capped':>8} "
+          f"{'Below floor':>12}")
+    print('  ' + '─' * 78)
     for regime in sorted(df_pd_head['regime'].unique()):
         sub = df_pd_head[df_pd_head['regime'] == regime]
         mr = sub['richardson_rank'].mean()
         mn = sub['richardson_rank'].min()
-        wins = (sub['richardson_rank'] == 1).sum()
+        wins = int((sub['richardson_rank'] == 1).sum())
         capn = int(sub['capped'].sum())
-        print(f"  {regime:<22} {mr:>10.2f} {mn:>10d} {wins:>8d} {capn:>8d}")
+        below = int(sub['richardson_below_floor'].sum())
+        mn_s = f'{int(mn):d}' if math.isfinite(mn) else '-'
+        print(f"  {regime:<22} {mr:>10.2f} {mn_s:>10} {wins:>8d} {capn:>8d} {below:>12d}")
+
+    below = df_pd_head[df_pd_head['richardson_below_floor'] == 1]
+    print(f'\n  UNRANKED CELLS — richardson_1 below the validity floor '
+          f'(valid_rate < {CFG_MOD.RANK_MIN_VALID}; g = {g_head:g}; {len(below)} cells)')
+    print('  ' + '─' * 65)
+    if len(below):
+        print(f"  {'Regime':<22} {'obs':>5} {'sigma':>7} {'valid':>7} {'best (ranked)':<18}")
+        for _, r in below.head(20).iterrows():
+            print(f"  {r['regime']:<22} {int(r['obs_idx']):>5} {r['noise']:>7.3f} "
+                  f"{r['richardson_valid_rate']:>7.3f} {r['best_method']:<18}")
+        if len(below) > 20:
+            print(f'  ... {len(below) - 20} more (see phase2_phase_diagram_g{g_head:g}.csv)')
+    else:
+        print('  (none)')
+
+    print(f'\n  Reported alongside, unranked (g = {g_head:g}, mean over cells): '
+          f"constant_assumed S = {df_pd_head['constant_assumed_stability'].mean():.3f}, "
+          f"constant_oracle S = {df_pd_head['constant_oracle_stability'].mean():.3f}")
 
     print('\n  Top feature correlations (all regimes, vs Richardson losing margin):')
     all_c = df_corr_head[df_corr_head['regime'] == 'ALL'].sort_values(

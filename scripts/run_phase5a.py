@@ -5,6 +5,15 @@ Phase 5A entry point — Full-Pool Ensemble with Ablation.
 
     python scripts/run_phase5a.py --quick     config.PHASE5A["quick"]
     python scripts/run_phase5a.py --full      config.PHASE5A["full"]
+    python scripts/run_phase5a.py --full --jobs 4     process pool over
+                                                      (obs_idx x noise) blocks
+
+--jobs N (default cpu_count() - 1) evaluates the (obs_idx x noise) blocks of
+the grid in N worker processes; every block writes a shard and the shards are
+concatenated in serial order, so phase5a_raw.csv is byte-identical for any N.
+The first completed block prints its timing and a projection of the
+evaluation wall time at the chosen job count.  --keep-shards retains
+results/phase5a/shards/ after the concatenation.
 
 Requires the dangerous-method artifact written by scripts/derive_dangerous.py
 (the phase stops with instructions if it is missing).
@@ -20,7 +29,7 @@ if _ROOT not in sys.path:
 import src.config as CFG_MOD
 from src.dangerous import load_dangerous
 from src.pipeline import resolve_regimes
-from phases.phase5a import run_all, SELECTORS, EPS, POOL, EVAL_METHODS
+from phases.phase5a import run_all, SELECTORS, EPS, POOL, EVAL_METHODS, default_jobs
 
 
 def n_evaluations(cfg: dict) -> dict:
@@ -38,6 +47,11 @@ def parse_args():
     g.add_argument('--quick', action='store_true')
     g.add_argument('--full',  action='store_true')
     p.add_argument('--out-dir', default=os.path.join('results', 'phase5a'))
+    p.add_argument('--jobs', type=int, default=default_jobs(),
+                   help='worker processes over (obs_idx x noise) blocks '
+                        f'(default cpu_count() - 1 = {default_jobs()}; 1 = serial)')
+    p.add_argument('--keep-shards', action='store_true',
+                   help='keep the per-block shards under <out-dir>/shards/')
     return p.parse_args()
 
 
@@ -87,6 +101,9 @@ def main():
     print(f'  perturbs    : {cfg["perturb_trials"]}')
     print(f'  EPS         : {EPS}')
     print(f'  evals       : {counts["central"]:,} central + {counts["diagnostic_calls"]:,} perturbation calls')
+    n_blocks = len(cfg['obs_idx_list']) * len(cfg['noise_list'])
+    print(f'  jobs        : {args.jobs}  over {n_blocks} (obs_idx x noise) blocks'
+          + ('  (serial)' if args.jobs <= 1 else ''))
     print(f'  output dir  : {out_dir}')
     print('=' * 72 + '\n')
 
@@ -102,6 +119,8 @@ def main():
         core_regimes    = cfg['core_regimes'],
         holdout_regimes = cfg['holdout_regimes'],
         default_g       = CFG_MOD.HEADLINE_G,
+        jobs            = args.jobs,
+        keep_shards     = args.keep_shards,
     )
 
     df_comp  = results['comparison']

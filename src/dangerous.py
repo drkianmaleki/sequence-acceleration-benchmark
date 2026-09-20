@@ -15,6 +15,12 @@ config.DANGEROUS_ARTIFACT (JSON).  Phases 2-5 obtain it through
 load_dangerous(); if the artifact is missing they stop with instructions,
 which is how the pipeline ordering (Phase 1 -> derivation -> Phases 2-5)
 is enforced.  reproduce_all.py runs the derivation step explicitly.
+
+Report-2 review (decision 2): only the 51 accelerators (src.pipeline
+.ACCEL_METHODS) are eligible for the dangerous flag.  The non-oracle trivial
+comparators are still scored (and printed by the derivation script, for the
+record) but they are never written to the artifact: neither into
+``dangerous_methods`` nor into the artifact's ``table``.
 """
 
 import datetime as _dt
@@ -26,8 +32,10 @@ from typing import Dict, FrozenSet, Optional, Tuple
 import pandas as pd
 
 import src.config as CFG_MOD
+from src.pipeline import ACCEL_METHODS
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_ELIGIBLE = frozenset(ACCEL_METHODS)
 
 
 def artifact_path(path: Optional[str] = None) -> str:
@@ -41,9 +49,12 @@ def derive_dangerous(df_agg: pd.DataFrame) -> Tuple[FrozenSet[str], pd.DataFrame
     Derive the dangerous set from a Phase-1 aggregated table.
 
     Rules: core regimes only (is_holdout == 0), capped cells excluded,
-    oracle excluded, pooled over strata, noise levels and regimes.
-    Returns (dangerous, table) where table has one row per method with the
-    pooled rates, S and the flag.
+    oracle excluded, pooled over strata, noise levels and regimes.  Only the
+    51 accelerators are eligible for the flag (``eligible`` column); the
+    non-oracle trivial comparators are scored for the record but can never
+    be dangerous.
+    Returns (dangerous, table) where table has one row per scored method
+    with the pooled rates, S, eligibility and the flag.
     """
     required = {"method", "valid_rate", "cat_rate", "beats_rate", "capped",
                 "is_holdout", "is_oracle"}
@@ -60,16 +71,19 @@ def derive_dangerous(df_agg: pd.DataFrame) -> Tuple[FrozenSet[str], pd.DataFrame
         cr = float(grp["cat_rate"].mean())
         br = float(grp["beats_rate"].mean())
         s = vr - CFG_MOD.W_CAT * cr + CFG_MOD.W_BEATS * br
+        eligible = method in _ELIGIBLE
         rows.append({
             "method": method,
             "is_trivial": int(grp["is_trivial"].iloc[0]) if "is_trivial" in grp else 0,
+            "eligible": int(eligible),
             "valid_rate": round(vr, 4), "cat_rate": round(cr, 4),
             "beats_rate": round(br, 4), "stability": round(s, 4),
             "n_cells": int(len(grp)),
-            "dangerous": int(s < 0.0),
+            "dangerous": int(eligible and s < 0.0),
         })
     table = (pd.DataFrame(rows).sort_values("stability").reset_index(drop=True))
     dangerous = frozenset(table.loc[table["dangerous"] == 1, "method"])
+    assert dangerous <= _ELIGIBLE
     return dangerous, table
 
 
@@ -85,14 +99,28 @@ def _git_head() -> str:
 def write_artifact(dangerous: FrozenSet[str], table: pd.DataFrame,
                    path: Optional[str] = None, source: str = "",
                    extra: Optional[Dict] = None) -> str:
-    """Write the JSON artifact; returns its path."""
+    """Write the JSON artifact; returns its path.
+
+    Only accelerator rows go into the artifact: trivial comparators are
+    dropped from ``table`` and refused in ``dangerous``.
+    """
+    bad = sorted(set(dangerous) - _ELIGIBLE)
+    if bad:
+        raise ValueError(f"only the 51 accelerators can be dangerous; got {bad}")
+    if "eligible" in table.columns:
+        table = table[table["eligible"] == 1]
+    else:
+        table = table[table["method"].isin(_ELIGIBLE)]
     p = artifact_path(path)
     os.makedirs(os.path.dirname(p), exist_ok=True)
     payload = {
         "schema": "dangerous_methods/v2",
         "criterion": ("pooled stability S = valid_rate - W_CAT*cat_rate + "
                       "W_BEATS*beats_rate < 0 on core regimes, pooled over "
-                      "gap strata and noise, capped cells excluded, oracle excluded"),
+                      "gap strata and noise, capped cells excluded, oracle excluded; "
+                      "the 51 accelerators only (trivial comparators never eligible)"),
+        "pool": "accelerators",
+        "n_pool": len(_ELIGIBLE),
         "W_CAT": CFG_MOD.W_CAT, "W_BEATS": CFG_MOD.W_BEATS,
         "asymptote_mode": CFG_MOD.ASYMPTOTE_MODE,
         "assumed_mode": CFG_MOD.ASSUMED_L_MODE,

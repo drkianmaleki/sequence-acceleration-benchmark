@@ -9,7 +9,9 @@ set from the Phase-1 output and write the artifact that later phases read.
 
 Criterion (src/dangerous.py): pooled stability S < 0 on the core regimes,
 pooled over the gap strata and noise levels, capped cells excluded, oracle
-excluded.  Exit status 0 on success, 1 when the Phase-1 table is missing.
+excluded.  Only the 51 accelerators are eligible; the trivial comparators are
+scored and printed for the record but never written to the artifact.
+Exit status 0 on success, 1 when the Phase-1 table is missing.
 """
 
 import argparse
@@ -47,10 +49,13 @@ def main() -> int:
     dangerous, table = derive_dangerous(df)
     out = write_artifact(dangerous, table, args.out, source=os.path.abspath(src_csv))
 
+    n_elig = int(table["eligible"].sum())
+    n_triv = int((table["eligible"] == 0).sum())
     print(f"  source     : {src_csv}  ({len(df)} aggregated rows)")
     print(f"  criterion  : S < 0, core regimes, pooled over strata "
           f"{CFG_MOD.HORIZON_GAP_FRACTIONS}, capped cells excluded, oracle excluded")
-    print(f"  methods    : {len(table)} scored")
+    print(f"  methods    : {len(table)} scored = {n_elig} accelerators (eligible) "
+          f"+ {n_triv} trivial comparators (scored for the record, never in the artifact)")
     print(f"  dangerous  : {len(dangerous)}  -> {sorted(dangerous)}")
     print(f"  legacy set : {len(CFG_MOD.LEGACY_DANGEROUS_METHODS)} "
           f"(not consumed; for the record)")
@@ -62,7 +67,14 @@ def main() -> int:
     print(f"  {'method':<22} {'S':>8} {'valid':>7} {'cat':>7} {'beats':>7} {'cells':>6}  flag")
     print("  " + "-" * 70)
     for _, r in table.iterrows():
-        flag = "DANGEROUS" if r["dangerous"] else ""
+        if r["dangerous"]:
+            flag = "DANGEROUS"
+        elif not r["eligible"]:
+            flag = "trivial (scored only; not eligible, not in artifact)"
+            if r["stability"] < 0:
+                flag += "  [S < 0]"
+        else:
+            flag = ""
         print(f"  {r['method']:<22} {r['stability']:>8.4f} {r['valid_rate']:>7.3f} "
               f"{r['cat_rate']:>7.3f} {r['beats_rate']:>7.3f} {int(r['n_cells']):>6}  {flag}")
     print("=" * 72)

@@ -23,7 +23,9 @@ What changed relative to the rejected design
 * Held-out regimes are evaluated but flagged is_holdout = 1 and pooled
   separately.  Pooled cross-regime tables exclude capped cells (reported in
   a separate capped block), sort by median error, and rank non-oracle
-  methods only; every table still shows the oracle rows.
+  methods with valid_rate >= config.RANK_MIN_VALID only (below-floor methods
+  are shown unranked and listed in a separate unranked block); every table
+  still shows the oracle rows.
 * The per-regime recommendation column is best_by_skill.
 
 Outputs (out_dir)
@@ -35,6 +37,9 @@ Outputs (out_dir)
     phase1_global_holdout.csv   the same over the held-out regimes
     phase1_capped.csv           the capped block: capped (regime, g) cells
                                 with achieved_g and per-method medians
+    phase1_unranked.csv         the unranked block: methods below the
+                                validity floor (valid_rate < RANK_MIN_VALID)
+                                in the pooled tables, with valid_rate
     phase1_regime_best.csv      best_by_skill (primary) and best_by_stability
                                 per (regime, g), oracle excluded
     phase1_horizons.csv         n_f / achieved_g per (regime, g), seed 0 for
@@ -57,7 +62,8 @@ from src.accelerators import METHODS, METHOD_NAMES
 from src.asymptote import assumed_asymptote, resolve_mode
 from src.generators import HOLDOUT, regime_functions
 from src.horizons import horizon_for_gap, horizon_table
-from src.pipeline import (capped_block, exclude_capped, median_skill,
+from src.pipeline import (assign_ranks, capped_block, exclude_capped, median_skill,
+                          unranked_block,
                           method_flags, resolve_regimes)
 from src.trivial import ORACLE_METHODS, best_reference_error, skill_score
 
@@ -346,12 +352,14 @@ def run_phase1(n_seeds:        int,
 
     # ── Global tables (pooled across regimes) ──────────────────────────────────
     # Capped cells are excluded from every pooled statistic; ranks are by the
-    # configured metric (median error, ascending) over non-oracle methods.
+    # configured metric (median error, ascending) over non-oracle methods with
+    # valid_rate >= RANK_MIN_VALID (src.pipeline.assign_ranks); below-floor
+    # methods stay in the table unranked and form the unranked block.
     def _pool(df: pd.DataFrame, label: str) -> pd.DataFrame:
         cols = ['method', 'family', 'method_type', 'is_trivial', 'is_oracle',
                 'regime_set', 'target_g', 'valid_rate', 'cat_rate', 'beats_rate',
                 'med_error', 'med_improve', 'med_skill', 'stability',
-                'n_regimes', 'n_cells', 'n_capped_excluded', 'rank']
+                'n_regimes', 'n_cells', 'n_capped_excluded', 'rank', 'rank_eligible']
         if df.empty:
             return pd.DataFrame(columns=cols)
         pooled = exclude_capped(df)
@@ -395,19 +403,21 @@ def run_phase1(n_seeds:        int,
                 'n_cells':     int(len(grp)),
                 'n_capped_excluded': n_excl,
             })
-        out = pd.DataFrame(rows)
-        out['rank'] = np.nan
         metric = CFG_MOD.RANK_METRIC
-        for g, grp in out.groupby('target_g'):
-            sub = grp[(grp['is_oracle'] == 0) & grp[metric].notna()]
-            sub = sub.sort_values([metric, 'method'], ascending=True)   # deterministic ties
-            out.loc[sub.index, 'rank'] = np.arange(1, len(sub) + 1, dtype=float)
+        out = assign_ranks(pd.DataFrame(rows), metric, group_cols=['target_g'])
         return (out.sort_values(['target_g', metric, 'method'],
                                 ascending=[True, True, True], na_position='last')
                    .reset_index(drop=True)[cols])
 
     df_global         = _pool(df_agg[df_agg['is_holdout'] == 0], 'core')
     df_global_holdout = _pool(df_agg[df_agg['is_holdout'] == 1], 'holdout')
+
+    # ── Unranked block: below the validity floor (shown, never ranked) ────────
+    unranked_cols = ['regime_set', 'target_g', 'method', 'method_type', 'valid_rate',
+                     'cat_rate', 'med_error', 'med_skill', 'stability', 'n_cells']
+    df_unranked = pd.concat([unranked_block(df_global, unranked_cols),
+                             unranked_block(df_global_holdout, unranked_cols)],
+                            ignore_index=True)
 
     # ── Capped block: the cells the pooled tables left out ─────────────────────
     df_capped = capped_block(df_agg, keys=['regime', 'is_holdout', 'target_g', 'method'],
@@ -490,6 +500,7 @@ def run_phase1(n_seeds:        int,
     _save(df_global,         'phase1_global.csv',         index=False)
     _save(df_global_holdout, 'phase1_global_holdout.csv', index=False)
     _save(df_capped,         'phase1_capped.csv',         index=False)
+    _save(df_unranked,       'phase1_unranked.csv',       index=False)
     _save(df_best,           'phase1_regime_best.csv',    index=False)
     _save(df_hz,             'phase1_horizons.csv',       index=False)
     for g, hm in heatmaps.items():
@@ -501,6 +512,7 @@ def run_phase1(n_seeds:        int,
         'global':         df_global,
         'global_holdout': df_global_holdout,
         'capped':         df_capped,
+        'unranked':       df_unranked,
         'regime_best':    df_best,
         'horizons':       df_hz,
         'heatmaps':       heatmaps,
