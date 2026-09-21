@@ -21,12 +21,12 @@ absent those facts are marked "not recomputed" in FACTS.md.
 
 Fragments (paper_fragments/, one tabular per file, booktabs, no \\begin{table})
 ------------------------------------------------------------------------------
-  f01_trivial_baseline.tex          trivial comparators vs accelerators, per stratum, core | held-out
+  f01_trivial_baseline.tex          trivial baseline: win rate and skill vs predict-L_hat and vs last_value (primary), strict hindsight skill, oracle reference
   f02_ranking_g{0.5,0.1,0.02}.tex   main ranking (accelerators above the validity floor) + unranked block
   f03_skill_summary.tex             fraction of cells with median skill < 1 per family, per stratum, core | held-out
-  f04_classical_noop.tex            the 23 classical variants vs the +/-10 % band, improvement factor and skill
+  f04_classical_noop.tex            the 21 classical variants vs the +/-10 % band, in MI and in win-rate-vs-last terms, plus strict skill
   f05_sweep1_modes.tex              assumed-asymptote mode sweep, cascade rows (Phase 5b sweep 1a; clamped features)
-  f05b_sweep1_consumers_{core,holdout}.tex   sweep 1b: L_hat-consuming accelerators + constant_assumed under every mode (when the file exists)
+  f05b_sweep1_consumers_{core,holdout}.tex   sweep 1b: per L_hat consumer, median error under each mode and win rate vs last_value (g = 0.5, 0.1); constant_assumed = the value of knowing the floor
   f06_generalisation.tex            held-out vs core rank shift per method
   f07_real_data_v2.tex              real-data re-evaluation over the (depth x target) grid, with skill
   f07b_real_data_legacy18.tex       the preserved 18-cell legacy real-data run
@@ -40,6 +40,7 @@ Fragments (paper_fragments/, one tabular per file, booktabs, no \\begin{table})
   f10c_diagnostics_ensemble.tex     Phase 4 selectors with trivial references, error and skill
   f10d_diagnostics_filter.tex       Phase 4 cascade + perturb_iqr screen
   f11_capped_block.tex              every capped (regime x stratum) cell with achieved_g; depth-grid counts
+  f12_validity_by_depth.tex         validity by observation depth: every method below the 0.9 floor at some depth
 
 Macros used (defined in the paper preamble): \\meth{}, \\diag{}, \\Stab,
 \\rhoC, \\rhoV, \\TE, \\LE, \\nobs, \\nf.
@@ -63,18 +64,19 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 import src.config as C                                    # noqa: E402
-from src.pipeline import ACCEL_METHODS, TRIVIAL_NON_ORACLE   # noqa: E402
+from src.pipeline import ACCEL_METHODS, PHASE2_POOL, TRIVIAL_NON_ORACLE   # noqa: E402
 from src.trivial import ORACLE_METHODS, SKILL_REFERENCE_METHODS  # noqa: E402
 
 STRATA = list(C.HORIZON_GAP_FRACTIONS)          # [0.5, 0.1, 0.02]
 HEADLINE_G = float(C.HEADLINE_G)                # 0.1
 ORACLE = "constant_oracle"
 DEPLOYABLE = list(SKILL_REFERENCE_METHODS)      # constant_assumed, last_value, window_mean, window_min
-CLASSICAL_FAMILIES = ("shanks", "wynn_eps", "wynn_rho", "levin", "brezinski", "weniger", "anderson")
+CLASSICAL_FAMILIES = ("shanks", "wynn_eps", "wynn_rho", "levin", "brezinski", "anderson")   # 21 variants (Weniger retired, Prompt 5B)
 NOOP_BAND = (0.9, 1.1)                          # median improvement factor within +/-10 % of 1
 SKILL_NOOP = 0.9                                # median skill >= 0.9: no better than 10 % over the best trivial
+WIN_BAND = (0.4, 0.6)                           # win rate vs last_value within a coin flip +/- 0.1
 FAMILY_ORDER = ["richardson", "parametric", "pade", "neville", "baseline", "ensemble",
-                "shanks", "wynn_eps", "wynn_rho", "levin", "brezinski", "weniger", "anderson", "trivial"]
+                "shanks", "wynn_eps", "wynn_rho", "levin", "brezinski", "anderson", "trivial"]
 TYPE_MACRO = {"trajectory": r"\TE", "limit": r"\LE"}
 REAL_DATASETS = ["adult", "bank_marketing", "covertype", "higgs", "jannis", "miniboone"]
 
@@ -209,10 +211,11 @@ LEGACY = set(C.LEGACY_DANGEROUS_METHODS)
 FAM = G_CORE.drop_duplicates("method").set_index("method")["family"].to_dict()
 TYP = G_CORE.drop_duplicates("method").set_index("method")["method_type"].to_dict()
 assert set(ACCEL_METHODS) == set(G_CORE[G_CORE.is_trivial == 0].method), "accelerator roster mismatch"
-assert len(ACCEL_METHODS) == 51 and len(DEPLOYABLE) == 4
+N_ACC = len(ACCEL_METHODS)          # 49 since Prompt 5B; never hard-coded below
+assert len(DEPLOYABLE) == 4
 CLASSICAL = sorted([m for m in ACCEL_METHODS if FAM[m] in CLASSICAL_FAMILIES],
                    key=lambda m: (CLASSICAL_FAMILIES.index(FAM[m]), m))
-assert len(CLASSICAL) == 23, len(CLASSICAL)
+assert len(CLASSICAL) == 21, len(CLASSICAL)
 
 SRC_G = ["results/phase1/phase1_global.csv (core regimes, all three strata, capped cells excluded)",
          "results/phase1/phase1_global_holdout.csv (held-out regimes)"]
@@ -223,7 +226,7 @@ def dag(m):
 
 
 def rank_accelerators(G):
-    """Rank among the 51 accelerators only, per stratum, med_error ascending,
+    """Rank among the accelerators only (N_ACC), per stratum, med_error ascending,
     over rank-eligible rows (valid_rate >= RANK_MIN_VALID, finite metric)."""
     out = {}
     for g in STRATA:
@@ -246,79 +249,90 @@ def row_of(G, g, m):
 # F01  trivial baseline -- THE PAPER'S FIRST RESULT
 # ═════════════════════════════════════════════════════════════════════════════
 def f01():
-    rows = [r"Stratum / row & \multicolumn{4}{c}{core (18 regimes)} & \multicolumn{4}{c}{held-out (6 regimes)} \\",
-            r"\cmidrule(lr){2-5}\cmidrule(lr){6-9}",
-            r" & med.\ err & med.\ skill & $\rhoV$ & $\rhoC$ & med.\ err & med.\ skill & $\rhoV$ & $\rhoC$ \\",
+    """Trivial baseline, Prompt-5B layout: fixed-reference (deployable) columns
+    vs predict-L_hat (constant_assumed) and vs last_value are primary, the
+    hindsight best-of-four (strict) skill is one column, the oracle constant is
+    a labelled reference row; no pooled-median-vs-best-single-trivial count."""
+    if "win_rate_vs_assumed" not in G_CORE.columns:
+        print("  (phase1_global.csv has no win_rate_vs_* columns: f01 needs a run at or after Prompt 5A; skipped)")
+        return
+    COLS = ["med_error", "win_rate_vs_assumed", "med_skill_vs_assumed", "win_rate_vs_last", "med_skill_vs_last", "med_skill"]
+    FMT = [f4, f3, f3, f3, f3, f3]
+
+    SELF = {"constant_assumed": ("win_rate_vs_assumed", "med_skill_vs_assumed"),
+            "last_value": ("win_rate_vs_last", "med_skill_vs_last")}
+
+    def cells(r):
+        if r is None:
+            return ["--"] * len(COLS)
+        own = SELF.get(str(r["method"]), ())
+        return ["--" if c in own else f(float(r[c])) for f, c in zip(FMT, COLS)]
+
+    rows = [r"Stratum / row & \multicolumn{6}{c}{core (18 regimes)} & \multicolumn{6}{c}{held-out (6 regimes)} \\",
+            r"\cmidrule(lr){2-7}\cmidrule(lr){8-13}",
+            r" & med.\ err & win vs $\hat L$ & skill vs $\hat L$ & win vs last & skill vs last & strict skill "
+            r"& med.\ err & win vs $\hat L$ & skill vs $\hat L$ & win vs last & skill vs last & strict skill \\",
             r"\midrule"]
     for g in STRATA:
-        core = G_CORE[G_CORE.target_g == g]
-        hold = G_HOLD[G_HOLD.target_g == g]
-        rows.append(mid(rf"\textit{{$g = {gname(g)}$}}" + (r" (headline)" if g == HEADLINE_G else ""), 9))
-        dep_c = core[core.method.isin(DEPLOYABLE)].sort_values("med_error")
-        for m in dep_c.method:
-            rc, rh = row_of(G_CORE, g, m), row_of(G_HOLD, g, m)
-            rows.append(f"{mth(m)} & {f4(rc.med_error)} & {f3(rc.med_skill)} & {f3(rc.valid_rate)} & {f3(rc.cat_rate)} & "
-                        f"{f4(rh.med_error)} & {f3(rh.med_skill)} & {f3(rh.valid_rate)} & {f3(rh.cat_rate)} \\\\")
-        rc, rh = row_of(G_CORE, g, ORACLE), row_of(G_HOLD, g, ORACLE)
-        rows.append(f"{mth(ORACLE)} \\textit{{(reference, not deployable)}} & {f4(rc.med_error)} & {f3(rc.med_skill)} & "
-                    f"{f3(rc.valid_rate)} & {f3(rc.cat_rate)} & {f4(rh.med_error)} & {f3(rh.med_skill)} & "
-                    f"{f3(rh.valid_rate)} & {f3(rh.cat_rate)} \\\\")
+        rows.append(mid(rf"\textit{{$g = {gname(g)}$}}" + (r" (headline)" if g == HEADLINE_G else ""), 13))
+        labels = {"constant_assumed": r"predict $\hat L$ (\meth{constant\_assumed})", "last_value": r"\meth{last\_value}",
+                  "window_mean": r"\meth{window\_mean}", "window_min": r"\meth{window\_min}"}
+        for m in ("constant_assumed", "last_value", "window_mean", "window_min"):
+            rows.append(f"{labels[m]} & " + " & ".join(cells(row_of(G_CORE, g, m)) + cells(row_of(G_HOLD, g, m))) + r" \\")
+        rows.append(f"{mth(ORACLE)} \\textit{{(reference, not deployable)}} & " +
+                    " & ".join(cells(row_of(G_CORE, g, ORACLE)) + cells(row_of(G_HOLD, g, ORACLE))) + r" \\")
         rows.append(r"\addlinespace[2pt]")
         stats = {}
-        for label, G, RK in (("core", G_CORE, RANK_CORE), ("holdout", G_HOLD, RANK_HOLD)):
-            s = G[G.target_g == g]
-            acc = s[s.is_trivial == 0]
-            dep = s[s.method.isin(DEPLOYABLE)]
-            best_dep_m = dep.loc[dep.med_error.idxmin(), "method"]
-            best_dep_e = float(dep.med_error.min())
+        for key, G, RK in (("core", G_CORE, RANK_CORE), ("holdout", G_HOLD, RANK_HOLD)):
+            sg = G[G.target_g == g]
+            acc = sg[sg.is_trivial == 0]
             best_m = min(RK[g], key=RK[g].get)
-            stats[label] = dict(
-                best_dep_m=best_dep_m, best_dep_e=best_dep_e, best_m=best_m,
-                oracle_e=float(s[s.method == ORACLE].med_error.iloc[0]),
-                n_beat_err=int((acc.med_error < best_dep_e).sum()),
-                n_beat_skill=int((acc.med_skill < 1.0).sum()),
-                n_eligible=int(acc.rank_eligible.sum()),
-                med_e=float(acc.med_error.median()), med_s=float(acc.med_skill.median()),
-                med_v=float(acc.valid_rate.median()), med_c=float(acc.cat_rate.median()))
-        for label, key in (("core", "core"), ("held-out", "holdout")):
+            stats[key] = dict(
+                best_m=best_m, n_eligible=int(acc.rank_eligible.sum()),
+                n_win_lhat=int((acc.win_rate_vs_assumed > 0.5).sum()), n_win_last=int((acc.win_rate_vs_last > 0.5).sum()),
+                n_strict=int((acc.med_skill < 1.0).sum()),
+                med={c: float(acc[c].median()) for c in COLS},
+                oracle_e=float(sg[sg.method == ORACLE].med_error.iloc[0]),
+                lhat_e=float(sg[sg.method == "constant_assumed"].med_error.iloc[0]),
+                last_e=float(sg[sg.method == "last_value"].med_error.iloc[0]))
+        for key, label in (("core", "core"), ("holdout", "held-out")):
             m = stats[key]["best_m"]
-            rc, rh = row_of(G_CORE, g, m), row_of(G_HOLD, g, m)
-            rows.append(f"best accelerator, {label} rank 1: {mth(m)} & {f4(rc.med_error)} & {f3(rc.med_skill)} & "
-                        f"{f3(rc.valid_rate)} & {f3(rc.cat_rate)} & {f4(rh.med_error)} & {f3(rh.med_skill)} & "
-                        f"{f3(rh.valid_rate)} & {f3(rh.cat_rate)} \\\\")
+            rows.append(f"best accelerator, {label} rank 1: {mth(m)} & " +
+                        " & ".join(cells(row_of(G_CORE, g, m)) + cells(row_of(G_HOLD, g, m))) + r" \\")
         sc, sh = stats["core"], stats["holdout"]
-        rows.append(f"median accelerator (51) & {f4(sc['med_e'])} & {f3(sc['med_s'])} & {f3(sc['med_v'])} & {f3(sc['med_c'])} & "
-                    f"{f4(sh['med_e'])} & {f3(sh['med_s'])} & {f3(sh['med_v'])} & {f3(sh['med_c'])} \\\\")
-        rows.append(f"accelerators beating best deployable trivial & {sc['n_beat_err']}/51 & {sc['n_beat_skill']}/51 & & & "
-                    f"{sh['n_beat_err']}/51 & {sh['n_beat_skill']}/51 & & \\\\")
+        rows.append(f"median accelerator ({N_ACC}) & " +
+                    " & ".join([f(sc["med"][c]) for f, c in zip(FMT, COLS)] + [f(sh["med"][c]) for f, c in zip(FMT, COLS)]) + r" \\")
+        rows.append(rf"accelerators with win rate $> 0.5$ / strict skill $< 1$ & & {sc['n_win_lhat']}/{N_ACC} & & {sc['n_win_last']}/{N_ACC} & & {sc['n_strict']}/{N_ACC}"
+                    rf" & & {sh['n_win_lhat']}/{N_ACC} & & {sh['n_win_last']}/{N_ACC} & & {sh['n_strict']}/{N_ACC} \\")
         if g != STRATA[-1]:
             rows.append(r"\midrule")
         for key, label in (("core", "core"), ("holdout", "held-out")):
             st = stats[key]
             sec = "trivial baseline"
-            flt = f"target_g == {g}, regime_set == {key}, capped cells excluded (pooled table)"
             fil = SRC_G[0] if key == "core" else SRC_G[1]
-            fact(sec, f"g={gname(g)} {label}: best deployable trivial", f"{st['best_dep_m']} (med. err {st['best_dep_e']:.4f})",
-                 fil, flt, "argmin med_error over {constant_assumed, last_value, window_mean, window_min}")
-            fact(sec, f"g={gname(g)} {label}: constant_oracle med. err", f"{st['oracle_e']:.4f}", fil, flt, "med_error row of constant_oracle")
-            bm = st["best_m"]
-            bro = row_of(G_CORE if key == "core" else G_HOLD, g, bm)
-            fact(sec, f"g={gname(g)} {label}: best accelerator", f"{bm} (med. err {bro.med_error:.4f}, med. skill {bro.med_skill:.3f})",
-                 fil, flt + ", is_trivial == 0, rank_eligible == 1", "argmin med_error over rank-eligible accelerators")
-            fact(sec, f"g={gname(g)} {label}: accelerators with med. err below best deployable trivial",
-                 f"{st['n_beat_err']} of 51 ({st['n_eligible']} rank-eligible)", fil, flt + ", is_trivial == 0",
-                 "count(med_error < min med_error of the four deployable trivials)")
-            fact(sec, f"g={gname(g)} {label}: accelerators with pooled med. skill < 1", f"{st['n_beat_skill']} of 51", fil,
-                 flt + ", is_trivial == 0", "count(med_skill < 1); skill = hindsight best-of-four (strict): err / best-of-four trivial error per cell, pooled median")
-            fact(sec, f"g={gname(g)} {label}: median accelerator", f"med. err {st['med_e']:.4f}, med. skill {st['med_s']:.3f}",
-                 fil, flt + ", is_trivial == 0", "median over the 51 accelerators of med_error / med_skill")
-    frag("f01_trivial_baseline.tex", "l" + "r" * 8, rows, SRC_G,
-         "per stratum; oracle excluded from every count; skill = hindsight best-of-four (strict): err / best-of-four deployable trivial per cell",
-         "Trivial comparators vs accelerators: the four deployable trivials, the oracle constant as a labelled reference, "
-         "the rank-1 accelerator of each regime set, the median accelerator, and how many of the 51 accelerators beat the best "
-         "deployable trivial (count by pooled median error / count with pooled median skill < 1)",
-         notes=["'accelerators beating best deployable trivial': first number = med_error below the best single deployable "
-                "trivial's med_error; second = pooled med_skill < 1 (beats the per-cell best-of-four on the median cell)"])
+            flt = f"target_g == {g}, regime_set == {key}, capped cells excluded (pooled table)"
+            fact(sec, f"g={gname(g)} {label}: predict-L_hat / last_value / oracle median error",
+                 f"{st['lhat_e']:.4f} / {st['last_e']:.4f} / {st['oracle_e']:.4f}", fil, flt, "med_error rows of constant_assumed, last_value, constant_oracle")
+            bm = st["best_m"]; bro = row_of(G_CORE if key == "core" else G_HOLD, g, bm)
+            fact(sec, f"g={gname(g)} {label}: best accelerator (rank 1 by median error)",
+                 f"{bm}: med. err {bro.med_error:.4f}; win rate vs L_hat {bro.win_rate_vs_assumed:.3f}, vs last {bro.win_rate_vs_last:.3f}; "
+                 f"median skill vs L_hat {bro.med_skill_vs_assumed:.3f}, vs last {bro.med_skill_vs_last:.3f}; strict {bro.med_skill:.3f}",
+                 fil, flt + ", is_trivial == 0, rank_eligible == 1", "argmin med_error; win_rate_vs_* = mean over cells of the per-cell win rate")
+            fact(sec, f"g={gname(g)} {label}: accelerators with win rate > 0.5 vs L_hat / vs last_value; with strict pooled skill < 1",
+                 f"{st['n_win_lhat']} / {st['n_win_last']} / {st['n_strict']} of {N_ACC} ({st['n_eligible']} rank-eligible)",
+                 fil, flt + ", is_trivial == 0", "count(win_rate_vs_assumed > 0.5); count(win_rate_vs_last > 0.5); count(med_skill < 1)")
+            fact(sec, f"g={gname(g)} {label}: median accelerator",
+                 f"med. err {st['med']['med_error']:.4f}; win vs L_hat {st['med']['win_rate_vs_assumed']:.3f}, vs last {st['med']['win_rate_vs_last']:.3f}; strict skill {st['med']['med_skill']:.3f}",
+                 fil, flt + ", is_trivial == 0", f"median over the {N_ACC} accelerators")
+    frag("f01_trivial_baseline.tex", "l" + "r" * 12, rows, SRC_G,
+         "per stratum, core | held-out; win vs X = per-cell win rate (fraction of seeds with error below X's, mean over cells); "
+         "skill vs X = median over cells of the per-cell median error ratio vs X; strict skill = hindsight best-of-four "
+         "(err / best of the four deployable trivials on the same cell); the oracle is excluded from every count",
+         "Trivial baseline (the paper's first result): the deployable trivials, the oracle constant as a labelled reference, the rank-1 "
+         "and median accelerator, and how many accelerators beat predict-L_hat / last_value on more than half of their cells, "
+         "with the hindsight (strict) skill alongside",
+         notes=["the Prompt-4 'pooled median error below the best single trivial' count was dropped (Report-5A review): it "
+                "compared pooled medians of different cells; the win rates are per-cell statements"])
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -351,13 +365,13 @@ def f02():
                         f"{f4(rc.med_error)} & {f3(rc.med_skill)} & {f3(rc.cat_rate)} & {f3(rc.valid_rate)} & "
                         f"{fint(rh_rank)} & {f4(rh.med_error)} & {f3(rh.med_skill)} & {f3(rh.cat_rate)} & {f3(rh.valid_rate)} \\\\")
         frag(f"f02_ranking_g{gname(g)}.tex", "rlll" + "rrrr" + "rrrrr", rows, SRC_G,
-             f"target_g == {g}; rank r = position by med_error among the 51 accelerators with rank_eligible == 1 "
+             f"target_g == {g}; rank r = position by med_error among the {N_ACC} accelerators with rank_eligible == 1 "
              f"(valid_rate >= {C.RANK_MIN_VALID}), core and held-out ranked separately; trivial comparators not ranked "
              f"(see f01); dagger = in the dangerous artifact",
              f"Main ranking at g = {gname(g)}: rank pool = accelerators above the validity floor, core and held-out side by side, "
              f"unranked block appended")
         fact("ranking", f"g={gname(g)}: rank-eligible accelerators (core / held-out)",
-             f"{len(RANK_CORE[g])} / {len(RANK_HOLD[g])} of 51", SRC_G[0], f"target_g == {g}, is_trivial == 0",
+             f"{len(RANK_CORE[g])} / {len(RANK_HOLD[g])} of {N_ACC}", SRC_G[0], f"target_g == {g}, is_trivial == 0",
              f"count(rank_eligible == 1); floor valid_rate >= {C.RANK_MIN_VALID}")
         fact("ranking", f"g={gname(g)}: below-floor accelerators (core)", ", ".join(below.method), SRC_G[0],
              f"target_g == {g}, is_trivial == 0, rank_eligible == 0", "the unranked block")
@@ -403,7 +417,7 @@ def f03():
     acc = A[A.is_trivial == 0]
     vals = [cell(acc[(acc.target_g == g) & (acc.is_holdout == h)]) for g in STRATA for h in (0, 1)]
     rows.append(r"\midrule")
-    rows.append(r"\textbf{all accelerators} & 51 & & " + " & ".join(vals) + r" \\")
+    rows.append(rf"\textbf{{all accelerators}} & {N_ACC} & & " + " & ".join(vals) + r" \\")
     for g in STRATA:
         for h, lab in ((0, "core"), (1, "held-out")):
             sub = acc[(acc.target_g == g) & (acc.is_holdout == h)]
@@ -424,11 +438,16 @@ def f03():
 # F04  classical no-op table
 # ═════════════════════════════════════════════════════════════════════════════
 def f04():
-    head = [r"Family & Method & \multicolumn{2}{c}{$g = 0.5$} & \multicolumn{2}{c}{$g = 0.1$} & \multicolumn{2}{c}{$g = 0.02$} \\",
-            r"\cmidrule(lr){3-4}\cmidrule(lr){5-6}\cmidrule(lr){7-8}",
-            r" & & MI & med.\ skill & MI & med.\ skill & MI & med.\ skill \\", r"\midrule"]
+    """Classical no-op table on the 21 classical variants: MI vs the +/-10 % band and,
+    in win-rate terms, the per-cell win rate vs last_value within 0.5 +/- 0.1."""
+    has_win = "win_rate_vs_last" in G_CORE.columns
+    per = 3 if has_win else 2
+    head = [r"Family & Method & " + " & ".join(rf"\multicolumn{{{per}}}{{c}}{{$g = {gname(g)}$}}" for g in STRATA) + r" \\",
+            "".join(rf"\cmidrule(lr){{{3 + per * i}-{2 + per * (i + 1)}}}" for i in range(len(STRATA))),
+            r" & & " + " & ".join((r"MI & win vs last & med.\ skill" if has_win else r"MI & med.\ skill") for _ in STRATA) + r" \\", r"\midrule"]
     rows = list(head)
     inband = {g: 0 for g in STRATA}
+    wband = {g: 0 for g in STRATA}
     snoop = {g: 0 for g in STRATA}
     last_fam = None
     for m in CLASSICAL:
@@ -442,26 +461,39 @@ def f04():
             inband[g] += int(ib)
             snoop[g] += int(sn)
             cells.append((r"\textbf{" + f3(mi) + "}") if ib else f3(mi))
+            if has_win:
+                w = float(r.win_rate_vs_last)
+                wb = math.isfinite(w) and WIN_BAND[0] <= w <= WIN_BAND[1]
+                wband[g] += int(wb)
+                cells.append((r"\textbf{" + f3(w) + "}") if wb else f3(w))
             cells.append((r"\textbf{" + f3(sk) + "}") if sn else f3(sk))
         if last_fam is not None and fam != last_fam:
             rows.append(r"\addlinespace[2pt]")
         last_fam = fam
         rows.append(f"{esc(fam)} & {dag(m)}{mth(m)} & " + " & ".join(cells) + r" \\")
+    n = len(CLASSICAL)
     rows.append(r"\midrule")
     rows.append(r"\multicolumn{2}{l}{in the $\pm 10\%$ band (MI in $[0.9, 1.1]$)} & " +
-                " & ".join(f"{inband[g]}/23 & " for g in STRATA).rstrip(" &") + r" \\")
+                " & ".join(f"{inband[g]}/{n}" + " & " * (per - 1) for g in STRATA) + r" \\")
+    if has_win:
+        rows.append(r"\multicolumn{2}{l}{win rate vs last in $[0.4, 0.6]$ (coin flip)} & " +
+                    " & ".join(f" & {wband[g]}/{n} & " for g in STRATA) + r" \\")
     rows.append(r"\multicolumn{2}{l}{median skill $\geq 0.9$} & " +
-                " & ".join(f" & {snoop[g]}/23" for g in STRATA) + r" \\")
+                " & ".join(" & " * (per - 1) + f"{snoop[g]}/{n}" for g in STRATA) + r" \\")
     for g in STRATA:
-        fact("classical no-op", f"g={gname(g)} core: classical variants with MI in [0.9, 1.1]", f"{inband[g]} of 23", SRC_G[0],
+        fact("classical no-op", f"g={gname(g)} core: classical variants with MI in [0.9, 1.1]", f"{inband[g]} of {n}", SRC_G[0],
              f"target_g == {g}, family in {CLASSICAL_FAMILIES}", "count(0.9 <= med_improve <= 1.1); MI = median of curr_err / err")
-        fact("classical no-op", f"g={gname(g)} core: classical variants with median skill >= 0.9", f"{snoop[g]} of 23", SRC_G[0],
+        if has_win:
+            fact("classical no-op", f"g={gname(g)} core: classical variants with win rate vs last_value in [0.4, 0.6]", f"{wband[g]} of {n}", SRC_G[0],
+                 f"target_g == {g}, family in {CLASSICAL_FAMILIES}", "count(0.4 <= win_rate_vs_last <= 0.6); a no-op wins against the last value about half the time")
+        fact("classical no-op", f"g={gname(g)} core: classical variants with median skill >= 0.9", f"{snoop[g]} of {n}", SRC_G[0],
              f"target_g == {g}, family in {CLASSICAL_FAMILIES}", "count(med_skill >= 0.9)")
-    frag("f04_classical_noop.tex", "ll" + "rr" * 3, rows, [SRC_G[0]],
-         "core regimes, capped excluded; the 23 classical variants = families shanks, wynn_eps, wynn_rho, levin, brezinski, "
-         "weniger, anderson; MI = med_improve (median over seeds and cells of current-value error / method error); "
-         "bold MI = inside the +/-10 % band; bold skill = median skill >= 0.9",
-         "Classical no-op table by stratum: median improvement factor vs the +/-10 % band, and median skill")
+    frag("f04_classical_noop.tex", "ll" + "r" * (per * len(STRATA)), rows, [SRC_G[0]],
+         f"core regimes, capped excluded; the {n} classical variants = families shanks, wynn_eps, wynn_rho, levin, brezinski, anderson "
+         "(the Weniger pair was retired: numerically identical to levin_t1/t2); MI = med_improve (median over seeds and cells of "
+         "current-value error / method error), bold = inside the +/-10 % band; win vs last = per-cell win rate vs last_value, bold = "
+         "inside [0.4, 0.6]; med. skill = hindsight best-of-four (strict), bold = >= 0.9",
+         "Classical no-op table by stratum: median improvement factor vs the +/-10 % band, win rate vs the last value, and strict skill")
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -516,6 +548,10 @@ def f05():
 # F06  held-out vs core generalisation
 # ═════════════════════════════════════════════════════════════════════════════
 def f05b():
+    """Sweep 1b: per L_hat-consuming method, median error under each mode and the
+    win rate vs last_value (the mode-invariant reference), at g = 0.1 and 0.5,
+    core and held-out; constant_assumed's own error per mode = the value of
+    knowing the floor."""
     path = os.path.join(RES, "phase5b", "phase5b_sweep1_consumers.csv")
     if not os.path.exists(path):
         print("  (phase5b_sweep1_consumers.csv absent: fragment f05b skipped; produced by a run at or after Prompt 5A)")
@@ -523,28 +559,53 @@ def f05b():
     Cn = pd.read_csv(path)
     from phases.phase5b import SWEEP1_METHODS
     modes = [m for m in C.ASSUMED_L_MODES if m in set(Cn.assumed_mode)]
-    gs = [g for g in STRATA if g in set(Cn.target_g)]
-    head = [r"Method & mode & " + " & ".join(rf"\multicolumn{{4}}{{c}}{{$g = {gname(g)}$}}" for g in gs) + r" \\",
-            "".join(rf"\cmidrule(lr){{{3 + 4 * i}-{6 + 4 * i}}}" for i in range(len(gs))),
-            r" & & " + " & ".join(r"med.\ err & skill & win/assumed & $\rhoC$" for _ in gs) + r" \\", r"\midrule"]
+    gs = [g for g in (0.5, 0.1) if g in set(Cn.target_g)]
+    head = [r"Method & row & " + " & ".join(rf"\multicolumn{{{len(modes)}}}{{c}}{{$g = {gname(g)}$}}" for g in gs) + r" \\",
+            "".join(rf"\cmidrule(lr){{{3 + len(modes) * i}-{2 + len(modes) * (i + 1)}}}" for i in range(len(gs))),
+            r" & & " + " & ".join(" & ".join(esc(m) for m in modes) for _ in gs) + r" \\", r"\midrule"]
     for rs in ("core", "holdout"):
         rows = list(head)
         for m in SWEEP1_METHODS:
-            for i, mode in enumerate(modes):
-                cells = []
-                for g in gs:
+            e_cells, w_cells = [], []
+            for g in gs:
+                for mode in modes:
                     r = Cn[(Cn.method == m) & (Cn.assumed_mode == mode) & (Cn.regime_set == rs) & (Cn.target_g == g)]
                     if len(r):
                         r = r.iloc[0]
-                        cells += [f4(float(r.med_error)), f3(float(r.med_skill)), f3(float(r.win_rate_vs_assumed)), f3(float(r.cat_rate))]
+                        e_cells.append(f4(float(r.med_error)))
+                        w_cells.append("--" if m == "last_value" else f3(float(r.win_rate_vs_last)))
                     else:
-                        cells += ["--"] * 4
-                rows.append(f"{mth(m) if i == 0 else ''} & {esc(mode)} & " + " & ".join(cells) + r" \\")
+                        e_cells.append("--"); w_cells.append("--")
+            label = (r"predict $\hat L$ (\meth{constant\_assumed}) -- the value of knowing the floor" if m == "constant_assumed" else mth(m))
+            rows.append(f"{label} & med.\\ err & " + " & ".join(e_cells) + r" \\")
+            rows.append(r" & win vs last & " + " & ".join(w_cells) + r" \\")
             rows.append(r"\addlinespace[1pt]")
-        frag(f"f05b_sweep1_consumers_{rs}.tex", "ll" + "rrrr" * len(gs), rows,
+        frag(f"f05b_sweep1_consumers_{rs}.tex", "ll" + "r" * (len(modes) * len(gs)), rows,
              ["results/phase5b/phase5b_sweep1_consumers.csv (Phase 5b sweep 1b; capped excluded; pooled over noise)"],
-             f"regime_set == {rs}; skill = hindsight best-of-four (strict); win/assumed = win rate vs constant_assumed under the same mode",
-             f"Assumed-asymptote sweep 1b, {rs} regimes: the L_hat-consuming accelerators and constant_assumed under every mode")
+             f"regime_set == {rs}; med. err = median error of the method under that L_hat mode; win vs last = per-record win rate "
+             "against last_value, whose prediction does not depend on the mode (the mode-invariant reference); the vs-L_hat columns "
+             "stay in the CSV but are not the headline comparison because their reference changes with the mode",
+             f"Assumed-asymptote sweep 1b, {rs} regimes: the L_hat-consuming accelerators under every mode, and the value of knowing the floor")
+    # L_hat-invariance facts: max change in median error across modes per consumer
+    for rs in ("core", "holdout"):
+        for g in gs:
+            parts = []
+            for m in SWEEP1_METHODS:
+                sub_ = Cn[(Cn.method == m) & (Cn.regime_set == rs) & (Cn.target_g == g)]
+                if len(sub_) >= 2:
+                    lo, hi = float(sub_.med_error.min()), float(sub_.med_error.max())
+                    parts.append(f"{m} {hi - lo:.5f} ({100 * (hi - lo) / lo if lo > 0 else float('nan'):.1f} %)")
+            fact("sweep 1b (L_hat invariance)", f"max change of median error across the five L_hat modes, g={gname(g)}, {rs}",
+                 "; ".join(parts), "results/phase5b/phase5b_sweep1_consumers.csv", f"regime_set == {rs}, target_g == {g}",
+                 "max over modes - min over modes of med_error per method (relative to the min)")
+            ca = Cn[(Cn.method == "constant_assumed") & (Cn.regime_set == rs) & (Cn.target_g == g)]
+            fact("sweep 1b (L_hat invariance)", f"the value of knowing the floor: constant_assumed median error per mode, g={gname(g)}, {rs}",
+                 ", ".join(f"{r.assumed_mode} {r.med_error:.4f}" for _, r in ca.iterrows()),
+                 "results/phase5b/phase5b_sweep1_consumers.csv", f"method == constant_assumed, regime_set == {rs}, target_g == {g}", "med_error per assumed_mode")
+            best = Cn[(Cn.regime_set == rs) & (Cn.target_g == g) & (Cn.method != "constant_assumed")]
+            fact("sweep 1b (L_hat invariance)", f"win rate vs last_value per consumer under the zero mode, g={gname(g)}, {rs}",
+                 ", ".join(f"{r.method} {r.win_rate_vs_last:.3f}" for _, r in best[best.assumed_mode == "zero"].sort_values("win_rate_vs_last", ascending=False).iterrows()),
+                 "results/phase5b/phase5b_sweep1_consumers.csv", f"assumed_mode == zero, regime_set == {rs}, target_g == {g}", "win_rate_vs_last")
 
 
 def f06():
@@ -587,7 +648,7 @@ def f06():
                  f"{RANK_CORE[g].get(m, 'unranked')} / {RANK_HOLD[g].get(m, 'unranked')}", "; ".join(SRC_G),
                  f"target_g == {g}", "rank among rank-eligible accelerators by med_error")
     frag("f06_generalisation.tex", "l" + "rrr" + "rrrrr" + "rrr", rows, SRC_G,
-         "ranks among the 51 accelerators (rank-eligible only; -- = below the validity floor in that regime set); "
+         f"ranks among the {N_ACC} accelerators (rank-eligible only; -- = below the validity floor in that regime set); "
          "Delta = r_h - r_c (positive = worse on the held-out regimes); rows sorted by core rank at the headline stratum",
          "Held-out vs core generalisation: per-method rank shift per stratum, with median errors at the headline stratum; "
          "rational_fit and log_linear in bold")
@@ -848,13 +909,13 @@ def f09():
          "Phase 3 selectors: mean achieved stability per stratum and under leave-one-regime-out cross-validation")
 
     # b/c) Phase 5a ensembles
-    ORDER5 = [("oracle_51", "oracle over the 51-method pool"), ("constant_oracle", r"\meth{constant\_oracle} \textit{(reference)}"),
+    ORDER5 = [(f"oracle_{N_ACC}", f"oracle over the {N_ACC}-method pool"), ("constant_oracle", r"\meth{constant\_oracle} \textit{(reference)}"),
               ("oracle_9", "oracle over the 9-method pool"),
               ("fixed_rational", r"fixed \meth{rational\_fit}"), ("fixed_richardson", r"fixed \meth{richardson\_1}"),
               ("phase2_cascade", "Phase-2 cascade"),
               ("equal_ensemble_9", "equal ensemble (9)"), ("diag_ensemble_9", "diagnostic-weighted ensemble (9)"),
-              ("equal_ensemble_51", "equal ensemble (51)"), ("diag_ensemble_51", "diagnostic-weighted ensemble (51)"),
-              ("capped_diag_51", "capped diagnostic-weighted (51)"),
+              (f"equal_ensemble_{N_ACC}", f"equal ensemble ({N_ACC})"), (f"diag_ensemble_{N_ACC}", f"diagnostic-weighted ensemble ({N_ACC})"),
+              (f"capped_diag_{N_ACC}", f"capped diagnostic-weighted ({N_ACC})"),
               ("equal_ensemble_safe", "equal ensemble (safe)"), ("diag_ensemble_safe", "diagnostic-weighted (safe)"),
               ("capped_diag_safe", "capped diagnostic-weighted (safe)"),
               ("threshold_ens_010", "threshold ensemble, IQR $\\leq 0.10$"), ("threshold_ens_050", "threshold ensemble, IQR $\\leq 0.50$"),
@@ -883,7 +944,7 @@ def f09():
             if sel in ("fixed_rational", "equal_ensemble_9", "current_value"):
                 rows.append(r"\addlinespace[2pt]")
             rows.append(f"{name} & " + " & ".join(cells) + r" \\")
-        for sel in ("oracle_51", "constant_oracle", "oracle_9", "fixed_rational", "fixed_richardson", "phase2_cascade", "equal_ensemble_9", "constant_assumed"):
+        for sel in (f"oracle_{N_ACC}", "constant_oracle", "oracle_9", "fixed_rational", "fixed_richardson", "phase2_cascade", "equal_ensemble_9", "constant_assumed"):
             r = E[(E.selector == sel) & (E.target_g == HEADLINE_G)]
             if len(r):
                 r = r.iloc[0]
@@ -895,7 +956,7 @@ def f09():
              [f"results/phase5a/{path} ({label} regimes; obs 30/60/90/120 x 3 noise x 20 seeds; capped cells excluded)"],
              "all selectors; error = |prediction - true value at n_f|; skill = hindsight best-of-four (strict): err / best-of-four trivial error per record, median over records",
              f"Phase 5a selectors and ensembles, {label} regimes: median error and median skill per stratum "
-             f"(mean error at the headline stratum), oracle_51 vs constant_oracle vs the fixed defaults")
+             f"(mean error at the headline stratum), oracle_{N_ACC} vs constant_oracle vs the fixed defaults")
 
     # d) ablation
     AB = read("phase5a", "phase5a_ablation.csv")
@@ -947,12 +1008,15 @@ def f10():
          ["results/phase4/phase4_diagnostic_correlations.csv (core regimes pooled over obs 30/60/90/120, noise, seeds, strata; capped excluded)",
           "results/phase4/phase4_diagnostic_correlations_holdout.csv (held-out regimes)"],
          "all rows; Spearman correlation between the diagnostic and the absolute error over valid records; -- = diagnostic undefined "
-         "(shift_IQR is undefined for current_value, weniger_d2 and anderson_1 in the stored table)",
+         "(a NaN Spearman r in the stored table: the diagnostic is constant or undefined for that method)",
          "Phase 4 diagnostics: correlation of perturb_IQR and shift_IQR with error, core pooled and held-out")
 
     OB = read("phase4", "phase4_obs_reliability.csv")
     ob = OB[(OB.diagnostic == "perturb_iqr") & (OB.target_g == HEADLINE_G)]
     depths = sorted(ob.obs_idx.unique())
+    if not depths:
+        print("  (phase4_obs_reliability.csv has no perturb_iqr rows at the headline stratum: fragment f10b skipped)")
+        return _f10_rest()
     rows = [r"Method & " + " & ".join(rf"$\nobs = {int(d)}$" for d in depths) + r" \\", r"\midrule"]
     for m in list(dict.fromkeys(ob.method)):
         vals = []
@@ -970,6 +1034,10 @@ def f10():
          f"diagnostic == perturb_iqr, target_g == {HEADLINE_G}; Spearman r between perturb_IQR and error at each observation depth",
          "Phase 4: perturb_IQR reliability by observation depth at the headline stratum")
 
+    _f10_rest()
+
+
+def _f10_rest():
     E4 = read("phase4", "phase4_ensemble.csv")
     rows = [r"Selector & mean err & med.\ err & med.\ skill & $n$ \\", r"\midrule"]
     for _, r in E4.iterrows():
@@ -1042,6 +1110,44 @@ def f11():
          f"achieved g = gap(n_f) / gap(n_obs) actually reached; these cells are excluded from every pooled table and figure",
          "Capped block: every capped (regime x stratum) cell of the main run with the achieved gap fraction, and the capped-cell "
          "counts of the depth grids")
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# F12  validity by depth (every method with any depth below the floor)
+# ═════════════════════════════════════════════════════════════════════════════
+def f12():
+    path = os.path.join(RES, "phase5a", "phase5a_validity_by_depth.csv")
+    if not os.path.exists(path):
+        print("  (phase5a_validity_by_depth.csv absent: fragment f12 skipped; produced by a run at or after Prompt 5A)")
+        return
+    V = pd.read_csv(path)
+    V = V[V.is_oracle == 0]
+    depths = sorted(V.obs_idx.unique())
+    pooled = (V.groupby(["method", "obs_idx"]).apply(lambda g: (g.valid_rate * g.n).sum() / g.n.sum())
+               .unstack("obs_idx"))
+    worst = V.groupby("method").valid_rate.min()
+    flagged = pooled[(pooled < C.RANK_MIN_VALID).any(axis=1)].copy()
+    flagged["min"] = pooled.min(axis=1)
+    flagged = flagged.sort_values("min")
+    rows = [r"Method & " + " & ".join(rf"$\nobs = {int(d)}$" for d in depths) + r" & min (depth, $\sigma$) \\", r"\midrule"]
+    for m, r in flagged.iterrows():
+        cells = [(r"\textbf{" + f3(float(r[d])) + "}") if float(r[d]) < C.RANK_MIN_VALID else f3(float(r[d])) for d in depths]
+        rows.append(f"{dag(m)}{mth(m)} & " + " & ".join(cells) + f" & {f3(float(worst[m]))} \\\\")
+    rows.append(r"\midrule")
+    rows.append(rf"\multicolumn{{{len(depths) + 2}}}{{l}}{{{len(flagged)} of {int((V.is_trivial == 0).sum() and V[V.is_trivial == 0].method.nunique())} accelerators fall below "
+                rf"$\rhoV = {C.RANK_MIN_VALID:g}$ at some depth; the dangerous artifact (obs 90 only) flags {int(flagged.index.isin(DANGEROUS).sum())} of them}} \\")
+    for m, r in flagged.iterrows():
+        if m not in DANGEROUS:
+            fact("validity by depth", f"{m}: valid rate by depth (pooled over noise)", ", ".join(f"obs {int(d)}: {float(r[d]):.3f}" for d in depths),
+                 "results/phase5a/phase5a_validity_by_depth.csv", f"method == {m}", "n-weighted mean of valid_rate over noise per obs_idx")
+    fact("validity by depth", "accelerators below the 0.9 floor at some depth but not in the dangerous artifact",
+         ", ".join(m for m in flagged.index if m not in DANGEROUS) or "none",
+         "results/phase5a/phase5a_validity_by_depth.csv; results/phase1/dangerous_methods.json", "min over depth of the noise-pooled valid rate < 0.9",
+         "the artifact is derived at obs 90 only")
+    frag("f12_validity_by_depth.tex", "l" + "r" * (len(depths) + 1), rows,
+         ["results/phase5a/phase5a_validity_by_depth.csv (method x obs_idx x noise valid rate over every regime, seed and stratum)"],
+         f"methods whose noise-pooled valid rate is below {C.RANK_MIN_VALID} at any depth (bold); last column = the minimum over (depth, noise) cells; dagger = dangerous artifact",
+         "Validity by observation depth: every method that falls below the rank floor at some depth")
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1170,17 +1276,42 @@ def named_facts():
              ", ".join(f"sigma={n:g}: {100 * (1 - v):.3f}%" for n, v in nd.groupby('noise').valid.mean().items()),
              "results/phase1/phase1_records.csv", "method not dangerous, not the oracle", "per noise")
 
-    # method implementation notes (committed aggregate)
-    sec = "method implementation notes"
-    ca = AGG[AGG.method == "constant_assumed"].set_index(["regime", "noise", "target_g"]).med_error
-    for m in ("weniger_d1", "weniger_d2"):
-        w = AGG[AGG.method == m].set_index(["regime", "noise", "target_g"]).med_error
-        j = pd.concat([ca.rename("ca"), w.rename("w")], axis=1).dropna()
-        same = int(np.isclose(j.ca, j.w, rtol=0, atol=1e-9).sum())
-        fact(sec, f"{m}: cells whose median error equals constant_assumed's (L_hat = 0)", f"{same} of {len(j)} cells",
-             "results/phase1/phase1_aggregated.csv", f"method in ({m}, constant_assumed), matched on (regime, noise, target_g)",
-             "count(|med_error_w - med_error_ca| <= 1e-9); with w_n = s_n the Weniger numerator sum_j (-1)^j C(k,j) beta_j is identically 0 "
-             "for k = 1, 2 (src/accelerators.py _weniger_delta), so the transform returns 0 = the assumed asymptote")
+    # method roster notes (Prompt 5A / 5B)
+    sec = "method roster (Weniger, Levin, pool)"
+    fact(sec, "Weniger delta: root cause of the pre-5A degeneracy",
+         "with the remainder estimate w_n = s_n the numerator sum_j (-1)^j C(k,j) beta_j s_j / w_j collapses to sum_j (-1)^j C(k,j) beta_j, "
+         "the k-th difference of a degree-(k-1) polynomial, identically 0 for k = 1, 2: weniger_d1/d2 returned 0 for every input "
+         "(= constant_assumed under L_hat = 0)", "src/accelerators.py::_weniger_delta (docstring); REPORT_5A.md section 2", "-", "-")
+    fact(sec, "Weniger delta: fix (Prompt 5A)", "forward-difference remainder w_n = s_{n+1} - s_n on the last order+2 window values, Pochhammer weight (n0+j+1)_(k-1) via scipy.special.poch; "
+         "recovers the limit of 0.3 + 0.5 * 0.9^n to 1.2e-15 / 1.4e-15 (weniger_d1 / d2)",
+         "src/accelerators.py::_weniger_delta; tests/test_accelerators.py::test_weniger_recovers_geometric_limit", "-", "-")
+    fact(sec, "Weniger delta: identity with Levin t and removal (Prompt 5B)",
+         "this codebase's Levin 't' uses the same forward-difference remainder and the power weight (n0+j+1)^(k-1), which equals the Pochhammer weight for k <= 2, "
+         "so the corrected weniger_d1/d2 == levin_t1/t2 to machine precision on the 96 audit windows (max |diff| 0); the pair is retired from the roster "
+         f"(RETIRED_METHODS; {N_ACC} accelerators in {len(set(FAM[m] for m in ACCEL_METHODS))} families remain) and kept tested",
+         "src/accelerators.py (RETIRED_METHODS); tests/test_accelerators.py::test_weniger_equals_levin_t", "-", "-")
+    fact(sec, "Levin remainder naming (docstring correction, no numerical change)",
+         "'t' = forward-difference remainder w_n = Delta s_n (Weniger's d~-type; not Levin's backward-difference t); 'u' = (n+1) Delta s_n; 'v' = the ratio-of-differences form",
+         "src/accelerators.py::_levin_transform (docstring)", "-", "-")
+    fact(sec, "9-method Phase 2/3/4 pool", ", ".join(PHASE2_POOL) + " (weniger_d2 replaced by levin_t2, to which the corrected weniger_d2 is identical; the pool is defined once in src.pipeline.PHASE2_POOL)",
+         "src/pipeline.py::PHASE2_POOL", "-", "-")
+    fact(sec, "L_hat consumers (accelerators whose output depends on the assumed asymptote)",
+         "log_linear, richardson_1, richardson_2, richardson_3, single_exp_fit, double_exp_fit, rational_fit, log_fit, stability_weighted, median_ensemble (10; measured on the 96 audit windows)",
+         "tests/test_input_dependence.py; phases/phase5b.py::LHAT_CONSUMERS", "output differs between L_hat = 0 and 0.5 * min(window) on >= 1 window", "-")
+
+    # win rates vs each fixed trivial for the top-10 accelerators per stratum, core and held-out
+    if "win_rate_vs_assumed" in G_CORE.columns:
+        for key, G, RK in (("core", G_CORE, RANK_CORE), ("held-out", G_HOLD, RANK_HOLD)):
+            for g in STRATA:
+                top = sorted(RK[g], key=RK[g].get)[:10]
+                parts = []
+                for m in top:
+                    r = row_of(G, g, m)
+                    parts.append(f"{RK[g][m]}. {m}: {r.win_rate_vs_assumed:.2f}/{r.win_rate_vs_last:.2f}/{r.win_rate_vs_wmean:.2f}/{r.win_rate_vs_wmin:.2f}")
+                fact("top-10 win rates (vs assumed / last / wmean / wmin)", f"g={gname(g)} {key}", "; ".join(parts),
+                     SRC_G[0] if key == "core" else SRC_G[1], f"target_g == {g}, rank-eligible accelerators ranked by med_error, top 10",
+                     "win_rate_vs_<ref> = mean over uncapped cells of the per-cell fraction of seeds with error below the reference's")
+
     # pipeline provenance
     sec = "pipeline provenance"
     fact(sec, "results commit", RESULTS_HEAD, "git log -1 -- results", "-", "-")
@@ -1247,7 +1378,7 @@ def main():
     print(f"  code {CODE_HEAD}, results as of {RESULTS_HEAD}; dangerous = {sorted(DANGEROUS)}")
     f01(); f02(); f03(); f04(); f05(); f05b(); f06(); f07()
     answer = f08()
-    f09(); f10(); f11()
+    f09(); f10(); f11(); f12()
     named_facts()
     write_facts(answer)
     write_index()

@@ -64,7 +64,7 @@ python scripts/make_paper_tables.py            # -> paper_fragments/*.tex + FACT
 python scripts/make_paper_tables.py --no-raw   # same, without reading the git-ignored raw files
 ```
 
-The script reads the per-stratum result files (never the legacy-named headline copies) and writes 20 booktabs `tabular` fragments to `paper_fragments/` (index in `paper_fragments/README.md`) plus `FACTS.md`, the list of every headline number with its file, filter and formula. Fragment `f01_trivial_baseline.tex` — the four deployable trivials, the oracle reference, the best and median accelerator, and how many accelerators beat the best deployable trivial, per stratum, core and held-out — is the paper's first result. No table value in the paper is hand-typed.
+The script reads the per-stratum result files (never the legacy-named headline copies) and writes 23 booktabs `tabular` fragments to `paper_fragments/` (`f01` … `f12`; index in `paper_fragments/README.md`) plus `FACTS.md`, the list of every headline number with its file, filter and formula. Fragment `f01_trivial_baseline.tex` — per stratum, core and held-out: the deployable trivials, the oracle reference, the rank-1 and median accelerator, with the per-cell win rate and median skill vs predict-L̂ and vs the last value as the primary columns and the hindsight best-of-four (strict) skill alongside — is the paper's first result. `f05b` is the assumed-asymptote sweep 1b (win rate vs the mode-invariant `last_value`; `constant_assumed`'s own error per mode is the value of knowing the floor), `f07`/`f08` report the real data three ways (all / pre-minimum / post-minimum targets), `f12` the validity by observation depth. No table value in the paper is hand-typed.
 
 ---
 
