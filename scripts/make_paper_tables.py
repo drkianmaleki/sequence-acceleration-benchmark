@@ -1181,9 +1181,9 @@ def named_facts():
              "100 * (1 - mean over cells of valid_rate) per noise level")
     s = A[A.family.isin(CLASSICAL_FAMILIES)]
     by = s.groupby("noise").valid_rate.mean()
-    fact(sec, "all 23 classical (difference-based) variants: invalid rate by noise (Phase 1)",
+    fact(sec, f"all {len(CLASSICAL)} classical (difference-based) variants: invalid rate by noise (Phase 1)",
          ", ".join(f"sigma={n:g}: {100 * (1 - v):.2f}%" for n, v in by.items()),
-         "results/phase1/phase1_aggregated.csv", "family in the seven classical families", "100 * (1 - mean valid_rate) per noise level")
+         "results/phase1/phase1_aggregated.csv", f"family in the {len(CLASSICAL_FAMILIES)} classical families", "100 * (1 - mean valid_rate) per noise level")
     nd = A[(~A.method.isin(DANGEROUS)) & (A.is_trivial == 0)]
     by = nd.groupby("noise").valid_rate.mean()
     fact(sec, "all non-dangerous accelerators: invalid rate by noise (Phase 1)",
@@ -1250,9 +1250,9 @@ def named_facts():
              ", ".join(f"obs {int(d)}: {100 * (1 - v):.3f}%" for d, v in nd.groupby('obs_idx').valid.mean().items()),
              "results/phase5a/phase5a_raw.csv", "method not dangerous, not the oracle", "per obs_idx")
         cl = nd[nd.method.isin(CLASSICAL)]
-        fact("sigma = 0 cancellation NaNs", "the 23 classical variants: invalid rate by noise (Phase 5a, four depths)",
+        fact("sigma = 0 cancellation NaNs", f"the {len(CLASSICAL)} classical variants: invalid rate by noise (Phase 5a, four depths)",
              ", ".join(f"sigma={n:g}: {100 * (1 - v):.3f}%" for n, v in cl.groupby('noise').valid.mean().items()),
-             "results/phase5a/phase5a_raw.csv", "family in the seven classical families", "per noise")
+             "results/phase5a/phase5a_raw.csv", f"family in the {len(CLASSICAL_FAMILIES)} classical families", "per noise")
         rf = df[(df.method == "rational_fit") & (df.target_g == HEADLINE_G) & (df.is_holdout == 0) & (df.capped == 0)]
         n_lt, n_gt = int((rf.skill < 1).sum()), int((rf.skill > 1).sum())
         fact("ensembles (Phase 5a)", f"fixed rational_fit, core g={gname(HEADLINE_G)}: records with skill < 1 / > 1",
