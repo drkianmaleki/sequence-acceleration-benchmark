@@ -1,0 +1,1340 @@
+START 2026-09-20 23:35:22
+========================================================================
+  Reproducing all results  [FULL mode, redesign v2]
+========================================================================
+  9 steps.  Order: Phase 0 -> Phase 1 -> dangerous re-derivation -> Phases 2-5 -> real data
+  Output: results/<phase>/
+
+
+========================================================================
+  [1/9]  Phase 0 — analytic unit tests
+  $ scripts/run_phase0_tests.py
+========================================================================
+========================================================================
+  PHASE 0 UNIT TEST REPORT
+  Sequence Acceleration — Validation on Known Analytic Sequences
+========================================================================
+
+────────────────────────────────────────────────────────────────────────
+  GEOM: Geometric r=0.92 — algebraic methods should be exact
+  Threshold: >= 10x improvement  (or abs_error < 1e-08 = PASS)
+  Pass: 14/51   Valid: 43/51
+────────────────────────────────────────────────────────────────────────
+  Method                       Estimate     AbsError    Improve   Result
+  ──────────────────────── ──────────── ──────────── ────────── ────────
+  geom_avg_diff                0.010000     0.00e+00      exact     PASS
+  shanks_1                     0.010000     0.00e+00      exact     PASS
+  wynn_eps_1                   0.010000     0.00e+00      exact     PASS
+  levin_t1                     0.010000     0.00e+00      exact     PASS
+  best_shanks_wynn             0.010000     0.00e+00      exact     PASS
+  levin_t2                     0.010000     0.00e+00 310843747217.60x     PASS
+  levin_v1                     0.010000     0.00e+00 238235779996.98x     PASS
+  levin_u2                     0.010000     0.00e+00 204971219916.69x     PASS
+  levin_v2                     0.010000     0.00e+00 4957529066.25x     PASS
+  single_exp_fit               0.010000     0.00e+00 1443369052.83x     PASS
+  log_linear                   0.010000     0.00e+00 103763899.12x     PASS
+  double_exp_fit               0.010000     0.00e+00 156969.35x     PASS
+  brezinski_theta2             0.010004     3.94e-06    111.94x     PASS
+  brezinski_theta1             0.009958     4.16e-05     10.58x     PASS
+  levin_u1                     0.009923     7.72e-05      5.70x     fail
+  anderson_3                   0.010439     4.39e-04      1.00x     fail
+  anderson_2                   0.010439     4.39e-04      1.00x     fail
+  anderson_1                   0.010440     4.40e-04      1.00x     fail
+  current_value                0.010441     4.41e-04      1.00x     fail
+  wynn_rho_1                   0.009521     4.79e-04      0.92x     fail
+  wynn_rho_2                   0.010521     5.21e-04      0.85x     fail
+  wynn_rho_3                   0.009434     5.66e-04      0.78x     fail
+  log_fit                      0.011232     1.23e-03      0.36x     fail
+  neville_3                    0.007028     2.97e-03      0.15x     fail
+  stability_weighted           0.005877     4.12e-03      0.11x     fail
+  neville_4                    0.005449     4.55e-03      0.10x     fail
+  neville_2                    0.016282     6.28e-03      0.07x     fail
+  pade_22                      0.016886     6.89e-03      0.06x     fail
+  pade_23                      0.000609     9.39e-03      0.05x     fail
+  rational_fit                 0.000276     9.72e-03      0.05x     fail
+  pade_12                      0.000134     9.87e-03      0.04x     fail
+  median_ensemble              0.000134     9.87e-03      0.04x     fail
+  richardson_1                 0.000057     9.94e-03      0.04x     fail
+  richardson_2                 0.000025     9.98e-03      0.04x     fail
+  richardson_3                 0.000015     9.98e-03      0.04x     fail
+  pade_11                      0.000012     9.99e-03      0.04x     fail
+  pade_13                     -0.000000     1.00e-02      0.04x     fail
+  weniger_d1                  -0.000000     1.00e-02      0.04x     fail
+  weniger_d2                  -0.000000     1.00e-02      0.04x     fail
+  richardson_a20              -0.000781     1.08e-02      0.04x     fail
+  richardson_a10              -0.023612     3.36e-02      0.01x     fail
+  richardson_a05              -0.060851     7.09e-02      0.01x     fail
+  pade_21                      1.567514     1.56e+00      0.00x     fail
+  linear                        INVALID            —          —  INVALID
+  shanks_2                      INVALID            —          —  INVALID
+  shanks_3                      INVALID            —          —  INVALID
+  shanks_4                      INVALID            —          —  INVALID
+  wynn_eps_2                    INVALID            —          —  INVALID
+  wynn_eps_3                    INVALID            —          —  INVALID
+  pade_31                       INVALID            —          —  INVALID
+  pade_32                       INVALID            —          —  INVALID
+
+────────────────────────────────────────────────────────────────────────
+  HARMONIC: Harmonic (power-law alpha=1) — Richardson target
+  Threshold: >= 5x improvement  (or abs_error < 1e-08 = PASS)
+  Pass: 26/51   Valid: 49/51
+────────────────────────────────────────────────────────────────────────
+  Method                       Estimate     AbsError    Improve   Result
+  ──────────────────────── ──────────── ──────────── ────────── ────────
+  wynn_rho_2                   0.010000     0.00e+00 3917584132217.60x     PASS
+  wynn_rho_1                   0.010000     0.00e+00 1919034699120.23x     PASS
+  levin_u2                     0.010000     0.00e+00 5908334919.02x     PASS
+  levin_v2                     0.010000     0.00e+00 47776217.24x     PASS
+  levin_u1                     0.009875     1.25e-04     88.02x     PASS
+  levin_v1                     0.009872     1.28e-04     86.07x     PASS
+  richardson_2                 0.009866     1.34e-04     81.89x     PASS
+  richardson_1                 0.009866     1.34e-04     81.89x     PASS
+  pade_13                      0.010200     2.00e-04     55.00x     PASS
+  rational_fit                 0.010200     2.00e-04     54.97x     PASS
+  pade_31                      0.010200     2.00e-04     54.97x     PASS
+  pade_11                      0.010200     2.00e-04     54.96x     PASS
+  pade_12                      0.010200     2.00e-04     54.96x     PASS
+  pade_21                      0.010200     2.00e-04     54.96x     PASS
+  pade_22                      0.010200     2.00e-04     54.96x     PASS
+  neville_4                    0.010200     2.00e-04     54.96x     PASS
+  pade_32                      0.010200     2.00e-04     54.96x     PASS
+  pade_23                      0.010200     2.00e-04     54.96x     PASS
+  neville_3                    0.010200     2.00e-04     54.95x     PASS
+  neville_2                    0.010201     2.01e-04     54.60x     PASS
+  log_linear                   0.010213     2.13e-04     51.52x     PASS
+  richardson_3                 0.010214     2.14e-04     51.36x     PASS
+  richardson_a10               0.010553     5.53e-04     19.87x     PASS
+  shanks_4                     0.011231     1.23e-03      8.93x     PASS
+  shanks_3                     0.011421     1.42e-03      7.73x     PASS
+  median_ensemble              0.012115     2.11e-03      5.20x     PASS
+  brezinski_theta2             0.012682     2.68e-03      4.10x     fail
+  stability_weighted           0.012760     2.76e-03      3.98x     fail
+  shanks_2                     0.012809     2.81e-03      3.91x     fail
+  wynn_eps_3                   0.012841     2.84e-03      3.87x     fail
+  log_fit                      0.013442     3.44e-03      3.19x     fail
+  levin_t2                     0.013731     3.73e-03      2.95x     fail
+  wynn_eps_2                   0.013745     3.75e-03      2.93x     fail
+  brezinski_theta1             0.015431     5.43e-03      2.02x     fail
+  shanks_1                     0.015556     5.56e-03      1.98x     fail
+  wynn_eps_1                   0.015556     5.56e-03      1.98x     fail
+  levin_t1                     0.015556     5.56e-03      1.98x     fail
+  best_shanks_wynn             0.015556     5.56e-03      1.98x     fail
+  geom_avg_diff                0.015773     5.77e-03      1.90x     fail
+  single_exp_fit               0.018775     8.77e-03      1.25x     fail
+  double_exp_fit               0.018775     8.77e-03      1.25x     fail
+  richardson_a20               0.019401     9.40e-03      1.17x     fail
+  weniger_d1                  -0.000000     1.00e-02      1.10x     fail
+  weniger_d2                   0.000000     1.00e-02      1.10x     fail
+  anderson_3                   0.020976     1.10e-02      1.00x     fail
+  anderson_2                   0.020981     1.10e-02      1.00x     fail
+  anderson_1                   0.020985     1.10e-02      1.00x     fail
+  current_value                0.020989     1.10e-02      1.00x     fail
+  richardson_a05              -0.003977     1.40e-02      0.79x     fail
+  linear                        INVALID            —          —  INVALID
+  wynn_rho_3                    INVALID            —          —  INVALID
+
+────────────────────────────────────────────────────────────────────────
+  LOGSLOW: Log-slow — Brezinski-theta / Wynn-rho target
+  Threshold: >= 2x improvement  (or abs_error < 1e-08 = PASS)
+  Pass: 11/51   Valid: 50/51
+────────────────────────────────────────────────────────────────────────
+  Method                       Estimate     AbsError    Improve   Result
+  ──────────────────────── ──────────── ──────────── ────────── ────────
+  weniger_d1                  -0.000000     1.00e-02     17.66x     PASS
+  weniger_d2                   0.000000     1.00e-02     17.66x     PASS
+  pade_13                     -0.002569     1.26e-02     14.05x     PASS
+  pade_12                      0.034639     2.46e-02      7.17x     PASS
+  pade_32                     -0.035737     4.57e-02      3.86x     PASS
+  pade_23                      0.059463     4.95e-02      3.57x     PASS
+  levin_v2                     0.072071     6.21e-02      2.85x     PASS
+  log_linear                   0.078357     6.84e-02      2.58x     PASS
+  levin_v1                     0.081303     7.13e-02      2.48x     PASS
+  levin_u2                     0.082549     7.25e-02      2.43x     PASS
+  levin_u1                     0.092750     8.28e-02      2.13x     PASS
+  log_fit                      0.103922     9.39e-02      1.88x     fail
+  richardson_2                 0.107011     9.70e-02      1.82x     fail
+  richardson_3                 0.107160     9.72e-02      1.82x     fail
+  wynn_rho_3                   0.107970     9.80e-02      1.80x     fail
+  richardson_1                 0.113991     1.04e-01      1.70x     fail
+  wynn_rho_2                   0.116557     1.07e-01      1.66x     fail
+  shanks_3                     0.123287     1.13e-01      1.56x     fail
+  shanks_4                     0.123622     1.14e-01      1.55x     fail
+  richardson_a05               0.124283     1.14e-01      1.55x     fail
+  pade_22                      0.125167     1.15e-01      1.53x     fail
+  neville_4                    0.128743     1.19e-01      1.49x     fail
+  median_ensemble              0.131337     1.21e-01      1.46x     fail
+  neville_3                    0.132717     1.23e-01      1.44x     fail
+  wynn_rho_1                   0.132724     1.23e-01      1.44x     fail
+  neville_2                    0.138694     1.29e-01      1.37x     fail
+  brezinski_theta2             0.138714     1.29e-01      1.37x     fail
+  shanks_2                     0.139386     1.29e-01      1.36x     fail
+  wynn_eps_3                   0.141495     1.31e-01      1.34x     fail
+  pade_11                      0.142574     1.33e-01      1.33x     fail
+  rational_fit                 0.143305     1.33e-01      1.32x     fail
+  stability_weighted           0.145565     1.36e-01      1.30x     fail
+  levin_t2                     0.148055     1.38e-01      1.28x     fail
+  wynn_eps_2                   0.148397     1.38e-01      1.28x     fail
+  brezinski_theta1             0.159452     1.49e-01      1.18x     fail
+  shanks_1                     0.159883     1.50e-01      1.18x     fail
+  wynn_eps_1                   0.159883     1.50e-01      1.18x     fail
+  levin_t1                     0.159883     1.50e-01      1.18x     fail
+  best_shanks_wynn             0.159883     1.50e-01      1.18x     fail
+  geom_avg_diff                0.160999     1.51e-01      1.17x     fail
+  richardson_a10               0.161842     1.52e-01      1.16x     fail
+  single_exp_fit               0.173741     1.64e-01      1.08x     fail
+  double_exp_fit               0.173740     1.64e-01      1.08x     fail
+  richardson_a20               0.184670     1.75e-01      1.01x     fail
+  anderson_3                   0.186244     1.76e-01      1.00x     fail
+  anderson_2                   0.186373     1.76e-01      1.00x     fail
+  anderson_1                   0.186497     1.76e-01      1.00x     fail
+  current_value                0.186617     1.77e-01      1.00x     fail
+  pade_21                     -0.364695     3.75e-01      0.47x     fail
+  pade_31                     13.123300     1.31e+01      0.01x     fail
+  linear                        INVALID            —          —  INVALID
+
+────────────────────────────────────────────────────────────────────────
+  ALTGEOM: Alternating geometric — Shanks/Aitken theoretically exact
+  Threshold: >= 20x improvement  (or abs_error < 1e-08 = PASS)
+  Pass: 10/51   Valid: 44/51
+────────────────────────────────────────────────────────────────────────
+  Method                       Estimate     AbsError    Improve   Result
+  ──────────────────────── ──────────── ──────────── ────────── ────────
+  wynn_eps_1                   0.010000     0.00e+00      exact     PASS
+  levin_t1                     0.010000     0.00e+00      exact     PASS
+  levin_t2                     0.010000     0.00e+00      exact     PASS
+  levin_u2                     0.010000     0.00e+00      exact     PASS
+  levin_v1                     0.010000     0.00e+00      exact     PASS
+  levin_v2                     0.010000     0.00e+00      exact     PASS
+  shanks_1                     0.010000     0.00e+00 88731213.53x     PASS
+  median_ensemble              0.010000     0.00e+00 88731213.53x     PASS
+  best_shanks_wynn             0.010000     0.00e+00 88731213.53x     PASS
+  levin_u1                     0.010000     0.00e+00    140.68x     PASS
+  anderson_3                   0.010000     2.70e-07      1.00x     fail
+  anderson_2                   0.010000     2.70e-07      1.00x     fail
+  anderson_1                   0.010000     2.70e-07      1.00x     fail
+  current_value                0.010000     2.70e-07      1.00x     fail
+  wynn_rho_1                   0.010000     3.10e-07      0.85x     fail
+  wynn_rho_2                   0.010000     3.70e-07      0.72x     fail
+  wynn_rho_3                   0.010000     4.30e-07      0.61x     fail
+  brezinski_theta1             0.009999     6.80e-07      0.39x     fail
+  brezinski_theta2             0.010002     1.75e-06      0.15x     fail
+  geom_avg_diff                0.010002     1.78e-06      0.15x     fail
+  pade_22                      0.009981     1.89e-05      0.01x     fail
+  pade_11                      0.009977     2.31e-05      0.01x     fail
+  single_exp_fit               0.009965     3.51e-05      0.01x     fail
+  double_exp_fit               0.009965     3.51e-05      0.01x     fail
+  rational_fit                 0.009965     3.51e-05      0.01x     fail
+  log_fit                      0.009964     3.63e-05      0.01x     fail
+  richardson_1                 0.010088     8.84e-05      0.00x     fail
+  richardson_a20               0.010123     1.23e-04      0.00x     fail
+  richardson_a10               0.010238     2.38e-04      0.00x     fail
+  richardson_a05               0.010425     4.25e-04      0.00x     fail
+  richardson_2                 0.009186     8.14e-04      0.00x     fail
+  richardson_3                 0.009186     8.14e-04      0.00x     fail
+  neville_2                    0.014817     4.82e-03      0.00x     fail
+  stability_weighted           0.006728     3.27e-03      0.00x     fail
+  linear                       0.027265     1.73e-02      0.00x     fail
+  pade_12                      1.001442     9.91e-01      0.00x     fail
+  pade_13                      0.000024     9.98e-03      0.00x     fail
+  pade_21                      0.019474     9.47e-03      0.00x     fail
+  pade_23                      0.037965     2.80e-02      0.00x     fail
+  pade_32                      0.017207     7.21e-03      0.00x     fail
+  weniger_d1                  -0.000000     1.00e-02      0.00x     fail
+  weniger_d2                  -0.000000     1.00e-02      0.00x     fail
+  neville_3                    0.309811     3.00e-01      0.00x     fail
+  neville_4                   13.841195     1.38e+01      0.00x     fail
+  log_linear                    INVALID            —          —  INVALID
+  shanks_2                      INVALID            —          —  INVALID
+  shanks_3                      INVALID            —          —  INVALID
+  shanks_4                      INVALID            —          —  INVALID
+  wynn_eps_2                    INVALID            —          —  INVALID
+  wynn_eps_3                    INVALID            —          —  INVALID
+  pade_31                       INVALID            —          —  INVALID
+
+========================================================================
+  GLOBAL PASS SUMMARY  (✓ = PASS, · = fail or invalid)
+  Method                       GEOM     HARM     LOGS     ALTG    Total
+  ──────────────────────── ──────── ──────── ──────── ──────── ────────
+  levin_u2                        ✓        ✓        ✓        ✓        4
+  levin_v2                        ✓        ✓        ✓        ✓        4
+  levin_v1                        ✓        ✓        ✓        ✓        4
+  log_linear                      ✓        ✓        ✓        ·        3
+  levin_u1                        ·        ✓        ✓        ✓        3
+  levin_t1                        ✓        ·        ·        ✓        2
+  best_shanks_wynn                ✓        ·        ·        ✓        2
+  median_ensemble                 ·        ✓        ·        ✓        2
+  levin_t2                        ✓        ·        ·        ✓        2
+  pade_12                         ·        ✓        ✓        ·        2
+  pade_13                         ·        ✓        ✓        ·        2
+  pade_23                         ·        ✓        ✓        ·        2
+  pade_32                         ·        ✓        ✓        ·        2
+  shanks_1                        ✓        ·        ·        ✓        2
+  wynn_eps_1                      ✓        ·        ·        ✓        2
+  double_exp_fit                  ✓        ·        ·        ·        1
+  geom_avg_diff                   ✓        ·        ·        ·        1
+  brezinski_theta2                ✓        ·        ·        ·        1
+  brezinski_theta1                ✓        ·        ·        ·        1
+  wynn_rho_2                      ·        ✓        ·        ·        1
+  richardson_3                    ·        ✓        ·        ·        1
+  shanks_4                        ·        ✓        ·        ·        1
+  richardson_a10                  ·        ✓        ·        ·        1
+  single_exp_fit                  ✓        ·        ·        ·        1
+  weniger_d2                      ·        ·        ✓        ·        1
+  pade_11                         ·        ✓        ·        ·        1
+  neville_4                       ·        ✓        ·        ·        1
+  pade_22                         ·        ✓        ·        ·        1
+  pade_21                         ·        ✓        ·        ·        1
+  pade_31                         ·        ✓        ·        ·        1
+  rational_fit                    ·        ✓        ·        ·        1
+  richardson_1                    ·        ✓        ·        ·        1
+  richardson_2                    ·        ✓        ·        ·        1
+  neville_2                       ·        ✓        ·        ·        1
+  neville_3                       ·        ✓        ·        ·        1
+  wynn_rho_1                      ·        ✓        ·        ·        1
+  shanks_3                        ·        ✓        ·        ·        1
+  weniger_d1                      ·        ·        ✓        ·        1
+  log_fit                         ·        ·        ·        ·        0
+  anderson_2                      ·        ·        ·        ·        0
+  anderson_1                      ·        ·        ·        ·        0
+  current_value                   ·        ·        ·        ·        0
+  anderson_3                      ·        ·        ·        ·        0
+  linear                          ·        ·        ·        ·        0
+  richardson_a05                  ·        ·        ·        ·        0
+  richardson_a20                  ·        ·        ·        ·        0
+  shanks_2                        ·        ·        ·        ·        0
+  stability_weighted              ·        ·        ·        ·        0
+  wynn_eps_2                      ·        ·        ·        ·        0
+  wynn_eps_3                      ·        ·        ·        ·        0
+  wynn_rho_3                      ·        ·        ·        ·        0
+
+========================================================================
+  IMPLEMENTATION FLAGS
+────────────────────────────────────────────────────────────────────────
+  ✓  No method was always-invalid across all four tests.
+
+  ℹ  VALID ESTIMATES but below threshold on all four tests.
+     Check against theoretical expectations before flagging as broken.
+       anderson_1
+       anderson_2
+       anderson_3
+       current_value
+       linear
+       log_fit
+       richardson_a05
+       richardson_a20
+       shanks_2
+       stability_weighted
+       wynn_eps_2
+       wynn_eps_3
+       wynn_rho_3
+========================================================================
+
+Saved: results\phase0_unit_tests.csv
+Saved: results\phase0_unit_tests.txt
+
+  Completed in 2s
+
+========================================================================
+  [2/9]  Phase 1 — main benchmark
+  $ scripts/run_phase1.py --full
+========================================================================
+========================================================================
+  PHASE 1 — Main Synthetic Benchmark  [FULL mode, redesign v2]
+========================================================================
+  Regimes       : 18 core + 6 held-out
+  Methods       : 56 (51 accelerators + 5 trivial comparators)
+  Seeds         : 30
+  Noise         : [0.0, 0.001, 0.005]
+  Gap strata g  : [0.5, 0.1, 0.02]  (headline g = 0.1; cap n = 50,000)
+  obs_idx       : 90
+  window_len    : 60
+  L_true        : hetero (log-uniform on (0.005, 0.5), hidden per regime x seed)
+  L_hat mode    : zero
+  Total evals   : 362,880
+  Output dir    : results\phase1
+========================================================================
+
+  [  108/2160]    5.0%  two_exp               sigma=0.000
+  [  216/2160]   10.0%  three_exp             sigma=0.001
+  [  324/2160]   15.0%  four_exp              sigma=0.001
+  [  432/2160]   20.0%  power_law             sigma=0.005
+  [  540/2160]   25.0%  rational_decay        sigma=0.005
+  [  648/2160]   30.0%  multiphase            sigma=0.000
+  [  756/2160]   35.0%  osc_exp               sigma=0.001
+  [  864/2160]   40.0%  damped_osc_pow        sigma=0.001
+  [  972/2160]   45.0%  log_slow              sigma=0.005
+  [ 1080/2160]   50.0%  delayed_plateau       sigma=0.005
+  [ 1188/2160]   55.0%  noisy_plateau         sigma=0.000
+  [ 1296/2160]   60.0%  slow_osc_power        sigma=0.001
+  [ 1404/2160]   65.0%  log_oscillatory       sigma=0.001
+  [ 1512/2160]   70.0%  heavy_noise_plat      sigma=0.005
+  [ 1620/2160]   75.0%  broken_power_law      sigma=0.005
+  [ 1728/2160]   80.0%  logistic_tail         sigma=0.000
+  [ 1836/2160]   85.0%  inv_sqrt_log          sigma=0.001
+  [ 1944/2160]   90.0%  random_knots          sigma=0.001
+  [ 2052/2160]   95.0%  real_boot_a           sigma=0.005
+  [ 2160/2160]  100.0%  real_boot_b           sigma=0.005
+  [2160/2160] 100.0%  Done.
+
+  Saved: results\phase1\phase1_records.csv  (362880 rows)
+  Saved: results\phase1\phase1_aggregated.csv  (12096 rows)
+  Saved: results\phase1\phase1_global.csv  (168 rows)
+  Saved: results\phase1\phase1_global_holdout.csv  (168 rows)
+  Saved: results\phase1\phase1_capped.csv  (392 rows)
+  Saved: results\phase1\phase1_unranked.csv  (40 rows)
+  Saved: results\phase1\phase1_regime_best.csv  (72 rows)
+  Saved: results\phase1\phase1_horizons.csv  (72 rows)
+  Saved: results\phase1\phase1_heatmap_g0.5.csv  (56 rows)
+  Saved: results\phase1\phase1_heatmap_g0.1.csv  (56 rows)
+  Saved: results\phase1\phase1_heatmap_g0.02.csv  (56 rows)
+
+  Generating figures ...
+  Saved: results\phase1\figure_01_stability_ranking.png
+  Saved: results\phase1\figure_02_heatmap.png
+  Saved: results\phase1\figure_03_horizon_sensitivity.png
+  Saved: results\phase1\figure_04_method_type.png
+  Saved: results\phase1\figure_05_regime_recommendations.png
+  Saved: results\phase1\figure_06_richardson_profile.png
+
+  GAP-STRATIFIED HORIZONS  (n_obs = 90; seed 0 for seed-dependent shapes)
+| regime | g = 0.5 | g = 0.1 | g = 0.02 |
+|---|---|---|---|
+| single_exp | 108 (g = 0.4868) | 148 (g = 0.0983) | 188 (g = 0.0198) |
+| two_exp | 129 (g = 0.4956) | 218 (g = 0.0999) | 308 (g = 0.0198) |
+| three_exp | 176 (g = 0.4988) | 377 (g = 0.0999) | 579 (g = 0.0198) |
+| four_exp | 231 (g = 0.4981) | 631 (g = 0.0998) | 1033 (g = 0.0200) |
+| power_law | 244 (g = 0.4999) | 2441 (g = 0.1000) | 24329 (g = 0.0200) |
+| rational_decay | 205 (g = 0.5000) | 1125 (g = 0.1000) | 5725 (g = 0.0200) |
+| mixed_pow_rat | 254 (g = 0.4990) | 2260 (g = 0.1000) | 27113 (g = 0.0200) |
+| multiphase | 504 (g = 0.4998) | 3852 (g = 0.1000) | 20594 (g = 0.0200) |
+| osc_exp | 107 (g = 0.4783) | 165 (g = 0.0957) | 222 (g = 0.0197) |
+| damped_osc_pow | 260 (g = 0.4994) | 3014 (g = 0.1000) | 39688 (g = 0.0200) |
+| log_slow | 8594 (g = 0.5000) | **50000 CAP** (achieved g = 0.419) | **50000 CAP** (achieved g = 0.419) |
+| delayed_plateau | 160 (g = 0.4966) | 321 (g = 0.0993) | 482 (g = 0.0198) |
+| staircase | 170 (g = 0.2778) | 320 (g = 0.0000) | 320 (g = 0.0000) |
+| noisy_plateau | 104 (g = 0.4966) | 137 (g = 0.0954) | 169 (g = 0.0193) |
+| slow_osc_power | 415 (g = 0.4984) | 3483 (g = 0.1000) | 39003 (g = 0.0200) |
+| log_oscillatory | 533 (g = 0.4984) | **50000 CAP** (achieved g = 0.299) | **50000 CAP** (achieved g = 0.299) |
+| heavy_noise_plat | 97 (g = 0.4966) | 114 (g = 0.0907) | 130 (g = 0.0183) |
+| broken_power_law | 514 (g = 0.4999) | 28776 (g = 0.1000) | **50000 CAP** (achieved g = 0.080) |
+| stretched_exp | 193 (g = 0.4983) | 579 (g = 0.0998) | 1172 (g = 0.0200) |
+| logistic_tail | 105 (g = 0.4775) | 135 (g = 0.0961) | 164 (g = 0.0194) |
+| inv_sqrt_log | 245 (g = 0.4998) | 2929 (g = 0.1000) | 41315 (g = 0.0200) |
+| random_knots | 400 (g = 0.4994) | 6723 (g = 0.1000) | **50000 CAP** (achieved g = 0.032) |
+| real_boot_a | 125 (g = 0.4971) | 209 (g = 0.0986) | 273 (g = 0.0200) |
+| real_boot_b | 151 (g = 0.4968) | 335 (g = 0.0992) | 444 (g = 0.0200) |
+
+
+  TOP-20 GLOBAL BY MEDIAN ERROR  (core regimes, g = 0.1, capped cells excluded, L_hat mode = zero, rank floor valid_rate >= 0.9)
+  ────────────────────────────────────────────────────────────────────────────────────────────
+  Method                   Type            MedErr   Skill  Valid    Cat    Stab  Cells  Rank
+  ────────────────────────────────────────────────────────────────────────────────────────────
+  constant_oracle          limit          0.00773   0.164  1.000  0.000   1.400     48     -
+  log_linear               trajectory     0.02018   0.601  0.953  0.112   1.032     48     1
+  richardson_3             trajectory     0.02219   0.827  0.980  0.097   1.095     48     2
+  richardson_2             trajectory     0.02568   0.696  0.992  0.085   1.144     48     3
+  double_exp_fit           trajectory     0.02873   0.764  0.979  0.029   1.285     48     4
+  rational_fit             trajectory     0.02956   0.670  1.000  0.009   1.333     48     5
+  richardson_1             trajectory     0.03006   0.879  1.000  0.088   1.148     48     6
+  pade_23                  trajectory     0.03023   0.889  0.996  0.093   1.090     48     7
+  pade_12                  trajectory     0.03136   0.903  0.995  0.087   1.094     48     8
+  pade_22                  trajectory     0.03332   1.904  0.924  0.163   0.862     48     9
+  single_exp_fit           trajectory     0.03613   1.001  1.000  0.008   1.369     48    10
+  richardson_a05           trajectory     0.03836   0.674  1.000  0.009   1.267     48    11
+  pade_13                  trajectory     0.03902   1.303  0.972  0.151   0.899     48    12
+  pade_11                  trajectory     0.03972   1.558  0.999  0.049   1.181     48    13
+  wynn_eps_3               limit          0.04382   1.518  0.957  0.057   1.038     48    14
+  stability_weighted       trajectory     0.04561   1.362  1.000  0.019   1.210     48    15
+  median_ensemble          trajectory     0.04728   1.397  1.000  0.006   1.251     48    16
+  wynn_eps_2               limit          0.04733   1.521  0.967  0.048   1.060     48    17
+  levin_t2                 limit          0.04746   1.520  0.979  0.040   1.100     48    18
+  shanks_4                 limit          0.04746   1.581  0.979  0.041   1.045     48    19
+
+  UNRANKED — BELOW VALIDITY FLOOR  (g = 0.1, core; valid_rate < 0.9; shown, never ranked; 8 methods)
+  ────────────────────────────────────────────────────────────────────────────────────────────
+  Method                   Type          Valid    Cat    MedErr   Skill    Stab  Cells
+  pade_31                  trajectory    0.867  0.773   1.95347  31.176  -0.633     48
+  pade_32                  trajectory    0.688  0.582   0.25741   5.547  -0.373     48
+  neville_2                trajectory    0.661  0.719   4.52690 192.499  -0.685     48
+  pade_21                  trajectory    0.602  0.605   0.33640   5.161  -0.546     48
+  geom_avg_diff            limit         0.601  0.442   0.05049   1.672  -0.118     48
+  neville_3                trajectory    0.480  0.771 111.07984 3262.867  -0.970     48
+  linear                   trajectory    0.444  0.765   0.30568   6.048  -1.060     48
+  neville_4                trajectory    0.335  0.750  96.06736 1742.476  -1.073     48
+
+  TRIVIAL COMPARATORS  (g = 0.1, core, capped excluded)
+  ────────────────────────────────────────────────────────────
+  constant_oracle          med_err=0.00773  skill=0.164  stab=1.400 (oracle, unranked)
+  constant_assumed         med_err=0.06204  skill=1.000  stab=0.843 
+  window_min               med_err=0.06808  skill=1.493  stab=1.050 
+  last_value               med_err=0.10303  skill=1.570  stab=1.000 
+  window_mean              med_err=0.14626  skill=2.733  stab=1.034 
+
+  CAPPED CELLS  (excluded from pooled tables; 7 regime x g cells)
+  ────────────────────────────────────────────────────────────
+  log_slow           g=0.1   n_f= 50000  achieved g = 0.419
+  log_slow           g=0.02  n_f= 50000  achieved g = 0.419
+  log_oscillatory    g=0.1   n_f= 50000  achieved g = 0.299
+  log_oscillatory    g=0.02  n_f= 50000  achieved g = 0.299
+  broken_power_law   g=0.02  n_f= 50000  achieved g = 0.080
+  random_knots       g=0.1   n_f=  3850  achieved g = 0.100
+  random_knots       g=0.02  n_f= 45170  achieved g = 0.020
+
+  PER-REGIME BEST BY SKILL  (g = 0.1; oracle excluded)
+  ────────────────────────────────────────────────────────────────────────────────────────────
+  single_exp                   n_f=   148     single_exp_fit       skill=0.020  (by stability: single_exp_fit)
+  two_exp                      n_f=   218     single_exp_fit       skill=0.066  (by stability: single_exp_fit)
+  three_exp                    n_f=   377     richardson_3         skill=0.325  (by stability: pade_11)
+  four_exp                     n_f=   631     richardson_2         skill=0.193  (by stability: log_linear)
+  power_law                    n_f=  2441     neville_4            skill=0.079  (by stability: rational_fit)
+  rational_decay               n_f=  1125     neville_4            skill=0.002  (by stability: rational_fit)
+  mixed_pow_rat                n_f=  2260     neville_4            skill=0.123  (by stability: log_linear)
+  multiphase                   n_f=  3852     log_linear           skill=0.294  (by stability: log_linear)
+  osc_exp                      n_f=   165     pade_22              skill=0.071  (by stability: pade_22)
+  damped_osc_pow               n_f=  3014     richardson_1         skill=0.094  (by stability: rational_fit)
+  log_slow                     n_f= 50000 CAP log_fit              skill=0.008  (by stability: log_fit)
+  delayed_plateau              n_f=   321     double_exp_fit       skill=0.157  (by stability: single_exp_fit)
+  staircase                    n_f=   320     double_exp_fit       skill=0.468  (by stability: double_exp_fit)
+  noisy_plateau                n_f=   137     richardson_a20       skill=0.369  (by stability: richardson_a20)
+  slow_osc_power               n_f=  3483     single_exp_fit       skill=0.420  (by stability: richardson_a10)
+  log_oscillatory              n_f= 50000 CAP richardson_1         skill=0.268  (by stability: richardson_1)
+  heavy_noise_plat             n_f=   114     window_mean          skill=1.000  (by stability: window_mean)
+  broken_power_law             n_f= 28776     window_min           skill=1.000  (by stability: window_min)
+  stretched_exp      [holdout] n_f=   579     neville_4            skill=0.060  (by stability: rational_fit)
+  logistic_tail      [holdout] n_f=   135     richardson_a05       skill=0.123  (by stability: richardson_a05)
+  inv_sqrt_log       [holdout] n_f=  2929     neville_4            skill=0.084  (by stability: richardson_a10)
+  random_knots       [holdout] n_f=  3850 CAP neville_4            skill=0.254  (by stability: rational_fit)
+  real_boot_a        [holdout] n_f=   209     richardson_a10       skill=0.045  (by stability: richardson_a10)
+  real_boot_b        [holdout] n_f=   335     rational_fit         skill=0.232  (by stability: log_linear)
+
+  All files saved to: results\phase1/
+========================================================================
+
+
+  Completed in 1839s
+
+========================================================================
+  [3/9]  Dangerous re-derivation (Phase 1 -> artifact)
+  $ scripts/derive_dangerous.py
+========================================================================
+========================================================================
+  DANGEROUS-METHOD RE-DERIVATION  (Phase 1 -> artifact for Phases 2-5)
+========================================================================
+  source     : results\phase1\phase1_aggregated.csv  (12096 aggregated rows)
+  criterion  : S < 0, core regimes, pooled over strata [0.5, 0.1, 0.02], capped cells excluded, oracle excluded
+  methods    : 55 scored = 51 accelerators (eligible) + 4 trivial comparators (scored for the record, never in the artifact)
+  dangerous  : 8  -> ['geom_avg_diff', 'linear', 'neville_2', 'neville_3', 'neville_4', 'pade_21', 'pade_31', 'pade_32']
+  legacy set : 8 (not consumed; for the record)
+  vs legacy  : +[]  -[]
+  artifact   : C:\Users\kianu\Dropbox\Projects\Ongoing\Accelerator_project\code\results/phase1/dangerous_methods.json
+
+  method                        S   valid     cat   beats  cells  flag
+  ----------------------------------------------------------------------
+  neville_4               -1.0592   0.345   0.748   0.231    147  DANGEROUS
+  neville_3               -0.9423   0.502   0.768   0.232    147  DANGEROUS
+  neville_2               -0.6766   0.673   0.721   0.233    147  DANGEROUS
+  linear                  -0.6543   0.583   0.631   0.063    147  DANGEROUS
+  pade_31                 -0.5447   0.802   0.703   0.148    147  DANGEROUS
+  pade_21                 -0.3393   0.673   0.546   0.199    147  DANGEROUS
+  pade_32                 -0.1981   0.749   0.524   0.255    147  DANGEROUS
+  geom_avg_diff           -0.1470   0.591   0.449   0.402    147  DANGEROUS
+  weniger_d1               0.6463   0.977   0.233   0.337    147  
+  weniger_d2               0.6693   0.984   0.225   0.340    147  
+  constant_assumed         0.7218   1.000   0.209   0.352    147  trivial (scored only; not eligible, not in artifact)
+  pade_22                  0.8729   0.934   0.162   0.656    147  
+  pade_13                  0.9328   0.981   0.135   0.556    147  
+  brezinski_theta2         0.9383   0.977   0.089   0.347    147  
+  window_mean              0.9962   1.000   0.033   0.155    147  trivial (scored only; not eligible, not in artifact)
+  current_value            1.0000   1.000   0.000   0.000    147  
+  last_value               1.0000   1.000   0.000   0.000    147  trivial (scored only; not eligible, not in artifact)
+  levin_v1                 1.0194   0.980   0.049   0.346    147  
+  levin_u1                 1.0196   0.980   0.075   0.473    147  
+  wynn_rho_3               1.0209   0.973   0.070   0.472    147  
+  pade_12                  1.0332   0.984   0.106   0.651    147  
+  wynn_eps_3               1.0373   0.957   0.058   0.490    147  
+  pade_23                  1.0390   0.990   0.107   0.655    147  
+  shanks_4                 1.0494   0.980   0.040   0.373    147  
+  window_min               1.0521   1.000   0.044   0.350    147  trivial (scored only; not eligible, not in artifact)
+  wynn_rho_2               1.0558   0.978   0.053   0.461    147  
+  levin_v2                 1.0599   0.979   0.043   0.418    147  
+  wynn_eps_2               1.0614   0.968   0.048   0.475    147  
+  levin_u2                 1.0624   0.980   0.046   0.436    147  
+  wynn_rho_1               1.0819   0.979   0.035   0.430    147  
+  levin_t2                 1.0941   0.979   0.041   0.491    147  
+  shanks_2                 1.0958   0.999   0.020   0.343    147  
+  log_linear               1.1069   0.971   0.089   0.783    147  
+  shanks_3                 1.1226   1.000   0.018   0.397    147  
+  pade_11                  1.1303   0.996   0.073   0.701    147  
+  brezinski_theta1         1.1501   1.000   0.040   0.573    147  
+  levin_t1                 1.1537   0.980   0.035   0.608    147  
+  wynn_eps_1               1.1537   0.980   0.035   0.608    147  
+  richardson_3             1.1556   0.983   0.072   0.792    147  
+  richardson_2             1.1902   0.993   0.064   0.814    147  
+  anderson_3               1.1935   1.000   0.011   0.538    147  
+  stability_weighted       1.2008   1.000   0.021   0.605    147  
+  anderson_2               1.2057   1.000   0.011   0.568    147  
+  shanks_1                 1.2150   1.000   0.014   0.608    147  
+  anderson_1               1.2150   1.000   0.014   0.608    147  
+  best_shanks_wynn         1.2150   1.000   0.014   0.608    147  
+  log_fit                  1.2162   1.000   0.025   0.665    147  
+  richardson_1             1.2255   1.000   0.050   0.813    147  
+  median_ensemble          1.2493   1.000   0.007   0.657    147  
+  richardson_a20           1.2670   1.000   0.005   0.693    147  
+  double_exp_fit           1.2798   0.980   0.028   0.891    147  
+  richardson_a05           1.2818   1.000   0.011   0.760    147  
+  rational_fit             1.3203   1.000   0.011   0.856    147  
+  richardson_a10           1.3236   1.000   0.006   0.840    147  
+  single_exp_fit           1.3613   1.000   0.007   0.938    147  
+========================================================================
+
+  Completed in 1s
+
+========================================================================
+  [4/9]  Phase 2 — failure detection
+  $ scripts/run_phase2.py --full
+========================================================================
+========================================================================
+  PHASE 2 — Richardson Failure Condition Mapping  [FULL, redesign v2]
+========================================================================
+  obs_idx sweep : [20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140]
+  noise levels  : [0.0, 0.003, 0.005, 0.01, 0.02]
+  gap strata    : [0.5, 0.1, 0.02]  (headline g = 0.1)
+  seeds         : 20
+  regimes       : 18 core (selector training data; no holdout)
+  methods       : 11  ['current_value', 'richardson_1', 'richardson_a10', 'single_exp_fit', 'rational_fit', 'pade_22', 'log_linear', 'weniger_d2', 'anderson_1', 'constant_assumed', 'constant_oracle']
+  rank pool     : 9 (the original 9; constant_assumed and constant_oracle reported alongside, unranked)
+  rank floor    : valid_rate >= 0.9 per cell
+  L_hat mode    : zero
+  total evals   : 772,200
+  output dir    : results\phase2
+========================================================================
+
+  [  1170/23400]    5.0%  obs=20  sigma=0.010
+  [  2340/23400]   10.0%  obs=30  sigma=0.003
+  [  3510/23400]   15.0%  obs=30  sigma=0.020
+  [  4680/23400]   20.0%  obs=40  sigma=0.005
+  [  5850/23400]   25.0%  obs=50  sigma=0.003
+  [  7020/23400]   30.0%  obs=50  sigma=0.020
+  [  8190/23400]   35.0%  obs=60  sigma=0.005
+  [  9360/23400]   40.0%  obs=70  sigma=0.000
+  [ 10530/23400]   45.0%  obs=70  sigma=0.020
+  [ 11700/23400]   50.0%  obs=80  sigma=0.005
+  [ 12870/23400]   55.0%  obs=90  sigma=0.000
+  [ 14040/23400]   60.0%  obs=90  sigma=0.010
+  [ 15210/23400]   65.0%  obs=100  sigma=0.005
+  [ 16380/23400]   70.0%  obs=110  sigma=0.000
+  [ 17550/23400]   75.0%  obs=110  sigma=0.010
+  [ 18720/23400]   80.0%  obs=120  sigma=0.003
+  [ 19890/23400]   85.0%  obs=130  sigma=0.000
+  [ 21060/23400]   90.0%  obs=130  sigma=0.010
+  [ 22230/23400]   95.0%  obs=140  sigma=0.003
+  [ 23400/23400]  100.0%  obs=140  sigma=0.020
+  [23400/23400] 100.0%  Done.
+
+  Saved: results\phase2\phase2_sweep_aggregated.csv  (38610 rows)
+  Saved: results\phase2\phase2_features.csv  (23400 rows)
+  Saved: results\phase2\phase2_capped.csv  (792 rows)
+
+  Stratum g = 0.5: phase diagram, correlations, rules ...
+  Saved: results\phase2\phase2_phase_diagram_g0.5.csv  (1170 rows)
+  Saved: results\phase2\phase2_correlations_g0.5.csv  (114 rows)
+  Saved: results\phase2\phase2_rules_g0.5.csv  (19 rows)
+
+  Stratum g = 0.1: phase diagram, correlations, rules ...
+  Saved: results\phase2\phase2_phase_diagram_g0.1.csv  (1170 rows)
+  Saved: results\phase2\phase2_correlations_g0.1.csv  (114 rows)
+  Saved: results\phase2\phase2_rules_g0.1.csv  (19 rows)
+
+  Stratum g = 0.02: phase diagram, correlations, rules ...
+  Saved: results\phase2\phase2_phase_diagram_g0.02.csv  (1170 rows)
+  Saved: results\phase2\phase2_correlations_g0.02.csv  (114 rows)
+  Saved: results\phase2\phase2_rules_g0.02.csv  (19 rows)
+
+  Generating figures ...
+  Saved: results\phase2\figure_p2_01_phase_diagram.png
+  Saved: results\phase2\figure_p2_02_crossover.png
+  Saved: results\phase2\figure_p2_03_correlations.png
+  Saved: results\phase2\figure_p2_04_global_correlations.png
+  Saved: results\phase2\figure_p2_05_rules.png
+
+========================================================================
+  PHASE 2 SUMMARY  (headline stratum g = 0.1)
+========================================================================
+
+  Richardson rank by regime (rank pool = 9; mean across obs_idx and noise over ranked cells; capped and below-floor cells flagged):
+  Regime                  Mean rank   Min rank     Wins   Capped  Below floor
+  ──────────────────────────────────────────────────────────────────────────────
+  broken_power_law             5.63          1        5       20            0
+  damped_osc_pow               1.91          1       31        0            0
+  delayed_plateau              4.18          3        0        0            0
+  four_exp                     2.18          1        5        0            0
+  heavy_noise_plat             3.15          1        8        0            0
+  log_oscillatory              2.85          1       19       65            0
+  log_slow                     1.62          1       38       65            0
+  mixed_pow_rat                2.23          1       11        0            0
+  multiphase                   2.95          2        0        0            0
+  noisy_plateau                2.65          1       12        0            0
+  osc_exp                      4.26          2        0        0            0
+  power_law                    1.95          1       27        0            0
+  rational_decay               2.92          1       10        0            0
+  single_exp                   4.80          1        1        0            0
+  slow_osc_power               2.69          1       26        0            0
+  staircase                    4.52          4        0        0            0
+  three_exp                    2.71          1        1        0            0
+  two_exp                      4.11          2        0        0            0
+
+  UNRANKED CELLS — richardson_1 below the validity floor (valid_rate < 0.9; g = 0.1; 0 cells)
+  ─────────────────────────────────────────────────────────────────
+  (none)
+
+  Reported alongside, unranked (g = 0.1, mean over cells): constant_assumed S = 0.909, constant_oracle S = 1.396
+
+  Top feature correlations (all regimes, vs Richardson losing margin):
+  richardson_r2           r = -0.4483  (p = 0.000)  *** candidate
+  diff_ratio_cv           r =  0.3877  (p = 0.000)  *** candidate
+  curvature_idx           r =  0.2477  (p = 0.000)
+  oscillation_idx         r =  0.2392  (p = 0.000)
+  noise_var               r =  0.0993  (p = 0.002)
+  log_log_slope           r = -0.0186  (p = 0.554)
+
+  Top 5 threshold rules (by precision):
+  Rule                                       Prec  Recall    Gain
+  ─────────────────────────────────────────────────────────────────
+  log_log_slope > -0.1 → rational_fit       0.541   0.317  0.1919
+  log_log_slope > -0.1 → pade_22            0.459   0.410  0.0443
+  richardson_r2 < 0.5 → rational_fit        0.362   0.430  0.0608
+  richardson_r2 < 0.7 → rational_fit        0.323   0.522  0.0451
+  richardson_r2 < 0.85 → rational_fit       0.304   0.737  0.0324
+
+  All files saved to: results\phase2/
+========================================================================
+
+  Completed in 979s
+
+========================================================================
+  [5/9]  Phase 3 — adaptive selection
+  $ scripts/run_phase3.py --full
+========================================================================
+========================================================================
+  PHASE 3 — Adaptive Selector Pipeline  [FULL, redesign v2]
+========================================================================
+  Phase 2 data : results\phase2
+  Output dir   : results\phase3
+  Headline stratum for per-grid figures: g = 0.1
+  Evaluations  : 0 (analysis of Phase 2 output; core regimes only)
+========================================================================
+
+  Loading Phase 2 data ...
+  Grid: 3510 rows  (18 regimes × 13 obs_idx × 5 noise × 3 strata; 360 capped cells)
+
+  Evaluating selectors ...
+  Saved: results\phase3\phase3_selector_comparison.csv  (21 rows)
+  Saved: results\phase3\phase3_regime_results.csv  (343 rows)
+  Saved: results\phase3\phase3_capped_cells.csv  (2520 rows)
+
+  Running leave-one-regime-out cross-validation ...
+  Saved: results\phase3\phase3_cv_results.csv  (90 rows)
+
+  Building regime fingerprinting classifier ...
+  Saved: results\phase3\phase3_regime_classifier.csv  (classifier: DecisionTree(depth=6, 5-fold CV))
+  Overall regime classification accuracy: 0.429
+
+  Generating figures ...
+  Saved: results\phase3\figure_p3_01_selector_comparison.png
+  Saved: results\phase3\figure_p3_02_improvement_map.png
+  Saved: results\phase3\figure_p3_03_classifier_accuracy.png
+  Saved: results\phase3\figure_p3_04_obs_depth.png
+  Saved: results\phase3\figure_p3_05_cv_summary.png
+
+========================================================================
+  PHASE 3 SUMMARY
+========================================================================
+
+  Global mean stability  (g = 0.5; 0 capped cells excluded):
+  Selector                Stability      n
+  ──────────────────────────────────────────
+  oracle                     1.3715   1170 <-- oracle
+  fixed_rational             1.3098   1170
+  phase2_cascade             1.2829   1170 <-- Phase 2
+  fixed_richardson           1.2779   1170
+  enhanced_cascade           1.2777   1170 <-- Phase 3
+  fixed_single_exp           1.2684   1170
+  fixed_current              1.0000   1170
+
+  Global mean stability  (g = 0.1; 150 capped cells excluded):
+  Selector                Stability      n
+  ──────────────────────────────────────────
+  oracle                     1.3728   1020 <-- oracle
+  fixed_rational             1.3135   1020
+  phase2_cascade             1.3118   1020 <-- Phase 2
+  fixed_richardson           1.2986   1020
+  fixed_single_exp           1.2880   1020
+  enhanced_cascade           1.2543   1020 <-- Phase 3
+  fixed_current              1.0000   1020
+
+  Global mean stability  (g = 0.02; 210 capped cells excluded):
+  Selector                Stability      n
+  ──────────────────────────────────────────
+  oracle                     1.3682    960 <-- oracle
+  fixed_richardson           1.3010    960
+  fixed_rational             1.2985    960
+  phase2_cascade             1.2930    960 <-- Phase 2
+  fixed_single_exp           1.2790    960
+  enhanced_cascade           1.2325    960 <-- Phase 3
+  fixed_current              1.0000    960
+
+  Leave-one-regime-out CV  (median stability across held-out regimes):
+  Selector                 Median      Min      Max
+  ──────────────────────────────────────────────────
+  fixed_richardson         1.3596   0.9889   1.3998
+  fixed_single_exp         1.2969   1.0138   1.3935
+  phase2_cascade           1.3463   1.0006   1.3990
+  enhanced_cascade         1.2730   0.9794   1.3954
+  oracle                   1.3919   1.2763   1.4000
+
+  Regime classifier overall accuracy: 0.429
+  Hardest regimes to classify:
+    three_exp               acc=0.062  confused with four_exp
+    mixed_pow_rat           acc=0.092  confused with log_slow
+    slow_osc_power          acc=0.092  confused with multiphase
+
+  Files saved to: results\phase3/
+========================================================================
+
+  Completed in 5s
+
+========================================================================
+  [6/9]  Phase 4 — perturbation diagnostics
+  $ scripts/run_phase4.py --full
+========================================================================
+========================================================================
+  PHASE 4 — Stability Diagnostic Stress Testing  [FULL, redesign v2]
+========================================================================
+  obs_idx    : [30, 60, 90, 120]
+  noise      : [0.0, 0.005, 0.02]
+  gap strata : [0.5, 0.1, 0.02]  (headline g = 0.1)
+  seeds      : 20
+  regimes    : 24 (core + held-out; pooled stats core only)
+  methods    : 9 diagnostic pool + 4 trivial references
+  shifts     : [-2, -1, 0, 1, 2]
+  perturbs   : 5
+  evals      : 224,640 central + 1,555,200 diagnostic calls
+  output dir : results\phase4
+========================================================================
+
+  [   288/5760]    5.0%  obs=30  sigma=0.000
+  [   576/5760]   10.0%  obs=30  sigma=0.005
+  [   864/5760]   15.0%  obs=30  sigma=0.005
+  [  1152/5760]   20.0%  obs=30  sigma=0.020
+  [  1440/5760]   25.0%  obs=30  sigma=0.020
+  [  1728/5760]   30.0%  obs=60  sigma=0.000
+  [  2016/5760]   35.0%  obs=60  sigma=0.005
+  [  2304/5760]   40.0%  obs=60  sigma=0.005
+  [  2592/5760]   45.0%  obs=60  sigma=0.020
+  [  2880/5760]   50.0%  obs=60  sigma=0.020
+  [  3168/5760]   55.0%  obs=90  sigma=0.000
+  [  3456/5760]   60.0%  obs=90  sigma=0.005
+  [  3744/5760]   65.0%  obs=90  sigma=0.005
+  [  4032/5760]   70.0%  obs=90  sigma=0.020
+  [  4320/5760]   75.0%  obs=90  sigma=0.020
+  [  4608/5760]   80.0%  obs=120  sigma=0.000
+  [  4896/5760]   85.0%  obs=120  sigma=0.005
+  [  5184/5760]   90.0%  obs=120  sigma=0.005
+  [  5472/5760]   95.0%  obs=120  sigma=0.020
+  [  5760/5760]  100.0%  obs=120  sigma=0.020
+  [5760/5760] 100.0%  Done.
+
+  Saved: results\phase4\phase4_raw.csv  (224640 rows)
+
+  Capped block ...
+  Saved: results\phase4\phase4_capped.csv  (377 rows)
+
+  Computing diagnostic correlations (core) ...
+  Saved: results\phase4\phase4_diagnostic_correlations.csv  (20 rows)
+  Computing diagnostic correlations (held-out) ...
+  Saved: results\phase4\phase4_diagnostic_correlations_holdout.csv  (20 rows)
+
+  Testing rejection rules (both diagnostics) ...
+  Saved: results\phase4\phase4_rejection_rules.csv  (115 rows)
+
+  Cascade + diagnostic filter ...
+  Saved: results\phase4\phase4_cascade_filter.csv  (7 rows)
+
+  Ensemble comparison ...
+  Saved: results\phase4\phase4_ensemble.csv  (9 rows)
+
+  Obs-depth reliability ...
+  Saved: results\phase4\phase4_obs_reliability.csv  (72 rows)
+
+  Generating figures ...
+  Saved: results\phase4\figure_p4_01_correlations.png
+  Saved: results\phase4\figure_p4_02_rejection_rules.png
+  Saved: results\phase4\figure_p4_03_obs_reliability.png
+  Saved: results\phase4\figure_p4_04_iqr_vs_error.png
+  Saved: results\phase4\figure_p4_05_regime_diagnostic.png
+
+========================================================================
+  PHASE 4 SUMMARY  (core regimes, capped excluded, headline g = 0.1)
+========================================================================
+
+  Global diagnostic correlations (vs |error|):
+  Diagnostic              r          p  Status
+  ───────────────────────────────────────────────────────
+  shift_iqr          0.0954     0.0000  
+  perturb_iqr        0.2251     0.0000  ** moderate
+
+  Best rejection rules (precision >= 0.30):
+  Diagnostic     Method                 Thresh    Prec  Recall
+  ──────────────────────────────────────────────────────────────
+  perturb_iqr    anderson_1              1.000   1.000   0.004
+  perturb_iqr    log_linear              1.000   1.000   0.038
+  shift_iqr      log_linear              0.500   1.000   0.109
+  shift_iqr      pade_22                 1.000   0.896   0.092
+  perturb_iqr    pade_22                 1.000   0.622   0.127
+  perturb_iqr    richardson_1            0.200   0.333   0.004
+  shift_iqr      rational_fit            0.200   0.333   0.005
+
+  Cascade + perturb_IQR filter (mean error):
+  Filter                      Mean error
+  ────────────────────────────────────────
+  no_filter                     0.067566
+  perturb_iqr>1.0               0.067566
+  perturb_iqr>0.5               0.067566
+  perturb_iqr>0.2               0.067574
+  perturb_iqr>0.1               0.067990
+  perturb_iqr>0.05              0.069002
+  perturb_iqr>0.02              0.071358
+
+  Selector mean error and skill (vs best-of-four trivial reference):
+  Selector                 Mean error     Median    Skill
+  ──────────────────────────────────────────────────────────
+  oracle                     0.018396   0.008256    0.296
+  phase2_proxy               0.043578   0.024611    0.715
+  fixed_rational             0.053127   0.033332    1.000
+  diag_ensemble              0.071090   0.048073    1.512
+  fixed_richardson           0.082983   0.037902    1.003
+  constant_assumed           0.121328   0.061672    1.000
+  window_min                 0.122111   0.101175    1.810
+  last_value                 0.132677   0.118499    2.284
+  window_mean                0.199545   0.166977    3.834
+
+  perturb_IQR vs error correlation (richardson_1, by obs_idx):
+   obs_idx        r          p
+  ────────────────────────────────
+        30   0.4527     0.0000
+        60   0.3583     0.0000
+        90   0.2954     0.0000
+       120   0.1700     0.0000
+
+  All files saved to: results\phase4/
+========================================================================
+
+  Completed in 1797s
+
+========================================================================
+  [7/9]  Phase 5a — ensemble ablation
+  $ scripts/run_phase5a.py --full
+========================================================================
+========================================================================
+  PHASE 5A — Full-Pool Ensemble  [FULL, redesign v2]
+========================================================================
+  Pool        : 51 accelerators  (8 dangerous per artifact)
+  Reference   : 5 trivial comparators (oracle labelled)
+  obs_idx     : [30, 60, 90, 120]
+  noise       : [0.0, 0.005, 0.02]
+  gap strata  : [0.5, 0.1, 0.02]  (headline g = 0.1)
+  seeds       : 20
+  regimes     : 24 (core + held-out)
+  perturbs    : 5
+  EPS         : 0.01
+  evals       : 967,680 central + 4,406,400 perturbation calls
+  jobs        : 7  over 12 (obs_idx x noise) blocks
+  output dir  : results\phase5a
+========================================================================
+
+  Dangerous set (Phase-1 artifact): ['geom_avg_diff', 'linear', 'neville_2', 'neville_3', 'neville_4', 'pade_21', 'pade_31', 'pade_32']
+  Pool (ensembles): 51 accelerators  (8 dangerous per artifact)
+  Reference rows  : 5 trivial comparators (oracle labelled, never pooled)
+  Chunking        : 12 (obs_idx x noise) blocks of 1,440 cells, 7 job(s); shards in results\phase5a\shards
+
+  [  1/12] block obs=90   sigma=0        80,640 rows  compute  54.0 min  wall  54.0 min
+
+  FIRST CHUNK: obs=90 sigma=0: 1,440 cells, 80,640 rows in 54.0 min compute (2248.0 ms/cell), 54.0 min wall since start
+  PROJECTION  : 12 chunks / 7 jobs = 2 round(s) x 54.0 min = 1.80 h evaluation wall time at --jobs 7  (serial equivalent 10.79 h; equal-cost chunks assumed; aggregation and figures extra)
+
+  [  2/12] block obs=60   sigma=0.02     80,640 rows  compute  83.5 min  wall  83.6 min
+  [  3/12] block obs=30   sigma=0.02     80,640 rows  compute  85.0 min  wall  85.0 min
+  [  4/12] block obs=60   sigma=0.005    80,640 rows  compute    1.57 h  wall    1.57 h
+  [  5/12] block obs=60   sigma=0        80,640 rows  compute    1.61 h  wall    1.61 h
+  [  6/12] block obs=30   sigma=0.005    80,640 rows  compute    1.63 h  wall    1.63 h
+  [  7/12] block obs=30   sigma=0        80,640 rows  compute    1.72 h  wall    1.72 h
+  [  8/12] block obs=90   sigma=0.005    80,640 rows  compute  49.4 min  wall    1.72 h
+  [  9/12] block obs=90   sigma=0.02     80,640 rows  compute  38.9 min  wall    2.04 h
+  [ 10/12] block obs=120  sigma=0        80,640 rows  compute  56.3 min  wall    2.35 h
+  [ 11/12] block obs=120  sigma=0.02     80,640 rows  compute  46.8 min  wall    2.39 h
+  [ 12/12] block obs=120  sigma=0.005    80,640 rows  compute  50.5 min  wall    2.41 h
+
+  [12/12] 100.0%  Done in 2.41 h.
+
+  Saved: results\phase5a\phase5a_raw.csv  (967,680 rows,  251 MB; 12 shards concatenated)
+
+  Aggregating ensemble results ...
+  Saved: results\phase5a\phase5a_ensemble.csv  (66 rows)
+  Saved: results\phase5a\phase5a_ensemble_holdout.csv  (66 rows)
+  Saved: results\phase5a\phase5a_by_sigma.csv  (198 rows)
+  Saved: results\phase5a\phase5a_per_regime.csv  (1474 rows)
+  Saved: results\phase5a\phase5a_ablation.csv  (27 rows)
+  Saved: results\phase5a\phase5a_method_weights.csv  (51 rows)
+  Saved: results\phase5a\phase5a_oracle_gap.csv  (72 rows)
+  Saved: results\phase5a\phase5a_capped.csv  (1624 rows)
+
+  Generating figures ...
+  Saved: results\phase5a\figure_p5a_01_comparison.png
+  Saved: results\phase5a\figure_p5a_02_by_sigma.png
+  Saved: results\phase5a\figure_p5a_03_method_weights.png
+  Saved: results\phase5a\figure_p5a_04_obs_gap.png
+
+========================================================================
+  PHASE 5A SUMMARY
+========================================================================
+
+  Global mean error  (g = 0.5, core, capped excluded, top 14):
+  Selector                     Mean err     Median    Skill
+  ------------------------------------------------------------
+  oracle_51                    0.005580   0.001349    0.048  <-- upper bound
+  oracle_9                     0.017194   0.005874    0.192
+  diag_ensemble_9              0.039080   0.024106    0.541
+  fixed_rational               0.039375   0.025608    0.581  <-- fixed baseline
+  equal_ensemble_9             0.046765   0.025884    0.656
+  phase2_cascade               0.050230   0.027094    0.671
+  fixed_richardson             0.053939   0.025836    0.627
+  diag_ensemble_51             0.056640   0.027706    0.711
+  capped_diag_51               0.056640   0.027706    0.711
+  diag_ensemble_safe           0.057985   0.028185    0.735
+  capped_diag_safe             0.057985   0.028185    0.735
+  equal_ensemble_51            0.063385   0.042833    1.057
+  threshold_ens_safe           0.064933   0.048191    1.062
+  equal_ensemble_safe          0.064933   0.048191    1.062
+
+  Global mean error  (g = 0.1, core, capped excluded, top 14):
+  Selector                     Mean err     Median    Skill
+  ------------------------------------------------------------
+  oracle_51                    0.007153   0.002639    0.085  <-- upper bound
+  constant_oracle              0.013494   0.012386    0.207  <-- oracle comparator (reference)
+  oracle_9                     0.018396   0.008256    0.296
+  fixed_rational               0.053127   0.033332    1.000  <-- fixed baseline
+  phase2_cascade               0.067619   0.038166    1.000
+  diag_ensemble_9              0.070965   0.047842    1.524
+  equal_ensemble_9             0.075281   0.040566    1.073
+  fixed_richardson             0.082983   0.037902    1.003
+  diag_ensemble_safe           0.092347   0.053334    1.499
+  capped_diag_safe             0.092347   0.053334    1.499
+  diag_ensemble_51             0.095165   0.052020    1.612
+  capped_diag_51               0.095165   0.052020    1.612
+  equal_ensemble_51            0.108064   0.068025    1.538
+  threshold_ens_safe           0.108139   0.069042    1.550
+
+  Global mean error  (g = 0.02, core, capped excluded, top 14):
+  Selector                     Mean err     Median    Skill
+  ------------------------------------------------------------
+  constant_oracle              0.002500   0.002248    0.037  <-- oracle comparator (reference)
+  oracle_51                    0.006605   0.002844    0.110  <-- upper bound
+  oracle_9                     0.016068   0.008946    0.390
+  fixed_rational               0.056159   0.035603    1.165  <-- fixed baseline
+  phase2_cascade               0.068623   0.039497    1.066
+  fixed_richardson             0.074484   0.039415    1.097
+  diag_ensemble_9              0.076117   0.051456    1.898
+  equal_ensemble_9             0.080211   0.042808    1.241
+  diag_ensemble_safe           0.100389   0.058283    1.946
+  capped_diag_safe             0.100389   0.058283    1.946
+  diag_ensemble_51             0.103163   0.060408    2.117
+  capped_diag_51               0.103163   0.060408    2.117
+  constant_assumed             0.110434   0.049623    1.000
+  equal_ensemble_51            0.120880   0.082602    1.835
+
+  Performance by sigma level  (g = 0.1):
+  Selector                       sigma=0.0   sigma=0.005    sigma=0.02
+  ----------------------------------------------------------------------
+  oracle_51                       0.004400      0.008696      0.008363
+  threshold_ens_010               0.066316      0.130949      0.127290
+  capped_diag_51                  0.094041      0.095572      0.095882
+  equal_ensemble_51               0.065584      0.131028      0.127580
+  fixed_rational                  0.049668      0.052034      0.057681
+  constant_assumed                0.121328      0.121328      0.121328
+
+  Ablation (positive = first selector is better):
+  Comparison                            g   Improvement
+  --------------------------------------------------------
+  capped_diag_vs_equal               0.02      0.017718
+  capped_diag_vs_equal                0.1      0.012899
+  capped_diag_vs_equal                0.5      0.006745
+  diag_vs_equal_51                   0.02      0.017718
+  diag_vs_equal_51                    0.1      0.012899
+  diag_vs_equal_51                    0.5      0.006745
+  filter_benefit                     0.02     -0.000078
+  filter_benefit                      0.1     -0.000046
+  filter_benefit                      0.5     -0.000104
+  pool_expansion_gain                0.02     -0.040670
+  pool_expansion_gain                 0.1     -0.032783
+  pool_expansion_gain                 0.5     -0.016620
+  rational_vs_window_min             0.02      0.082783
+  rational_vs_window_min              0.1      0.068984
+  rational_vs_window_min              0.5      0.031058
+  threshold_vs_constant_assumed      0.02     -0.010650
+  threshold_vs_constant_assumed       0.1      0.013143
+  threshold_vs_constant_assumed       0.5      0.113047
+  threshold_vs_equal_51              0.02     -0.000204
+  threshold_vs_equal_51               0.1     -0.000121
+  threshold_vs_equal_51               0.5     -0.001652
+  threshold_vs_rational              0.02     -0.064926
+  threshold_vs_rational               0.1     -0.055058
+  threshold_vs_rational               0.5     -0.025662
+  weighting_gain_9                   0.02      0.004094
+  weighting_gain_9                    0.1      0.004316
+  weighting_gain_9                    0.5      0.007685
+
+  10 most reliable (lowest mean perturb_IQR, g = 0.1):
+  Method                     Mean IQR   Mean err    Skill  Dangerous?
+  --------------------------------------------------------------------
+  weniger_d1                   0.0000     0.1223    1.000  
+  weniger_d2                   0.0000     0.1236    1.000  
+  richardson_a20               0.0013     0.1701    2.623  
+  richardson_a10               0.0018     0.1414    2.090  
+  log_fit                      0.0018     0.1058    1.821  
+  richardson_a05               0.0029     0.1024    1.254  
+  anderson_3                   0.0040     0.1251    2.159  
+  anderson_2                   0.0042     0.1261    2.189  
+  current_value                0.0050     0.1327    2.284  
+  richardson_1                 0.0055     0.0830    1.003  
+
+  All files saved to: results\phase5a/
+========================================================================
+
+  Completed in 8868s
+
+========================================================================
+  [8/9]  Phase 5b — sensitivity sweeps
+  $ scripts/run_phase5b.py --full
+========================================================================
+========================================================================
+  PHASE 5B — Sensitivity Analysis  [FULL, redesign v2]
+========================================================================
+  Sweep 1 (L_hat mode): ['zero', 'half', 'oracle', 'double', 'winmin']
+  Sweep 2 (window):     [20, 40, 60, 80, 100]
+  Sweep 3 (CAT_MULT):   [2.0, 5.0, 10.0]  (55 methods)
+  gap strata: [0.5, 0.1]  (headline g = 0.1)
+  noise:      [0.0, 0.005, 0.02]
+  seeds:      20
+  regimes:    24 (core + held-out)
+  dangerous:  8 per artifact
+  Sweep 1 evals: 28,800
+  Sweep 2 evals: 28,800
+  Sweep 3 evals: 475,200
+  Output dir: results\phase5b
+========================================================================
+
+  Dangerous set (Phase-1 artifact): ['geom_avg_diff', 'linear', 'neville_2', 'neville_3', 'neville_4', 'pade_21', 'pade_31', 'pade_32']
+
+  === SWEEP 1: Assumed-Asymptote (L_hat) Sensitivity ===
+  Sweep 1: 5 assumed-L modes × 3 noise × 20 seeds × 24 regimes × 2 strata
+    [  720/7200]   10.0%  mode=zero  sigma=0.005
+    [ 1440/7200]   20.0%  mode=zero  sigma=0.020
+    [ 2160/7200]   30.0%  mode=half  sigma=0.005
+    [ 2880/7200]   40.0%  mode=half  sigma=0.020
+    [ 3600/7200]   50.0%  mode=oracle  sigma=0.005
+    [ 4320/7200]   60.0%  mode=oracle  sigma=0.020
+    [ 5040/7200]   70.0%  mode=double  sigma=0.005
+    [ 5760/7200]   80.0%  mode=double  sigma=0.020
+    [ 6480/7200]   90.0%  mode=winmin  sigma=0.005
+    [ 7200/7200]  100.0%  mode=winmin  sigma=0.020
+  Saved: results\phase5b\phase5b_sweep1_global.csv  (60 rows)
+  Saved: results\phase5b\phase5b_sweep1_regime.csv  (720 rows)
+
+  === SWEEP 2: Window Length Sensitivity ===
+  Sweep 2: 5 window lengths × 3 noise × 20 seeds × 24 regimes × 2 strata
+    [  720/7200]   10.0%  win=20  sigma=0.005
+    [ 1440/7200]   20.0%  win=20  sigma=0.020
+    [ 2160/7200]   30.0%  win=40  sigma=0.005
+    [ 2880/7200]   40.0%  win=40  sigma=0.020
+    [ 3600/7200]   50.0%  win=60  sigma=0.005
+    [ 4320/7200]   60.0%  win=60  sigma=0.020
+    [ 5040/7200]   70.0%  win=80  sigma=0.005
+    [ 5760/7200]   80.0%  win=80  sigma=0.020
+    [ 6480/7200]   90.0%  win=100  sigma=0.005
+    [ 7200/7200]  100.0%  win=100  sigma=0.020
+  Saved: results\phase5b\phase5b_sweep2_global.csv  (60 rows)
+  Saved: results\phase5b\phase5b_sweep2_regime.csv  (720 rows)
+
+  === SWEEP 3: CAT_MULT Sensitivity ===
+  Sweep 3: 3 CAT_MULT × 3 noise × 20 seeds × 24 regimes × 2 strata  (55 methods, oracle excluded)
+    [  432/4320]   10.0%  CAT_MULT=2  sigma=0.000
+    [  864/4320]   20.0%  CAT_MULT=2  sigma=0.005
+    [ 1296/4320]   30.0%  CAT_MULT=2  sigma=0.020
+    [ 1728/4320]   40.0%  CAT_MULT=5  sigma=0.000
+    [ 2160/4320]   50.0%  CAT_MULT=5  sigma=0.005
+    [ 2592/4320]   60.0%  CAT_MULT=5  sigma=0.020
+    [ 3024/4320]   70.0%  CAT_MULT=10  sigma=0.000
+    [ 3456/4320]   80.0%  CAT_MULT=10  sigma=0.005
+    [ 3888/4320]   90.0%  CAT_MULT=10  sigma=0.020
+    [ 4320/4320]  100.0%  CAT_MULT=10  sigma=0.020
+  Saved: results\phase5b\phase5b_sweep3_champions.csv  (138 rows)
+  Saved: results\phase5b\phase5b_sweep3_global.csv  (330 rows)
+  Saved: results\phase5b\phase5b_sweep3_unranked.csv  (39 rows)
+  Saved: results\phase5b\phase5b_sweep3_concordance.csv  (6 rows)
+
+  Generating figures ...
+  Saved: results\phase5b\figure_p5b_01_linf.png
+  Saved: results\phase5b\figure_p5b_02_window.png
+  Saved: results\phase5b\figure_p5b_03_catmult.png
+
+========================================================================
+  PHASE 5B SUMMARY
+========================================================================
+
+  SWEEP 1 — Cascade metrics vs assumed-asymptote mode (g=0.1, sigma=0.0, core, capped excluded):
+      mode  Precision   Recall       Gain  Robust?
+  -------------------------------------------------------
+      zero      0.524    0.184     0.0457  NO
+      half      0.550    0.184     0.0458  NO
+    oracle      0.550    0.184     0.0458  NO (oracle)
+    double      0.550    0.184     0.0458  NO
+    winmin      0.550    0.184     0.0458  NO
+
+  SWEEP 2 — Cascade metrics vs window length (g=0.1, sigma=0.0):
+    Window  Precision   Recall       Gain  Robust?
+  -------------------------------------------------------
+        20      0.529    0.250     0.0027  NO
+        40      0.651    0.228     0.0196  NO
+        60      0.540    0.189     0.0457  NO <-- Phase 2 default
+        80      0.550    0.231     0.0139  NO
+       100      1.000    0.202     0.0006  YES
+
+  SWEEP 3 — CAT_MULT concordance (g=0.1, core):
+  Comparison                 Kendall tau   Champ agree
+  -------------------------------------------------------
+  CAT=2 vs CAT=5                 0.7743        0.8125
+  CAT=2 vs CAT=10                 0.6651        0.8125
+  CAT=5 vs CAT=10                 0.8575        0.8750
+
+  SWEEP 3 — top-5 global stability ranking (g=0.1, CAT_MULT=2, core, capped excluded, rank floor valid_rate >= 0.9):
+      1  single_exp_fit         S=1.310  valid=1.000
+      2  richardson_a10         S=1.248  valid=1.000
+      3  double_exp_fit         S=1.227  valid=0.983
+      4  richardson_a20         S=1.200  valid=1.000
+      5  rational_fit           S=1.195  valid=1.000
+  SWEEP 3 — unranked, below the validity floor (g=0.1, CAT_MULT=2; 8 methods):
+       -  pade_31                S=-0.811  valid=0.848
+       -  neville_2              S=-0.834  valid=0.614
+       -  geom_avg_diff          S=-0.297  valid=0.584
+       -  pade_32                S=-0.863  valid=0.545
+       -  pade_21                S=-1.033  valid=0.522
+       -  linear                 S=-1.360  valid=0.445
+       -  neville_3              S=-1.049  valid=0.401
+       -  neville_4              S=-1.137  valid=0.314
+
+  Core regime champions: 4/16 regimes change champion across CAT_MULT values (g=0.1).
+    damped_osc_pow        : CAT=2=richardson_a05  |  CAT=5=richardson_1  |  CAT=10=richardson_1
+    heavy_noise_plat      : CAT=2=window_mean  |  CAT=5=window_mean  |  CAT=10=pade_11
+    single_exp            : CAT=2=single_exp_fit  |  CAT=5=richardson_a20  |  CAT=10=single_exp_fit
+    slow_osc_power        : CAT=2=richardson_a20  |  CAT=5=richardson_a10  |  CAT=10=richardson_a10
+
+  All files saved to: results\phase5b/
+========================================================================
+
+  Completed in 2287s
+
+========================================================================
+  [9/9]  Real data — recorded-curve re-evaluation
+  $ scripts/run_real_data.py --full
+========================================================================
+========================================================================
+  REAL DATA — RE-EVALUATION OF RECORDED CURVES  (redesign v2)
+========================================================================
+  Curves     : C:\Users\kianu\Dropbox\Projects\Ongoing\Accelerator_project\code\results/real_data/real_data_curves.csv
+  Depths     : [30, 60, 90, 120, 150]
+  Targets    : [300, 400, 500]  (cells need depth < target)
+  Window len : 60
+  L_hat mode : zero  (no oracle on real curves)
+  Methods    : richardson_1, rational_fit, cascade + 4 trivial references
+  Cells      : 90  ->  630 evaluations
+  Output dir : results\real_data
+  Legacy 18-cell results are preserved (real_data_results.csv untouched).
+========================================================================
+
+  Saved: results\real_data\real_data_results_v2.csv  (630 rows)
+  Saved: results\real_data\real_data_summary_v2.csv  (90 rows)
+  Saved: results\real_data\figure_rd_v2_01_skill.png
+
+================================================================================
+  REAL-DATA RE-EVALUATION SUMMARY  (recorded curves, no retraining)
+================================================================================
+
+  Datasets   : ['adult', 'bank_marketing', 'covertype', 'higgs', 'jannis', 'miniboone']
+  Cells      : 90  (depth < target)
+  L_hat mode : zero
+
+  Per (depth, target): mean errors and median cascade skill
+   depth  target    cascade  richardson   rational    current  best-triv  med skill  beats triv
+  ────────────────────────────────────────────────────────────────────────────────────────────
+      30     300    0.03444     0.02530    0.02842    0.11247    0.11247      0.305        1.00
+      30     400    0.03891     0.03206    0.03512    0.11914    0.11914      0.368        1.00
+      30     500    0.04263     0.03778    0.04061    0.12358    0.12358      0.381        1.00
+      60     300    0.02503     0.02653    0.01854    0.05657    0.05657      0.496        0.67
+      60     400    0.03397     0.03639    0.02473    0.06324    0.06324      0.607        0.67
+      60     500    0.04137     0.04457    0.02990    0.06767    0.06767      0.728        0.50
+      90     300    0.00516     0.00575    0.00645    0.03489    0.03489      0.209        1.00
+      90     400    0.00988     0.01068    0.01161    0.04156    0.04156      0.281        1.00
+      90     500    0.01406     0.01501    0.01615    0.04600    0.04600      0.353        1.00
+     120     300    0.00695     0.00780    0.00785    0.02308    0.02308      0.262        0.83
+     120     400    0.01199     0.01333    0.01331    0.02975    0.02975      0.351        0.67
+     120     500    0.01638     0.01814    0.01803    0.03418    0.03418      0.414        0.67
+     150     300    0.00432     0.00388    0.00480    0.01609    0.01608      0.274        0.83
+     150     400    0.00855     0.00808    0.00945    0.02276    0.02275      0.356        0.67
+     150     500    0.01233     0.01173    0.01363    0.02725    0.02725      0.419        0.67
+
+  Method median skill over all cells (skill < 1 beats the best trivial reference):
+    cascade            med skill = 0.336   finite = 90/90
+    constant_assumed   med skill = 10.650   finite = 90/90
+    last_value         med skill = 1.000   finite = 90/90
+    rational_fit       med skill = 0.355   finite = 90/90
+    richardson_1       med skill = 0.345   finite = 90/90
+    window_mean        med skill = 1.876   finite = 90/90
+    window_min         med skill = 1.000   finite = 90/90
+
+  Cascade method selection: {'richardson_1': np.int64(54), 'rational_fit': np.int64(36)}
+  Best trivial reference:   {'last_value': np.int64(88), 'window_min': np.int64(2)}
+
+  perturb_iqr of the routed method (5 trials, 2% perturbation, crc32 seed per (dataset, depth)): finite = 90/90, median = 0.00301, range = [0.00019, 0.05367]
+    routed rational_fit   n =  36  median perturb_iqr = 0.00573
+    routed richardson_1   n =  54  median perturb_iqr = 0.00168
+
+  Provenance (recorded on every summary row):
+    phase2_features_path = 'results\\phase2\\phase2_features.csv'
+    phase2_features_rows = 23400
+    git_head             = 0375f24
+
+========================================================================
+
+
+  Completed in 5s
+
+========================================================================
+  PIPELINE SUMMARY  [FULL]
+========================================================================
+   #  step                                             status       time
+  ----------------------------------------------------------------------
+   1  Phase 0 — analytic unit tests                    OK             2s
+   2  Phase 1 — main benchmark                         OK          1839s
+   3  Dangerous re-derivation (Phase 1 -> artifact)    OK             1s
+   4  Phase 2 — failure detection                      OK           979s
+   5  Phase 3 — adaptive selection                     OK             5s
+   6  Phase 4 — perturbation diagnostics               OK          1797s
+   7  Phase 5a — ensemble ablation                     OK          8868s
+   8  Phase 5b — sensitivity sweeps                    OK          2287s
+   9  Real data — recorded-curve re-evaluation         OK             5s
+  ----------------------------------------------------------------------
+      total                                                       15783s
+  All steps completed successfully.  Results are in results/
+========================================================================
+
+EXIT 0 03:58:25

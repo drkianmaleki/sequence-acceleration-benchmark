@@ -1,6 +1,10 @@
-selector,mean_error,median_error,n
-oracle,0.007693,0.003965,4320
-fixed_rational,0.042219,0.01232,4320
-fixed_richardson,0.052288,0.015963,4320
-phase2_proxy,0.025817,0.008059,4320
-diag_ensemble,0.067046,0.042717,4320
+selector,target_g,is_trivial,mean_error,median_error,med_skill,n
+oracle,0.1,0,0.018396,0.008256,0.2958,3780
+fixed_rational,0.1,0,0.053127,0.033332,1.0,3780
+fixed_richardson,0.1,0,0.082983,0.037902,1.0027,3780
+phase2_proxy,0.1,0,0.043578,0.024611,0.7147,3780
+diag_ensemble,0.1,0,0.07109,0.048073,1.5119,3780
+constant_assumed,0.1,1,0.121328,0.061672,1.0,3780
+last_value,0.1,1,0.132677,0.118499,2.2837,3780
+window_mean,0.1,1,0.199545,0.166977,3.8343,3780
+window_min,0.1,1,0.122111,0.101175,1.8102,3780
