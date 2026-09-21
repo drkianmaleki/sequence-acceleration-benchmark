@@ -6,7 +6,7 @@
 ────────────────────────────────────────────────────────────────────────
   GEOM: Geometric r=0.92 — algebraic methods should be exact
   Threshold: >= 10x improvement  (or abs_error < 1e-08 = PASS)
-  Pass: 14/51   Valid: 43/51
+  Pass: 14/49   Valid: 41/49
 ────────────────────────────────────────────────────────────────────────
   Method                       Estimate     AbsError    Improve   Result
   ──────────────────────── ──────────── ──────────── ────────── ────────
@@ -47,8 +47,6 @@
   richardson_3                 0.000015     9.98e-03      0.04x     fail
   pade_11                      0.000012     9.99e-03      0.04x     fail
   pade_13                     -0.000000     1.00e-02      0.04x     fail
-  weniger_d1                  -0.000000     1.00e-02      0.04x     fail
-  weniger_d2                  -0.000000     1.00e-02      0.04x     fail
   richardson_a20              -0.000781     1.08e-02      0.04x     fail
   richardson_a10              -0.023612     3.36e-02      0.01x     fail
   richardson_a05              -0.060851     7.09e-02      0.01x     fail
@@ -65,7 +63,7 @@
 ────────────────────────────────────────────────────────────────────────
   HARMONIC: Harmonic (power-law alpha=1) — Richardson target
   Threshold: >= 5x improvement  (or abs_error < 1e-08 = PASS)
-  Pass: 26/51   Valid: 49/51
+  Pass: 26/49   Valid: 47/49
 ────────────────────────────────────────────────────────────────────────
   Method                       Estimate     AbsError    Improve   Result
   ──────────────────────── ──────────── ──────────── ────────── ────────
@@ -111,8 +109,6 @@
   single_exp_fit               0.018775     8.77e-03      1.25x     fail
   double_exp_fit               0.018775     8.77e-03      1.25x     fail
   richardson_a20               0.019401     9.40e-03      1.17x     fail
-  weniger_d1                  -0.000000     1.00e-02      1.10x     fail
-  weniger_d2                   0.000000     1.00e-02      1.10x     fail
   anderson_3                   0.020976     1.10e-02      1.00x     fail
   anderson_2                   0.020981     1.10e-02      1.00x     fail
   anderson_1                   0.020985     1.10e-02      1.00x     fail
@@ -124,12 +120,10 @@
 ────────────────────────────────────────────────────────────────────────
   LOGSLOW: Log-slow — Brezinski-theta / Wynn-rho target
   Threshold: >= 2x improvement  (or abs_error < 1e-08 = PASS)
-  Pass: 11/51   Valid: 50/51
+  Pass: 9/49   Valid: 48/49
 ────────────────────────────────────────────────────────────────────────
   Method                       Estimate     AbsError    Improve   Result
   ──────────────────────── ──────────── ──────────── ────────── ────────
-  weniger_d1                  -0.000000     1.00e-02     17.66x     PASS
-  weniger_d2                   0.000000     1.00e-02     17.66x     PASS
   pade_13                     -0.002569     1.26e-02     14.05x     PASS
   pade_12                      0.034639     2.46e-02      7.17x     PASS
   pade_32                     -0.035737     4.57e-02      3.86x     PASS
@@ -183,7 +177,7 @@
 ────────────────────────────────────────────────────────────────────────
   ALTGEOM: Alternating geometric — Shanks/Aitken theoretically exact
   Threshold: >= 20x improvement  (or abs_error < 1e-08 = PASS)
-  Pass: 10/51   Valid: 44/51
+  Pass: 10/49   Valid: 42/49
 ────────────────────────────────────────────────────────────────────────
   Method                       Estimate     AbsError    Improve   Result
   ──────────────────────── ──────────── ──────────── ────────── ────────
@@ -227,8 +221,6 @@
   pade_21                      0.019474     9.47e-03      0.00x     fail
   pade_23                      0.037965     2.80e-02      0.00x     fail
   pade_32                      0.017207     7.21e-03      0.00x     fail
-  weniger_d1                  -0.000000     1.00e-02      0.00x     fail
-  weniger_d2                  -0.000000     1.00e-02      0.00x     fail
   neville_3                    0.309811     3.00e-01      0.00x     fail
   neville_4                   13.841195     1.38e+01      0.00x     fail
   log_linear                    INVALID            —          —  INVALID
@@ -243,55 +235,53 @@
   GLOBAL PASS SUMMARY  (✓ = PASS, · = fail or invalid)
   Method                       GEOM     HARM     LOGS     ALTG    Total
   ──────────────────────── ──────── ──────── ──────── ──────── ────────
+  levin_v1                        ✓        ✓        ✓        ✓        4
   levin_u2                        ✓        ✓        ✓        ✓        4
   levin_v2                        ✓        ✓        ✓        ✓        4
-  levin_v1                        ✓        ✓        ✓        ✓        4
-  log_linear                      ✓        ✓        ✓        ·        3
   levin_u1                        ·        ✓        ✓        ✓        3
-  levin_t1                        ✓        ·        ·        ✓        2
-  best_shanks_wynn                ✓        ·        ·        ✓        2
-  median_ensemble                 ·        ✓        ·        ✓        2
+  log_linear                      ✓        ✓        ✓        ·        3
   levin_t2                        ✓        ·        ·        ✓        2
-  pade_12                         ·        ✓        ✓        ·        2
-  pade_13                         ·        ✓        ✓        ·        2
-  pade_23                         ·        ✓        ✓        ·        2
-  pade_32                         ·        ✓        ✓        ·        2
+  levin_t1                        ✓        ·        ·        ✓        2
+  median_ensemble                 ·        ✓        ·        ✓        2
+  best_shanks_wynn                ✓        ·        ·        ✓        2
   shanks_1                        ✓        ·        ·        ✓        2
   wynn_eps_1                      ✓        ·        ·        ✓        2
-  double_exp_fit                  ✓        ·        ·        ·        1
-  geom_avg_diff                   ✓        ·        ·        ·        1
+  pade_23                         ·        ✓        ✓        ·        2
+  pade_32                         ·        ✓        ✓        ·        2
+  pade_13                         ·        ✓        ✓        ·        2
+  pade_12                         ·        ✓        ✓        ·        2
   brezinski_theta2                ✓        ·        ·        ·        1
   brezinski_theta1                ✓        ·        ·        ·        1
-  wynn_rho_2                      ·        ✓        ·        ·        1
+  richardson_2                    ·        ✓        ·        ·        1
+  richardson_1                    ·        ✓        ·        ·        1
+  shanks_3                        ·        ✓        ·        ·        1
   richardson_3                    ·        ✓        ·        ·        1
   shanks_4                        ·        ✓        ·        ·        1
-  richardson_a10                  ·        ✓        ·        ·        1
-  single_exp_fit                  ✓        ·        ·        ·        1
-  weniger_d2                      ·        ·        ✓        ·        1
-  pade_11                         ·        ✓        ·        ·        1
+  wynn_rho_2                      ·        ✓        ·        ·        1
+  double_exp_fit                  ✓        ·        ·        ·        1
+  geom_avg_diff                   ✓        ·        ·        ·        1
   neville_4                       ·        ✓        ·        ·        1
+  pade_11                         ·        ✓        ·        ·        1
   pade_22                         ·        ✓        ·        ·        1
   pade_21                         ·        ✓        ·        ·        1
   pade_31                         ·        ✓        ·        ·        1
   rational_fit                    ·        ✓        ·        ·        1
-  richardson_1                    ·        ✓        ·        ·        1
-  richardson_2                    ·        ✓        ·        ·        1
-  neville_2                       ·        ✓        ·        ·        1
   neville_3                       ·        ✓        ·        ·        1
+  neville_2                       ·        ✓        ·        ·        1
   wynn_rho_1                      ·        ✓        ·        ·        1
-  shanks_3                        ·        ✓        ·        ·        1
-  weniger_d1                      ·        ·        ✓        ·        1
-  log_fit                         ·        ·        ·        ·        0
-  anderson_2                      ·        ·        ·        ·        0
-  anderson_1                      ·        ·        ·        ·        0
-  current_value                   ·        ·        ·        ·        0
-  anderson_3                      ·        ·        ·        ·        0
+  richardson_a10                  ·        ✓        ·        ·        1
+  single_exp_fit                  ✓        ·        ·        ·        1
   linear                          ·        ·        ·        ·        0
+  anderson_3                      ·        ·        ·        ·        0
+  anderson_1                      ·        ·        ·        ·        0
+  anderson_2                      ·        ·        ·        ·        0
+  current_value                   ·        ·        ·        ·        0
+  log_fit                         ·        ·        ·        ·        0
+  shanks_2                        ·        ·        ·        ·        0
   richardson_a05                  ·        ·        ·        ·        0
   richardson_a20                  ·        ·        ·        ·        0
-  shanks_2                        ·        ·        ·        ·        0
-  stability_weighted              ·        ·        ·        ·        0
   wynn_eps_2                      ·        ·        ·        ·        0
+  stability_weighted              ·        ·        ·        ·        0
   wynn_eps_3                      ·        ·        ·        ·        0
   wynn_rho_3                      ·        ·        ·        ·        0
 

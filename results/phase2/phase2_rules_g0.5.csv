@@ -12,9 +12,9 @@ target_g,feature,operator,threshold,alternative,n_fire,n_total,fire_rate,precisi
 0.5,oscillation_idx,>,0.1,log_linear,931,1170,0.796,0.216,0.834,-0.1327
 0.5,richardson_r2,<,0.7,log_linear,355,1170,0.303,0.186,0.274,-0.3639
 0.5,noise_var,>,1e-05,richardson_a10,1014,1170,0.867,0.182,0.934,-0.1124
+0.5,diff_ratio_cv,<,0.01,levin_t2,133,1170,0.114,0.18,0.14,-0.0858
 0.5,richardson_r2,<,0.5,pade_22,268,1170,0.229,0.168,0.225,-0.3763
 0.5,diff_ratio_cv,<,0.05,pade_22,568,1170,0.485,0.158,0.45,-0.1348
+0.5,oscillation_idx,>,0.05,levin_t2,960,1170,0.821,0.139,0.773,-0.1846
+0.5,richardson_r2,<,0.5,levin_t2,268,1170,0.229,0.108,0.169,-0.2349
 0.5,curvature_idx,>,0.2,pade_22,307,1170,0.262,0.091,0.14,-0.6623
-0.5,richardson_r2,<,0.5,weniger_d2,268,1170,0.229,0.052,0.341,-1.188
-0.5,oscillation_idx,>,0.05,weniger_d2,960,1170,0.821,0.036,0.854,-0.772
-0.5,diff_ratio_cv,<,0.01,weniger_d2,133,1170,0.114,0.03,0.098,-0.6615

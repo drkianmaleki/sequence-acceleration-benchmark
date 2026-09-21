@@ -1,5 +1,5 @@
 method,diagnostic,spearman_r,p_value,n
-ALL,shift_iqr,0.0954,0.0,103770
+ALL,shift_iqr,0.1314,0.0,103677
 current_value,shift_iqr,,,11640
 richardson_1,shift_iqr,0.5831,0.0,11640
 richardson_a10,shift_iqr,0.7786,0.0,11640
@@ -7,9 +7,9 @@ single_exp_fit,shift_iqr,0.4055,0.0,11640
 rational_fit,shift_iqr,0.4869,0.0,11640
 pade_22,shift_iqr,0.4174,0.0,11289
 log_linear,shift_iqr,0.6287,0.0,11250
-weniger_d2,shift_iqr,,,11394
+levin_t2,shift_iqr,,,11301
 anderson_1,shift_iqr,,,11637
-ALL,perturb_iqr,0.2251,0.0,103734
+ALL,perturb_iqr,0.3852,0.0,103641
 current_value,perturb_iqr,0.5401,0.0,11640
 richardson_1,perturb_iqr,0.3185,0.0,11640
 richardson_a10,perturb_iqr,0.341,0.0,11640
@@ -17,5 +17,5 @@ single_exp_fit,perturb_iqr,0.3145,0.0,11640
 rational_fit,perturb_iqr,0.2964,0.0,11640
 pade_22,perturb_iqr,0.4246,0.0,11253
 log_linear,perturb_iqr,0.4913,0.0,11250
-weniger_d2,perturb_iqr,0.1522,0.0,11394
+levin_t2,perturb_iqr,0.4464,0.0,11301
 anderson_1,perturb_iqr,0.4636,0.0,11637

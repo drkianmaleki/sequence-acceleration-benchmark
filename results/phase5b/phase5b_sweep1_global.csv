@@ -1,61 +1,61 @@
-assumed_mode,target_g,noise,regime_set,n_capped_excluded,fire_rate,precision,recall,mean_gain,n
-zero,0.5,0.0,core,0,0.2333,0.4167,0.1683,0.014432,360
-zero,0.5,0.0,holdout,0,0.0167,0.0,0.0,-1.3e-05,120
-zero,0.5,0.005,core,0,0.2333,0.4524,0.1696,0.014518,360
-zero,0.5,0.005,holdout,0,0.025,0.6667,0.0253,2.3e-05,120
-zero,0.5,0.02,core,0,0.4,0.5139,0.341,0.013537,360
-zero,0.5,0.02,holdout,0,0.2667,0.375,0.1875,-0.000703,120
-zero,0.1,0.0,core,40,0.1969,0.5238,0.1844,0.04569,320
-zero,0.1,0.0,holdout,1,0.0168,0.0,0.0,-4.7e-05,119
-zero,0.1,0.005,core,40,0.1969,0.5714,0.1765,0.046046,320
-zero,0.1,0.005,holdout,1,0.0252,0.6667,0.025,0.000313,119
-zero,0.1,0.02,core,40,0.3281,0.5429,0.3,0.045307,320
-zero,0.1,0.02,holdout,1,0.2689,0.4375,0.1972,-0.001944,119
-half,0.5,0.0,core,0,0.2222,0.4375,0.1683,0.014537,360
-half,0.5,0.0,holdout,0,0.0083,0.0,0.0,-6e-06,120
-half,0.5,0.005,core,0,0.2222,0.45,0.1607,0.014589,360
-half,0.5,0.005,holdout,0,0.0167,0.5,0.0127,2.1e-05,120
-half,0.5,0.02,core,0,0.4,0.5139,0.341,0.013535,360
-half,0.5,0.02,holdout,0,0.2667,0.375,0.1875,-0.000703,120
-half,0.1,0.0,core,40,0.1875,0.55,0.1844,0.045751,320
-half,0.1,0.0,holdout,1,0.0084,0.0,0.0,-2.4e-05,119
-half,0.1,0.005,core,40,0.1875,0.5833,0.1716,0.045901,320
-half,0.1,0.005,holdout,1,0.0168,0.5,0.0125,2.6e-05,119
-half,0.1,0.02,core,40,0.3281,0.5429,0.3,0.045307,320
-half,0.1,0.02,holdout,1,0.2689,0.4375,0.1972,-0.001944,119
-oracle,0.5,0.0,core,0,0.2222,0.4375,0.1683,0.014537,360
-oracle,0.5,0.0,holdout,0,0.0083,0.0,0.0,-6e-06,120
-oracle,0.5,0.005,core,0,0.2222,0.45,0.1607,0.014589,360
-oracle,0.5,0.005,holdout,0,0.0167,0.5,0.0127,2.1e-05,120
-oracle,0.5,0.02,core,0,0.4,0.5139,0.341,0.013536,360
-oracle,0.5,0.02,holdout,0,0.2667,0.375,0.1875,-0.000703,120
-oracle,0.1,0.0,core,40,0.1875,0.55,0.1844,0.045751,320
-oracle,0.1,0.0,holdout,1,0.0084,0.0,0.0,-2.4e-05,119
-oracle,0.1,0.005,core,40,0.1875,0.5833,0.1716,0.045901,320
-oracle,0.1,0.005,holdout,1,0.0168,0.5,0.0125,2.6e-05,119
-oracle,0.1,0.02,core,40,0.3281,0.5429,0.3,0.045308,320
-oracle,0.1,0.02,holdout,1,0.2689,0.4375,0.1972,-0.001944,119
-double,0.5,0.0,core,0,0.2222,0.4375,0.1683,0.014537,360
-double,0.5,0.0,holdout,0,0.0083,0.0,0.0,-6e-06,120
-double,0.5,0.005,core,0,0.2222,0.4625,0.1644,0.01459,360
-double,0.5,0.005,holdout,0,0.0167,0.5,0.0127,2.1e-05,120
-double,0.5,0.02,core,0,0.4,0.5139,0.341,0.013532,360
-double,0.5,0.02,holdout,0,0.2667,0.375,0.1875,-0.000703,120
-double,0.1,0.0,core,40,0.1875,0.55,0.1844,0.045751,320
-double,0.1,0.0,holdout,1,0.0084,0.0,0.0,-2.4e-05,119
-double,0.1,0.005,core,40,0.1875,0.5833,0.1716,0.045902,320
-double,0.1,0.005,holdout,1,0.0168,0.5,0.0125,2.6e-05,119
-double,0.1,0.02,core,40,0.3281,0.5429,0.3,0.0453,320
-double,0.1,0.02,holdout,1,0.2689,0.4375,0.1972,-0.001945,119
-winmin,0.5,0.0,core,0,0.2222,0.4375,0.1683,0.014537,360
-winmin,0.5,0.0,holdout,0,0.0083,0.0,0.0,-6e-06,120
-winmin,0.5,0.005,core,0,0.2222,0.45,0.1607,0.014589,360
-winmin,0.5,0.005,holdout,0,0.0167,0.5,0.0127,2.1e-05,120
-winmin,0.5,0.02,core,0,0.4,0.5139,0.341,0.01354,360
-winmin,0.5,0.02,holdout,0,0.2667,0.375,0.1875,-0.000703,120
-winmin,0.1,0.0,core,40,0.1875,0.55,0.1844,0.045751,320
-winmin,0.1,0.0,holdout,1,0.0084,0.0,0.0,-2.4e-05,119
-winmin,0.1,0.005,core,40,0.1875,0.5833,0.1716,0.045901,320
-winmin,0.1,0.005,holdout,1,0.0168,0.5,0.0125,2.6e-05,119
-winmin,0.1,0.02,core,40,0.3281,0.5429,0.3,0.045307,320
-winmin,0.1,0.02,holdout,1,0.2689,0.4375,0.1972,-0.001945,119
+assumed_mode,target_g,noise,regime_set,n_capped_excluded,fire_rate,precision,recall,mean_gain,n,note
+zero,0.5,0.0,core,0,0.2333,0.4167,0.1683,0.014432,360,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+zero,0.5,0.0,holdout,0,0.0167,0.0,0.0,-1.3e-05,120,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+zero,0.5,0.005,core,0,0.2333,0.4524,0.1696,0.014518,360,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+zero,0.5,0.005,holdout,0,0.025,0.6667,0.0253,2.3e-05,120,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+zero,0.5,0.02,core,0,0.4,0.5139,0.341,0.013537,360,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+zero,0.5,0.02,holdout,0,0.2667,0.375,0.1875,-0.000703,120,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+zero,0.1,0.0,core,40,0.1969,0.5238,0.1844,0.04569,320,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+zero,0.1,0.0,holdout,1,0.0168,0.0,0.0,-4.7e-05,119,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+zero,0.1,0.005,core,40,0.1969,0.5714,0.1765,0.046046,320,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+zero,0.1,0.005,holdout,1,0.0252,0.6667,0.025,0.000313,119,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+zero,0.1,0.02,core,40,0.3281,0.5429,0.3,0.045307,320,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+zero,0.1,0.02,holdout,1,0.2689,0.4375,0.1972,-0.001944,119,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+half,0.5,0.0,core,0,0.2222,0.4375,0.1683,0.014537,360,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+half,0.5,0.0,holdout,0,0.0083,0.0,0.0,-6e-06,120,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+half,0.5,0.005,core,0,0.2222,0.45,0.1607,0.014589,360,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+half,0.5,0.005,holdout,0,0.0167,0.5,0.0127,2.1e-05,120,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+half,0.5,0.02,core,0,0.4,0.5139,0.341,0.013535,360,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+half,0.5,0.02,holdout,0,0.2667,0.375,0.1875,-0.000703,120,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+half,0.1,0.0,core,40,0.1875,0.55,0.1844,0.045751,320,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+half,0.1,0.0,holdout,1,0.0084,0.0,0.0,-2.4e-05,119,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+half,0.1,0.005,core,40,0.1875,0.5833,0.1716,0.045901,320,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+half,0.1,0.005,holdout,1,0.0168,0.5,0.0125,2.6e-05,119,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+half,0.1,0.02,core,40,0.3281,0.5429,0.3,0.045307,320,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+half,0.1,0.02,holdout,1,0.2689,0.4375,0.1972,-0.001944,119,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+oracle,0.5,0.0,core,0,0.2222,0.4375,0.1683,0.014537,360,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+oracle,0.5,0.0,holdout,0,0.0083,0.0,0.0,-6e-06,120,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+oracle,0.5,0.005,core,0,0.2222,0.45,0.1607,0.014589,360,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+oracle,0.5,0.005,holdout,0,0.0167,0.5,0.0127,2.1e-05,120,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+oracle,0.5,0.02,core,0,0.4,0.5139,0.341,0.013536,360,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+oracle,0.5,0.02,holdout,0,0.2667,0.375,0.1875,-0.000703,120,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+oracle,0.1,0.0,core,40,0.1875,0.55,0.1844,0.045751,320,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+oracle,0.1,0.0,holdout,1,0.0084,0.0,0.0,-2.4e-05,119,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+oracle,0.1,0.005,core,40,0.1875,0.5833,0.1716,0.045901,320,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+oracle,0.1,0.005,holdout,1,0.0168,0.5,0.0125,2.6e-05,119,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+oracle,0.1,0.02,core,40,0.3281,0.5429,0.3,0.045308,320,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+oracle,0.1,0.02,holdout,1,0.2689,0.4375,0.1972,-0.001944,119,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+double,0.5,0.0,core,0,0.2222,0.4375,0.1683,0.014537,360,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+double,0.5,0.0,holdout,0,0.0083,0.0,0.0,-6e-06,120,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+double,0.5,0.005,core,0,0.2222,0.4625,0.1644,0.01459,360,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+double,0.5,0.005,holdout,0,0.0167,0.5,0.0127,2.1e-05,120,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+double,0.5,0.02,core,0,0.4,0.5139,0.341,0.013532,360,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+double,0.5,0.02,holdout,0,0.2667,0.375,0.1875,-0.000703,120,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+double,0.1,0.0,core,40,0.1875,0.55,0.1844,0.045751,320,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+double,0.1,0.0,holdout,1,0.0084,0.0,0.0,-2.4e-05,119,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+double,0.1,0.005,core,40,0.1875,0.5833,0.1716,0.045902,320,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+double,0.1,0.005,holdout,1,0.0168,0.5,0.0125,2.6e-05,119,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+double,0.1,0.02,core,40,0.3281,0.5429,0.3,0.0453,320,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+double,0.1,0.02,holdout,1,0.2689,0.4375,0.1972,-0.001945,119,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+winmin,0.5,0.0,core,0,0.2222,0.4375,0.1683,0.014537,360,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+winmin,0.5,0.0,holdout,0,0.0083,0.0,0.0,-6e-06,120,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+winmin,0.5,0.005,core,0,0.2222,0.45,0.1607,0.014589,360,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+winmin,0.5,0.005,holdout,0,0.0167,0.5,0.0127,2.1e-05,120,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+winmin,0.5,0.02,core,0,0.4,0.5139,0.341,0.01354,360,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+winmin,0.5,0.02,holdout,0,0.2667,0.375,0.1875,-0.000703,120,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+winmin,0.1,0.0,core,40,0.1875,0.55,0.1844,0.045751,320,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+winmin,0.1,0.0,holdout,1,0.0084,0.0,0.0,-2.4e-05,119,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+winmin,0.1,0.005,core,40,0.1875,0.5833,0.1716,0.045901,320,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+winmin,0.1,0.005,holdout,1,0.0168,0.5,0.0125,2.6e-05,119,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+winmin,0.1,0.02,core,40,0.3281,0.5429,0.3,0.045307,320,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"
+winmin,0.1,0.02,holdout,1,0.2689,0.4375,0.1972,-0.001945,119,"cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); non-zero modes coincide when L_hat >= 0.5*min(window)"

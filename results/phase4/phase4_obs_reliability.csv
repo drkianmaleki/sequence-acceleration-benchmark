@@ -13,8 +13,8 @@ obs_idx,target_g,method,diagnostic,spearman_r,p_value,n,hi_iqr_prec
 30,0.1,pade_22,perturb_iqr,0.3937,0.0,865,0.172
 30,0.1,log_linear,shift_iqr,0.636,0.0,887,
 30,0.1,log_linear,perturb_iqr,0.5751,0.0,887,
-30,0.1,weniger_d2,shift_iqr,,,873,
-30,0.1,weniger_d2,perturb_iqr,0.265,0.0,873,
+30,0.1,levin_t2,shift_iqr,,,880,
+30,0.1,levin_t2,perturb_iqr,0.4838,0.0,880,0.034
 30,0.1,anderson_1,shift_iqr,,,899,
 30,0.1,anderson_1,perturb_iqr,0.4241,0.0,899,0.115
 60,0.1,current_value,shift_iqr,,,960,
@@ -31,8 +31,8 @@ obs_idx,target_g,method,diagnostic,spearman_r,p_value,n,hi_iqr_prec
 60,0.1,pade_22,perturb_iqr,0.4619,0.0,945,0.226
 60,0.1,log_linear,shift_iqr,0.6053,0.0,934,
 60,0.1,log_linear,perturb_iqr,0.4819,0.0,934,
-60,0.1,weniger_d2,shift_iqr,,,942,
-60,0.1,weniger_d2,perturb_iqr,0.1746,0.0,942,
+60,0.1,levin_t2,shift_iqr,,,933,
+60,0.1,levin_t2,perturb_iqr,0.4416,0.0,933,0.167
 60,0.1,anderson_1,shift_iqr,,,960,
 60,0.1,anderson_1,perturb_iqr,0.4407,0.0,960,0.188
 90,0.1,current_value,shift_iqr,,,960,
@@ -49,8 +49,8 @@ obs_idx,target_g,method,diagnostic,spearman_r,p_value,n,hi_iqr_prec
 90,0.1,pade_22,perturb_iqr,0.5134,0.0,884,0.403
 90,0.1,log_linear,shift_iqr,0.5015,0.0,896,1.0
 90,0.1,log_linear,perturb_iqr,0.5594,0.0,896,1.0
-90,0.1,weniger_d2,shift_iqr,,,936,
-90,0.1,weniger_d2,perturb_iqr,-0.0311,0.341414,936,
+90,0.1,levin_t2,shift_iqr,,,936,
+90,0.1,levin_t2,perturb_iqr,0.4145,0.0,936,0.0
 90,0.1,anderson_1,shift_iqr,,,960,
 90,0.1,anderson_1,perturb_iqr,0.4295,0.0,960,0.167
 120,0.1,current_value,shift_iqr,,,960,
@@ -67,7 +67,7 @@ obs_idx,target_g,method,diagnostic,spearman_r,p_value,n,hi_iqr_prec
 120,0.1,pade_22,perturb_iqr,0.3034,0.0,939,0.173
 120,0.1,log_linear,shift_iqr,0.3203,0.0,913,
 120,0.1,log_linear,perturb_iqr,0.5096,0.0,913,
-120,0.1,weniger_d2,shift_iqr,,,947,
-120,0.1,weniger_d2,perturb_iqr,0.2871,0.0,947,
+120,0.1,levin_t2,shift_iqr,,,918,
+120,0.1,levin_t2,perturb_iqr,0.3588,0.0,918,0.19
 120,0.1,anderson_1,shift_iqr,,,960,
 120,0.1,anderson_1,perturb_iqr,0.4095,0.0,960,0.214

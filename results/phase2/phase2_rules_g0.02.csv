@@ -8,13 +8,13 @@ target_g,feature,operator,threshold,alternative,n_fire,n_total,fire_rate,precisi
 0.02,noise_var,>,0.0001,single_exp_fit,612,960,0.637,0.258,0.617,-0.0316
 0.02,noise_var,>,1e-05,richardson_a10,826,960,0.86,0.235,0.933,-0.1315
 0.02,richardson_r2,<,0.5,pade_22,185,960,0.193,0.205,0.275,-0.4161
+0.02,diff_ratio_cv,<,0.01,levin_t2,119,960,0.124,0.185,0.229,-0.045
 0.02,curvature_idx,>,0.2,pade_22,255,960,0.266,0.149,0.275,-0.5438
 0.02,log_log_slope,>,-0.3,rational_fit,394,960,0.41,0.147,0.254,-0.0284
 0.02,diff_ratio_cv,<,0.05,pade_22,473,960,0.493,0.125,0.428,-0.2325
+0.02,richardson_r2,<,0.5,levin_t2,185,960,0.193,0.092,0.177,-0.2652
+0.02,oscillation_idx,>,0.05,levin_t2,788,960,0.821,0.082,0.677,-0.2029
 0.02,richardson_r2,<,0.7,log_linear,261,960,0.272,0.069,0.316,-0.4487
 0.02,oscillation_idx,>,0.05,log_linear,788,960,0.821,0.063,0.877,-0.1773
 0.02,oscillation_idx,>,0.1,log_linear,767,960,0.799,0.061,0.825,-0.1819
 0.02,oscillation_idx,>,0.2,log_linear,746,960,0.777,0.059,0.772,-0.1881
-0.02,richardson_r2,<,0.5,weniger_d2,185,960,0.193,0.027,0.238,-1.3059
-0.02,oscillation_idx,>,0.05,weniger_d2,788,960,0.821,0.023,0.857,-0.4858
-0.02,diff_ratio_cv,<,0.01,weniger_d2,119,960,0.124,0.017,0.095,-0.2417

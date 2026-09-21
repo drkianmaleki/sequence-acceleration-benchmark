@@ -1,8 +1,8 @@
 {
   "schema": "dangerous_methods/v2",
-  "criterion": "pooled stability S = valid_rate - W_CAT*cat_rate + W_BEATS*beats_rate < 0 on core regimes, pooled over gap strata and noise, capped cells excluded, oracle excluded; the 51 accelerators only (trivial comparators never eligible)",
+  "criterion": "pooled stability S = valid_rate - W_CAT*cat_rate + W_BEATS*beats_rate < 0 on core regimes, pooled over gap strata and noise, capped cells excluded, oracle excluded; the 49 accelerators only (trivial comparators never eligible)",
   "pool": "accelerators",
-  "n_pool": 51,
+  "n_pool": 49,
   "W_CAT": 2.0,
   "W_BEATS": 0.4,
   "asymptote_mode": "hetero",
@@ -13,8 +13,8 @@
     0.02
   ],
   "source": "results/phase1/phase1_aggregated.csv",
-  "git_head": "43eb1be",
-  "created": "2026-09-21T10:20:22",
+  "git_head": "74c02f1",
+  "created": "2026-09-21T12:07:12",
   "dangerous_methods": [
     "geom_avg_diff",
     "linear",
@@ -113,28 +113,6 @@
       "stability": -0.147,
       "n_cells": 147,
       "dangerous": 1
-    },
-    {
-      "method": "weniger_d1",
-      "is_trivial": 0,
-      "eligible": 1,
-      "valid_rate": 0.9769,
-      "cat_rate": 0.2326,
-      "beats_rate": 0.3367,
-      "stability": 0.6463,
-      "n_cells": 147,
-      "dangerous": 0
-    },
-    {
-      "method": "weniger_d2",
-      "is_trivial": 0,
-      "eligible": 1,
-      "valid_rate": 0.9837,
-      "cat_rate": 0.2252,
-      "beats_rate": 0.3399,
-      "stability": 0.6693,
-      "n_cells": 147,
-      "dangerous": 0
     },
     {
       "method": "pade_22",
@@ -467,7 +445,7 @@
       "dangerous": 0
     },
     {
-      "method": "anderson_1",
+      "method": "best_shanks_wynn",
       "is_trivial": 0,
       "eligible": 1,
       "valid_rate": 1.0,
@@ -478,7 +456,7 @@
       "dangerous": 0
     },
     {
-      "method": "best_shanks_wynn",
+      "method": "anderson_1",
       "is_trivial": 0,
       "eligible": 1,
       "valid_rate": 1.0,
