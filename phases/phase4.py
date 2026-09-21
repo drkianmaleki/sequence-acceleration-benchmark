@@ -20,7 +20,8 @@ Redesign v2
 -----------
   * Evaluation points are the three gap strata per (regime, obs_idx); every
     record carries target_g, achieved_g, n_f, capped, L_true, L_hat and a
-    skill score against the best-of-four trivial reference.
+    skill score against the hindsight best-of-four trivial reference (strict)
+    plus the fixed-reference skill_vs_* / win_vs_* columns.
   * Core and held-out regimes are both evaluated (is_holdout flag).  Pooled
     analyses (Q1-Q4, reliability) use the core regimes with capped cells
     excluded; held-out correlations are reported separately; capped cells
@@ -52,7 +53,8 @@ from src.asymptote    import assumed_asymptote
 from src.pipeline     import (REFERENCE_METHODS, capped_block, exclude_capped,
                               horizon_meta, is_holdout, method_flags,
                               resolve_regimes)
-from src.trivial      import best_reference_error, skill_score
+from src.trivial      import (REFERENCE_TAGS, best_reference_error, skill_score,
+                              skill_vs_from_arrays, skill_vs_table)
 
 # ── Method set ─────────────────────────────────────────────────────────────────
 PHASE4_METHODS = [
@@ -227,6 +229,7 @@ def run_phase4(obs_idx_list, noise_list, gap_fractions, n_seeds,
                                 'shift_iqr':   s_iqr,
                                 'perturb_iqr': p_iqr,
                             }
+                            rec.update(skill_vs_table(err if valid else float('nan'), errs))
                             rec.update(hm)
                             rec.update(method_flags(method))
                             records.append(rec)
@@ -433,7 +436,8 @@ def ensemble_comparison(df: pd.DataFrame, out_dir: str,
     Compare selectors using true_val stored in records, at the headline
     stratum.  Ensemble: weight each method by 1/(perturb_IQR + eps).  The
     four trivial references are reported as fixed selectors, and every
-    selector gets a median skill against the best-of-four reference.
+    selector gets a median skill against the hindsight best-of-four reference
+    (strict) plus med_skill_vs_* / win_rate_vs_* against each trivial.
     """
     eps = 0.01
     g   = _headline(df, default_g)
@@ -482,6 +486,7 @@ def ensemble_comparison(df: pd.DataFrame, out_dir: str,
             errs[m].append(_e(m))
 
     refs = np.asarray(refs, dtype=float)
+    ref_arrays = {tag: np.asarray(errs[name], dtype=float) for name, tag in REFERENCE_TAGS}
     summary_rows = []
     for sel in selectors:
         vals = np.asarray(errs[sel], dtype=float)
@@ -496,6 +501,7 @@ def ensemble_comparison(df: pd.DataFrame, out_dir: str,
             'median_error': round(float(np.median(vals[ok])), 6) if ok.any() else float('nan'),
             'med_skill':    round(float(np.median(sk)), 4) if sk.size else float('nan'),
             'n':            int(ok.sum()),
+            **skill_vs_from_arrays(vals, ref_arrays),   # med_skill_vs_* / win_rate_vs_*
         })
 
     df_sum = pd.DataFrame(summary_rows)

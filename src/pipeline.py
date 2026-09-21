@@ -14,7 +14,7 @@ are applied in exactly one way:
     assign_ranks         rank eligibility (oracle excluded, finite metric,
                          valid_rate >= config.RANK_MIN_VALID) and the rank
     unranked_block       the separate block of below-floor methods
-    skill_table          best-of-four trivial reference and per-method skill
+    skill_table          hindsight best-of-four (strict) reference and per-method skill
     method_flags         is_trivial / is_oracle for output schemas
     git_head             short commit hash for provenance fields
     ACCEL_METHODS        the 51 accelerators (ensemble / pool candidates)
@@ -204,7 +204,9 @@ def git_head() -> str:
 
 
 def skill_table(errors: Dict[str, float]) -> Tuple[float, Dict[str, float]]:
-    """Best-of-four trivial reference error and skill for every method."""
+    """Hindsight best-of-four (strict) reference error and skill for every method.
+
+    The fixed-reference columns (skill_vs_* / win_vs_*) are src.trivial.skill_vs_table."""
     ref = best_reference_error(errors)
     return ref, {m: (skill_score(e, ref) if (e is not None and math.isfinite(e))
                      else float("nan"))

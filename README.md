@@ -16,7 +16,7 @@ This is **redesign v2** (2026-09). The design of the originally submitted versio
 
 **Assumed asymptote L̂ (`src/asymptote.py`).** What a method is told about the asymptote is a separate, explicit choice: `zero` (L̂ = 0, the deployment-honest default and the only mode of the main run), `half`, `oracle` (L̂ = L_true, labelled as such), `double`, and `winmin` (0.9 × the window minimum, data-driven). Every accelerator, feature extractor and cascade input reads `cfg["L_inf"] = L̂`; Phase 5b sweep 1 varies the mode.
 
-**Trivial comparators and skill (`src/trivial.py`).** Five trivial predictors are registered as first-class methods: `constant_assumed` (returns L̂), `last_value`, `window_mean`, `window_min`, and the evaluation-only `constant_oracle` (returns `L_true`; flagged `is_oracle`, shown in tables, never ranked, never in a pool). Every record carries `skill = err(method) / err(best of the four deployable trivials on that cell)`: skill < 1 means the method beat every non-oracle trivial predictor there.
+**Trivial comparators and skill (`src/trivial.py`).** Five trivial predictors are registered as first-class methods: `constant_assumed` (returns L̂), `last_value`, `window_mean`, `window_min`, and the evaluation-only `constant_oracle` (returns `L_true`; flagged `is_oracle`, shown in tables, never ranked, never in a pool). Every record carries two kinds of skill. `skill = err(method) / err(best of the four deployable trivials on that cell)` is the **hindsight best-of-four (strict)** bar — the denominator needs the truth to pick the trivial, so skill < 1 means the method beat every non-oracle trivial predictor there, including the one only hindsight could have chosen; it is aggregated as `med_skill`. The **fixed-reference** columns `skill_vs_{assumed,last,wmean,wmin}` (error ratio against each deployable trivial separately) and `win_vs_{...}` (1 when the method's error is below that trivial's) are aggregated as `med_skill_vs_*` and `win_rate_vs_*` in every table that carries `med_skill` (Phase 1 aggregated / global / held-out, Phase 2, Phase 4 and 5a selector tables, real data v2).
 
 **Gap-defined horizons with capping (`src/horizons.py`).** Horizons are defined by the remaining gap, not by index: for a target fraction g ∈ {0.5, 0.1, 0.02} (headline g = 0.1), `n_f(regime, n_obs, g)` is the first n > n_obs at which the noiseless gap to `L_true` has shrunk to g × gap(n_obs), searched forward and capped at 50,000. When the cap binds, the achieved fraction is recorded and the cell is **excluded from every pooled statistic**; capped cells are reported in their own `*_capped.csv` block (fragment `f11`).
 
@@ -79,8 +79,8 @@ The script reads the per-stratum result files (never the legacy-named headline c
 | `scripts/run_phase3.py --full` | adaptive selection | analysis of Phase 2 | 5 s |
 | `scripts/run_phase4.py --full` | perturbation / shift diagnostics | 4 depths × 3 noise × 20 seeds × 24 regimes × 3 strata × 13 methods (+1.56 M diagnostic calls) | 30 min |
 | `scripts/run_phase5a.py --full [--jobs N]` | ensemble ablation | 4 depths × 3 noise × 20 seeds × 24 regimes × 3 strata × 56 methods (+4.4 M perturbation calls) | 2.5 h |
-| `scripts/run_phase5b.py --full` | sensitivity sweeps | assumed asymptote × window length × CAT_MULT, 2 strata | 38 min |
-| `scripts/run_real_data.py` | recorded-curve re-evaluation | 6 datasets × 5 depths × 3 targets × 7 methods | 5 s |
+| `scripts/run_phase5b.py --full` | sensitivity sweeps | sweep 1a cascade vs assumed asymptote (clamped features, labelled), sweep 1b the 10 L_hat-consuming accelerators + `constant_assumed` under the 5 modes, window length, CAT_MULT; 2 strata | 38 min (+ sweep 1b, not yet timed) |
+| `scripts/run_real_data.py` | recorded-curve re-evaluation | 6 datasets × 5 depths × 3 targets × 7 methods; every summary three ways (all / pre-minimum / post-minimum targets) | 5 s |
 
 `--quick` is accepted by every runner. `scripts/run_real_data.py --retrain` is the legacy path that downloads the OpenML datasets and retrains XGBoost to regenerate the recorded curves; it is not part of `reproduce_all.py`.
 
@@ -93,7 +93,7 @@ pip install pytest
 pytest tests/          # 342 tests
 ```
 
-`test_generators.py` checks the invariants each synthetic regime must satisfy (in particular that the noiseless generator output equals the truth function at every n; a mismatch there is silent at run time). `test_accelerators.py` verifies the 51 method implementations on four analytic sequences with known limits. `test_redesign.py` locks in the redesign: hidden heterogeneous asymptotes, the `L_true` / `L̂` separation (no method reads `cfg["L_true"]`), gap-defined horizons and capping, the trivial comparators and skill, the held-out split, the rank floor, and a regression test that reproduces the referee's finding under `ASYMPTOTE_MODE = "legacy"`. `test_pipeline_v2.py` covers the shared pipeline helpers, the dangerous artifact, the Phase-5a serial-vs-parallel byte identity and the real-data provenance columns.
+`test_generators.py` checks the invariants each synthetic regime must satisfy (in particular that the noiseless generator output equals the truth function at every n; a mismatch there is silent at run time). `test_accelerators.py` verifies the 51 method implementations on four analytic sequences with known limits. `test_redesign.py` locks in the redesign: hidden heterogeneous asymptotes, the `L_true` / `L̂` separation (no method reads `cfg["L_true"]`), gap-defined horizons and capping, the trivial comparators and skill, the held-out split, the rank floor, and a regression test that reproduces the referee's finding under `ASYMPTOTE_MODE = "legacy"`. `test_pipeline_v2.py` covers the shared pipeline helpers, the dangerous artifact, the Phase-5a serial-vs-parallel byte identity and the real-data provenance columns. `test_input_dependence.py` is the permanent guard against degenerate accelerators: on 96 generated windows every accelerator must react to a 1 % window perturbation on ≥ 90 % of the windows where it is finite and may coincide with a deployable trivial on ≤ 10 % of them (`current_value` exempt); it also measures the L_hat-consumer list that Phase 5b sweep 1b evaluates. It was added after `weniger_d1/d2` were found to return 0 for every input (fixed in `src/accelerators.py::_weniger_delta`, d-type remainder `w_n = Δs_n` with Pochhammer weights).
 
 ---
 
@@ -103,7 +103,7 @@ pytest tests/          # 342 tests
 sequence-acceleration-benchmark/
 ├── src/
 │   ├── accelerators.py     51 accelerator implementations (+ the trivial comparators registered as methods)
-│   ├── trivial.py          the five trivial comparators, best_reference_error, skill_score
+│   ├── trivial.py          the five trivial comparators, best_reference_error, skill_score, skill_vs_table (fixed-reference skill)
 │   ├── asymptote.py        assumed-asymptote modes (zero / half / oracle / double / winmin)
 │   ├── generators.py       18 core + 6 held-out regimes, hidden per-(regime, seed) L_true
 │   ├── horizons.py         gap-defined horizons n_f(regime, n_obs, g) with the 50,000 cap

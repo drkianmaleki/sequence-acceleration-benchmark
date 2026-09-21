@@ -20,13 +20,27 @@ All five share the accelerator signature  fn(seq, indices, future_x, cfg).
     last_value         alias of current_value (registered in accelerators.py
                        as the very same function object)
 
-Skill score
------------
-    skill(method) = err(method) / err(best of SKILL_REFERENCE_METHODS)
+Skill scores
+------------
+Two kinds, both per record (one method on one cell):
 
-where the reference set is {constant_assumed, last_value, window_mean,
-window_min}: the oracle is never in the denominator.  skill < 1 means the
-method beat every non-oracle trivial predictor on that cell.
+  hindsight best-of-four (strict)
+    skill(method) = err(method) / err(best of SKILL_REFERENCE_METHODS on that cell)
+    The denominator needs the truth to pick the trivial, so this is a
+    HINDSIGHT bar: skill < 1 means the method beat every deployable trivial
+    predictor there, including the one only hindsight could have chosen.
+    Column ``skill``; aggregated as ``med_skill``.
+
+  fixed-reference (deployable)
+    skill_vs_<ref> = err(method) / err(<ref>)   and
+    win_vs_<ref>   = 1 if err(method) < err(<ref>) else 0
+    for each deployable trivial separately (<ref> in assumed, last, wmean,
+    wmin = constant_assumed, last_value, window_mean, window_min).  Each
+    denominator is a predictor a deployment could actually run.  Aggregated
+    as ``med_skill_vs_<ref>`` (median) and ``win_rate_vs_<ref>`` (mean).
+
+The oracle is never in any denominator.  ``skill_vs_table`` builds the
+eight per-record columns; ``aggregate_skill_vs`` the eight aggregates.
 """
 
 import math
@@ -47,6 +61,20 @@ ORACLE_METHODS = frozenset({"constant_oracle"})
 SKILL_REFERENCE_METHODS = (
     "constant_assumed", "last_value", "window_mean", "window_min",
 )
+
+# Fixed-reference skill: one (method, tag) per deployable trivial.
+REFERENCE_TAGS = (
+    ("constant_assumed", "assumed"),
+    ("last_value",       "last"),
+    ("window_mean",      "wmean"),
+    ("window_min",       "wmin"),
+)
+SKILL_VS_COLS     = tuple(f"skill_vs_{t}"     for _, t in REFERENCE_TAGS)
+WIN_VS_COLS       = tuple(f"win_vs_{t}"       for _, t in REFERENCE_TAGS)
+MED_SKILL_VS_COLS = tuple(f"med_skill_vs_{t}" for _, t in REFERENCE_TAGS)
+WIN_RATE_VS_COLS  = tuple(f"win_rate_vs_{t}"  for _, t in REFERENCE_TAGS)
+SKILL_VS_RECORD_COLS = SKILL_VS_COLS + WIN_VS_COLS
+SKILL_VS_AGG_COLS    = MED_SKILL_VS_COLS + WIN_RATE_VS_COLS
 
 _SKILL_EPS = 1e-12
 
@@ -102,6 +130,67 @@ def best_reference_error(errors: Dict[str, float]) -> float:
     vals = [errors.get(m, float("nan")) for m in SKILL_REFERENCE_METHODS]
     vals = [v for v in vals if v is not None and math.isfinite(v)]
     return min(vals) if vals else float("nan")
+
+
+def skill_vs_table(err_method: Optional[float], errors: Dict[str, float]) -> Dict[str, float]:
+    """
+    The eight fixed-reference columns for one record:
+        skill_vs_<tag> = err_method / err(<ref>)   (NaN when either is invalid)
+        win_vs_<tag>   = 1 if err_method < err(<ref>) else 0  (0 when invalid)
+    ``errors`` maps method names (including the four deployable trivials) to
+    absolute errors; NaN marks an invalid estimate.
+    """
+    out: Dict[str, float] = {}
+    valid = (err_method is not None and math.isfinite(err_method))
+    for ref, tag in REFERENCE_TAGS:
+        e_ref = errors.get(ref, float("nan"))
+        e_ref = float("nan") if e_ref is None else float(e_ref)
+        if valid and math.isfinite(e_ref):
+            out[f"skill_vs_{tag}"] = skill_score(err_method, e_ref)
+            out[f"win_vs_{tag}"] = int(err_method < e_ref)
+        else:
+            out[f"skill_vs_{tag}"] = float("nan")
+            out[f"win_vs_{tag}"] = 0
+    return out
+
+
+def skill_vs_from_arrays(err_method, ref_errors: Dict[str, "np.ndarray"]) -> Dict[str, float]:
+    """
+    Aggregates for a selector evaluated on many records at once:
+    err_method and each ref_errors[tag] are equal-length arrays.  Returns
+    med_skill_vs_<tag> (median over records where both are finite) and
+    win_rate_vs_<tag> (mean of the win indicator over records where the
+    method is finite; an invalid method never wins).
+    """
+    err_method = np.asarray(err_method, dtype=float)
+    out: Dict[str, float] = {}
+    ok_m = np.isfinite(err_method)
+    for _, tag in REFERENCE_TAGS:
+        e_ref = np.asarray(ref_errors[tag], dtype=float)
+        both = ok_m & np.isfinite(e_ref)
+        if both.any():
+            sk = np.array([skill_score(a, b) for a, b in zip(err_method[both], e_ref[both])], dtype=float)
+            out[f"med_skill_vs_{tag}"] = round(float(np.median(sk)), 4)
+        else:
+            out[f"med_skill_vs_{tag}"] = float("nan")
+        wins = np.zeros(err_method.shape, dtype=float)
+        wins[both] = (err_method[both] < e_ref[both]).astype(float)
+        out[f"win_rate_vs_{tag}"] = round(float(wins[ok_m | np.isfinite(e_ref)].mean()), 4) if (ok_m | np.isfinite(e_ref)).any() else float("nan")
+    return out
+
+
+def aggregate_skill_vs(df, prefix_med: str = "med_skill_vs_", prefix_win: str = "win_rate_vs_") -> Dict[str, float]:
+    """
+    Aggregate the eight per-record columns of a DataFrame slice:
+    median of skill_vs_<tag> (NaN skipped) and mean of win_vs_<tag>.
+    """
+    out: Dict[str, float] = {}
+    for _, tag in REFERENCE_TAGS:
+        col_s, col_w = f"skill_vs_{tag}", f"win_vs_{tag}"
+        s = df[col_s].dropna() if col_s in df else None
+        out[f"{prefix_med}{tag}"] = (round(float(np.median(s)), 4) if s is not None and len(s) else float("nan"))
+        out[f"{prefix_win}{tag}"] = (round(float(df[col_w].mean()), 4) if col_w in df and len(df) else float("nan"))
+    return out
 
 
 def skill_score(err_method: Optional[float], err_reference: Optional[float]) -> float:

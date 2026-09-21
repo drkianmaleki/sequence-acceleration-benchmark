@@ -16,7 +16,8 @@ Redesign v2
 -----------
   * Evaluation points are the three gap strata per (regime, obs_idx); every
     raw record carries target_g, achieved_g, n_f, capped, L_true, L_hat,
-    skill, is_trivial, is_oracle, is_holdout, is_dangerous.
+    skill (hindsight best-of-four, strict), skill_vs_* / win_vs_* against each
+    deployable trivial, is_trivial, is_oracle, is_holdout, is_dangerous.
   * The ensemble / oracle pool is the 51 accelerators.  The five trivial
     comparators are evaluated and reported as fixed reference selectors
     (constant_oracle labelled) but never mixed into an ensemble.
@@ -24,7 +25,12 @@ Redesign v2
     (src.dangerous.load_dangerous); the phase refuses to run without it.
   * Core and held-out regimes are evaluated; pooled comparisons use the core
     regimes with capped cells excluded; held-out and capped blocks are
-    written separately.  Every selector row carries a median skill.
+    written separately.  Every selector row carries a median skill (hindsight
+    best-of-four, strict) and med_skill_vs_* / win_rate_vs_* against each
+    deployable trivial.
+  * phase5a_validity_by_depth.csv (method x obs_idx x noise: valid rate, n)
+    is written as a committed aggregate of the raw records, so the depth
+    dependence of validity is on record without the git-ignored raw file.
   * The evaluation grid is chunked over (obs_idx x noise) blocks
     (evaluate_block) and can run in a process pool (run_phase5a(jobs=N),
     scripts/run_phase5a.py --jobs N).  Blocks are independent by
@@ -58,8 +64,9 @@ from src.dangerous    import load_dangerous
 from src.pipeline     import (ACCEL_METHODS, capped_block, exclude_capped,
                               horizon_meta, is_holdout, method_flags,
                               resolve_regimes)
-from src.trivial      import (TRIVIAL_METHOD_NAMES, best_reference_error,
-                              skill_score)
+from src.trivial      import (MED_SKILL_VS_COLS, REFERENCE_TAGS, TRIVIAL_METHOD_NAMES,
+                              WIN_RATE_VS_COLS, best_reference_error, skill_score,
+                              skill_vs_from_arrays, skill_vs_table)
 
 PHASE2_METHODS = [
     'current_value', 'richardson_1', 'richardson_a10',
@@ -70,6 +77,7 @@ PHASE2_METHODS = [
 POOL         = list(ACCEL_METHODS)                 # 51 accelerators (ensembles, oracles)
 EVAL_METHODS = POOL + list(TRIVIAL_METHOD_NAMES)   # + 5 trivial comparators (reference rows)
 TRIVIAL_SELECTORS = list(TRIVIAL_METHOD_NAMES)
+_SKILL_VS_RECORD  = [f'skill_vs_{t}' for _, t in REFERENCE_TAGS] + [f'win_vs_{t}' for _, t in REFERENCE_TAGS]
 
 EPS     = 0.01   # for continuous weighting
 FIG_DPI = 150
@@ -250,6 +258,7 @@ def evaluate_block(obs_idx, sigma, n_max, n_seeds, regimes, gap_fractions,
                         'casc_slope':   slope,
                         'casc_r2':      r2,
                     }
+                    rec.update(skill_vs_table(err if valid else float('nan'), errs))
                     rec.update(hm)
                     rec.update(method_flags(method))
                     records.append(rec)
@@ -531,6 +540,11 @@ def _selector_summary(sub: pd.DataFrame, extra: dict) -> List[dict]:
     """mean / median error and median skill per selector on one slice."""
     rows = []
     refs = sub['ref_error'].to_numpy(dtype=float)
+    # the four deployable trivials are selectors themselves, so their
+    # per-record errors are columns of the frame
+    ref_arrays = {tag: (sub[name].to_numpy(dtype=float) if name in sub.columns
+                        else np.full(len(sub), np.nan))
+                  for name, tag in REFERENCE_TAGS}
     for sel in SELECTORS:
         if sel not in sub.columns:
             continue
@@ -549,6 +563,7 @@ def _selector_summary(sub: pd.DataFrame, extra: dict) -> List[dict]:
             'median_error': round(float(np.median(vals[ok])), 6),
             'med_skill':    round(float(np.median(sk)), 4) if sk.size else float('nan'),
             'n':            int(ok.sum()),
+            **skill_vs_from_arrays(vals, ref_arrays),   # med_skill_vs_* / win_rate_vs_*
         })
         rows.append(row)
     return rows
@@ -595,6 +610,7 @@ def aggregate_results(df, out_dir, dangerous, default_g=None):
                 'error':        float(mi.loc[m, 'error']),
                 'skill':        float(mi.loc[m, 'skill']),
                 'is_dangerous': int(m in dangerous),
+                **{c: float(mi.loc[m, c]) for c in _SKILL_VS_RECORD if c in mi.columns},
             })
 
     df_ens = pd.DataFrame(ens_rows)
@@ -671,7 +687,9 @@ def aggregate_results(df, out_dir, dangerous, default_g=None):
                         med_piqr=('perturb_iqr',  'median'),
                         mean_err=('error',          'mean'),
                         med_skill=('skill',         'median'),
-                        is_dangerous=('is_dangerous','first'))
+                        is_dangerous=('is_dangerous','first'),
+                        **{f'med_skill_vs_{t}': (f'skill_vs_{t}', 'median') for _, t in REFERENCE_TAGS},
+                        **{f'win_rate_vs_{t}': (f'win_vs_{t}', 'mean') for _, t in REFERENCE_TAGS})
                    .reset_index()
                    .sort_values('mean_piqr'))
     wgt_agg['target_g'] = g_head
@@ -702,7 +720,19 @@ def aggregate_results(df, out_dir, dangerous, default_g=None):
                           value_cols=['error', 'skill'])
     _save_csv(df_cap, out_dir, 'phase5a_capped.csv')
 
-    return df_ens, df_comp, df_sigma, df_regime, df_abl, wgt_agg, df_gap, df_cap
+    # ── Validity by depth (committed aggregate; Prompt 5A item 6) ─────────────
+    # method x obs_idx x noise over every regime, seed and stratum: the depth
+    # dependence that the obs-90 dangerous derivation cannot see (e.g.
+    # richardson_3 is ~50 % valid at obs 30 and 98 % at obs 90).
+    df_val = (df.groupby(['method', 'obs_idx', 'noise'])
+                .agg(valid_rate=('valid', 'mean'), n=('valid', 'size'),
+                     is_trivial=('is_trivial', 'first'), is_oracle=('is_oracle', 'first'),
+                     is_dangerous=('is_dangerous', 'first'))
+                .reset_index())
+    df_val['valid_rate'] = df_val['valid_rate'].round(4)
+    _save_csv(df_val, out_dir, 'phase5a_validity_by_depth.csv')
+
+    return df_ens, df_comp, df_sigma, df_regime, df_abl, wgt_agg, df_gap, df_cap, df_val
 
 
 # =============================================================================
@@ -869,7 +899,7 @@ def run_all(obs_idx_list, noise_list, gap_fractions, n_seeds,
 
     print('\n  Aggregating ensemble results ...')
     (df_ens, df_comp, df_sigma, df_regime, df_abl,
-     wgt_agg, df_gap, df_cap) = aggregate_results(df, out_dir, dangerous, default_g)
+     wgt_agg, df_gap, df_cap, df_val) = aggregate_results(df, out_dir, dangerous, default_g)
     g_head = _headline(df, default_g)
 
     print('\n  Generating figures ...')
@@ -884,6 +914,7 @@ def run_all(obs_idx_list, noise_list, gap_fractions, n_seeds,
         'raw': df, 'ensemble': df_ens, 'comparison': df_comp,
         'by_sigma': df_sigma, 'regime': df_regime,
         'ablation': df_abl, 'weights': wgt_agg, 'gap': df_gap,
-        'capped': df_cap, 'dangerous': dangerous, 'default_g': g_head,
+        'capped': df_cap, 'validity_by_depth': df_val,
+        'dangerous': dangerous, 'default_g': g_head,
         'figures': [p for p in paths if p],
     }

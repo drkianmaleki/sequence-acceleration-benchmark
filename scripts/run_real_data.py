@@ -27,6 +27,19 @@ New files
                                 centroids (phase2_features_path,
                                 phase2_features_rows, git_head)
     figure_rd_v2_01_skill.png   cascade skill heatmaps (dataset x depth, per target)
+    real_data_curve_minima_v2.csv   per dataset: argmin round of the recorded curve,
+                                its minimum, the value at round 500 and the relative
+                                rise from the minimum (Prompt 5A)
+    real_data_strata_v2.csv     every summary statistic three ways: all cells,
+                                pre-minimum targets, post-minimum targets
+                                (post_min_target = target_round > argmin_round),
+                                including the perturbation-diagnostic AUC per stratum
+
+Every row of the two per-cell files carries argmin_round and post_min_target;
+the summary also carries rise_from_min.  Skill columns: ``skill`` /
+``cascade_skill`` = hindsight best-of-four (strict); ``skill_vs_*`` /
+``win_vs_*`` (and ``cascade_skill_vs_*`` / ``cascade_win_vs_*``) against each
+deployable trivial.
 
 The legacy 18-cell diagnostics (perturb_IQR AUC, z-scored regime mapping) are
 verified by scripts/analyze_real_diagnostics_legacy.py against the stored
@@ -49,7 +62,8 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 import src.config as CFG_MOD
-from src.trajectories import evaluate_recorded_curves, process_curves, FEATURE_COLS
+from src.trajectories import (FEATURE_COLS, curve_minimum_table, evaluate_recorded_curves,
+                              process_curves, real_data_strata)
 
 OUT_DIR      = os.path.join('results', 'real_data')
 PHASE2_FEATS = os.path.join('results', 'phase2', 'phase2_features.csv')
@@ -112,6 +126,31 @@ def fig_skill_heatmap(df_sum: pd.DataFrame, out_dir: str) -> str:
     return path
 
 
+def print_strata_v2(df_min: pd.DataFrame, df_strata: pd.DataFrame, df_sum: pd.DataFrame):
+    """Curve minima per dataset and the three-way (all / pre-min / post-min) summary."""
+    print('  Recorded-curve minima (a target round beyond the argmin is a post-minimum target):')
+    print(f"  {'dataset':<16} {'rounds':>6} {'argmin':>7} {'min':>9} {'@round':>7} {'value':>9} {'rise':>8}")
+    print('  ' + '-' * 70)
+    for _, r in df_min.iterrows():
+        print(f"  {r['dataset']:<16} {int(r['n_rounds']):>6} {int(r['argmin_round']):>7} {r['min_value']:>9.5f} "
+              f"{int(r['at_round']):>7} {r['value_at_round']:>9.5f} {100 * r['rise_from_min']:>+7.2f}%")
+    print('\n  Three-way summary (failure = cascade skill >= 1; AUC: higher perturb_iqr read as failure):')
+    print(f"  {'stratum':<9} {'cells':>5} {'fail':>5} {'rate':>6} {'med err':>9} {'med skill':>10} {'med impr':>9} "
+          f"{'win/assumed':>11} {'win/last':>9} {'AUC':>6} {'p':>6}  ordering")
+    print('  ' + '-' * 110)
+    for _, r in df_strata.iterrows():
+        print(f"  {r['stratum']:<9} {int(r['n_cells']):>5} {int(r['n_fail']):>5} {r['fail_rate']:>6.3f} "
+              f"{r['med_cascade_err']:>9.5f} {r['med_cascade_skill']:>10.3f} {r['med_improvement']:>+9.3f} "
+              f"{r['win_rate_vs_assumed']:>11.3f} {r['win_rate_vs_last']:>9.3f} {r['perturb_auc']:>6.3f} "
+              f"{r['perturb_p']:>6.3f}  {r['perturb_ordering']}")
+    ct = pd.crosstab(df_sum['post_min_target'].map({0: 'pre-min', 1: 'post-min'}),
+                     (df_sum['cascade_skill'] >= 1).map({False: 'ok', True: 'fail'}), margins=True)
+    print('\n  Failure crosstab (rows: target vs the curve minimum):')
+    for line in ct.to_string().splitlines():
+        print('    ' + line)
+    print()
+
+
 def print_summary_v2(df_long: pd.DataFrame, df_sum: pd.DataFrame):
     print('\n' + '=' * 80)
     print('  REAL-DATA RE-EVALUATION SUMMARY  (recorded curves, no retraining)')
@@ -131,7 +170,7 @@ def print_summary_v2(df_long: pd.DataFrame, df_sum: pd.DataFrame):
               f"{sub['current_err'].mean():>10.5f} {sub['ref_error'].mean():>10.5f} "
               f"{sub['cascade_skill'].median():>10.3f} {beats:>11.2f}")
 
-    print(f'\n  Method median skill over all cells (skill < 1 beats the best trivial reference):')
+    print(f'\n  Method median skill over all cells (hindsight best-of-four, strict; skill < 1 beats the best trivial reference):')
     for m, sub in df_long.groupby('method'):
         print(f"    {m:<18} med skill = {sub['skill'].median():.3f}   "
               f"finite = {int(sub['skill'].notna().sum())}/{len(sub)}")
@@ -206,8 +245,18 @@ def main_reevaluate(args):
     print(f'  Saved: {p1}  ({len(df_long)} rows)')
     print(f'  Saved: {p2}  ({len(df_sum)} rows)')
 
+    df_min = curve_minimum_table(curves, last_round=N_ROUNDS)
+    p3 = os.path.join(args.out_dir, 'real_data_curve_minima_v2.csv')
+    df_min.to_csv(p3, index=False)
+    print(f'  Saved: {p3}  ({len(df_min)} rows)')
+    df_strata = real_data_strata(df_sum)
+    p4 = os.path.join(args.out_dir, 'real_data_strata_v2.csv')
+    df_strata.to_csv(p4, index=False)
+    print(f'  Saved: {p4}  ({len(df_strata)} rows)')
+
     fig_skill_heatmap(df_sum, args.out_dir)
     print_summary_v2(df_long, df_sum)
+    print_strata_v2(df_min, df_strata, df_sum)
     print('=' * 72 + '\n')
     return 0
 

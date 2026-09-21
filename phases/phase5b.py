@@ -9,14 +9,29 @@ config.PHASE5B_GAP_FRACTIONS (g = 0.5 and 0.1), with n_obs = 90.
 
 Sweep 1 — assumed-asymptote (L_hat) sensitivity
 -----------------------------------------------
-Question: Does the Phase 2 two-rule cascade still work when what the
-methods are told about the asymptote changes?  L_true is hidden and per
-(regime, seed); the ASSUMED value is swept over config.ASSUMED_L_MODES
-= {zero, half, oracle, double, winmin} (oracle = L_true, labelled).
+Question: What changes when what the methods are told about the asymptote
+changes?  L_true is hidden and per (regime, seed); the ASSUMED value is
+swept over config.ASSUMED_L_MODES = {zero, half, oracle, double, winmin}
+(oracle = L_true, labelled).
 
-For each mode, trajectory features (log_log_slope, richardson_r2) are
-recomputed with that L_hat and the cascade is applied with fixed Phase 2
-thresholds (slope > -0.1, R^2 < 0.5).
+Two parts (Prompt 5A):
+
+  1a  cascade rows (sweep1_linf, phase5b_sweep1_global/_regime.csv): the
+      Phase-2 trajectory features (log_log_slope, richardson_r2) are
+      recomputed with that L_hat and the two-rule cascade is applied with
+      the fixed thresholds.  NOTE: the feature extractor clamps
+      L0 = max(0, min(L_hat, 0.5 * min(window))), so the four non-zero modes
+      coincide whenever L_hat >= 0.5 * min(window) and this part is a near
+      no-op by construction; the rows are kept, labelled (column ``note``),
+      and the clamp is not lifted.
+  1b  consumer rows (sweep1_consumers, phase5b_sweep1_consumers*.csv): the
+      accelerators whose output actually depends on L_hat (LHAT_CONSUMERS,
+      measured by tests/test_input_dependence.py) plus constant_assumed,
+      evaluated under every mode on the 24 regimes (core / held-out pooled
+      separately), 3 noise levels, g in config.PHASE5B_GAP_FRACTIONS and
+      the seed grid; per (method, mode, g, regime set): valid / catastrophe
+      rate, median error, median skill (hindsight best-of-four, strict),
+      med_skill_vs_* and win_rate_vs_* against each deployable trivial.
 
 Sweep 2 — Window length sensitivity  (window_len in {20, 40, 60, 80, 100})
 Sweep 3 — CAT_MULT sensitivity       (CAT_MULT in {2, 5, 10})
@@ -36,8 +51,10 @@ Redesign v2
 
 Output files
 ------------
-phase5b_sweep1_global.csv      Cascade metrics vs assumed-asymptote mode (pooled)
+phase5b_sweep1_global.csv      Cascade metrics vs assumed-asymptote mode (pooled; clamped features, see note)
 phase5b_sweep1_regime.csv      Cascade metrics vs assumed-asymptote mode (per regime)
+phase5b_sweep1_consumers.csv   L_hat-consuming accelerators + constant_assumed vs mode, per (method, mode, g, regime set)
+phase5b_sweep1_consumers_noise.csv   the same per noise level
 phase5b_sweep2_global.csv      Cascade metrics vs window_len (pooled)
 phase5b_sweep2_regime.csv      Cascade metrics vs window_len (per regime)
 phase5b_sweep3_champions.csv   Regime champions at each CAT_MULT
@@ -68,6 +85,8 @@ from src.accelerators import METHODS
 from src.generators   import regime_functions
 from src.asymptote    import assumed_asymptote
 from src.dangerous    import load_dangerous
+from src.trivial      import (SKILL_REFERENCE_METHODS, aggregate_skill_vs,
+                              best_reference_error, skill_score, skill_vs_table)
 from src.pipeline     import (ACCEL_METHODS, TRIVIAL_NON_ORACLE, assign_ranks,
                               exclude_capped, horizon_meta, is_holdout,
                               method_flags, resolve_regimes, unranked_block)
@@ -81,6 +100,18 @@ CASCADE_METHODS = [
 
 # Sweep 3 ranks accelerators and the deployable trivial comparators; no oracle.
 ALL_METHODS = list(ACCEL_METHODS) + list(TRIVIAL_NON_ORACLE)
+
+# Accelerators whose output depends on the assumed asymptote L_hat (their
+# output differs between L_hat = 0 and L_hat = 0.5 * min(window) on at least
+# one of the 96 windows of tests/test_input_dependence.py, which asserts this
+# list).  The curve fits and Richardson fits use L_hat as a starting value or
+# offset; the two ensembles contain them.
+LHAT_CONSUMERS = ['richardson_1', 'richardson_2', 'richardson_3',
+                  'single_exp_fit', 'double_exp_fit', 'rational_fit', 'log_fit',
+                  'log_linear', 'stability_weighted', 'median_ensemble']
+SWEEP1_METHODS = LHAT_CONSUMERS + ['constant_assumed']
+CASCADE_CLAMP_NOTE = ('cascade features clamp L0 = max(0, min(L_hat, 0.5*min(window))); '
+                      'non-zero modes coincide when L_hat >= 0.5*min(window)')
 
 FIG_DPI = 150
 
@@ -328,9 +359,126 @@ def sweep1_linf(assumed_modes, obs_idx, window_len, noise_list,
     df = pd.DataFrame(records)
     df_global, df_regime = _aggregate_cascade(df, 'assumed_mode', assumed_modes,
                                               gap_fractions, noise_list, regimes)
+    # Kept and labelled: the clamp makes this part a near no-op (module docstring).
+    df_global['note'] = CASCADE_CLAMP_NOTE
+    df_regime['note'] = CASCADE_CLAMP_NOTE
     _save_csv(df_global, out_dir, 'phase5b_sweep1_global.csv')
     _save_csv(df_regime, out_dir, 'phase5b_sweep1_regime.csv')
     return df_global, df_regime
+
+
+def sweep1_consumers(assumed_modes, obs_idx, window_len, noise_list,
+                     gap_fractions, n_seeds, out_dir, core_regimes=None,
+                     holdout_regimes=None, verbose=True):
+    """
+    Sweep 1b: the L_hat-consuming accelerators (LHAT_CONSUMERS) plus
+    constant_assumed under every assumed-asymptote mode.  Same windows as
+    sweep1_linf (identical RNG streams per (mode, sigma, seed)), so every
+    mode sees the same sequences and only L_hat differs.
+
+    Per record: error, valid, catastrophic, skill (hindsight best-of-four,
+    strict) and the fixed-reference skill_vs_* / win_vs_* columns; the three
+    other deployable trivials are evaluated on every cell as references.
+    Aggregated per (assumed_mode, method, target_g, regime_set) with capped
+    cells excluded (phase5b_sweep1_consumers.csv) and additionally per noise
+    level (phase5b_sweep1_consumers_noise.csv).
+    """
+    regimes = resolve_regimes(core_regimes, holdout_regimes, include_holdout=True)
+    gap_fractions = [float(g) for g in gap_fractions]
+    n_arr   = np.arange(obs_idx + 1, dtype=float)
+    wl      = min(window_len, obs_idx)
+    eval_methods = list(dict.fromkeys(SWEEP1_METHODS + list(SKILL_REFERENCE_METHODS)))
+    records = []
+
+    total = len(assumed_modes) * len(noise_list) * n_seeds * len(regimes)
+    done  = 0
+    print(f'  Sweep 1b: {len(SWEEP1_METHODS)} L_hat consumers (+ 3 trivial references) × '
+          f'{len(assumed_modes)} modes × {len(noise_list)} noise × {n_seeds} seeds × '
+          f'{len(regimes)} regimes × {len(gap_fractions)} strata')
+
+    for assumed_mode in assumed_modes:
+        for sigma in noise_list:
+            for seed in range(n_seeds):
+                rng = np.random.RandomState(seed * 137 + int(sigma*1e6) % 9973)
+
+                for regime in regimes:
+                    gen, truth_fn, L_true = regime_functions(regime, seed)
+                    seq_full = gen(n_arr, rng, sigma)
+
+                    w_start  = max(0, obs_idx - wl + 1)
+                    seq_win  = list(seq_full[w_start : obs_idx + 1])
+                    idx_win  = list(range(w_start, obs_idx + 1))
+                    curr_val = float(seq_full[obs_idx])
+                    L_hat    = assumed_asymptote(L_true, seq_win, assumed_mode)
+
+                    for g in gap_fractions:
+                        hm       = horizon_meta(regime, obs_idx, g, seed)
+                        n_f      = hm['n_f']
+                        true_val = float(truth_fn(n_f))
+                        curr_err = abs(curr_val - true_val)
+                        cfg      = _cfg(n_f, L_hat)
+                        ests = _eval_methods(seq_win, idx_win, n_f, cfg, eval_methods)
+                        errs = {m: (abs(v - true_val) if math.isfinite(v) else float('nan'))
+                                for m, v in ests.items()}
+                        ref_err = best_reference_error(errs)
+                        for m in SWEEP1_METHODS:
+                            err   = errs[m]
+                            valid = math.isfinite(err)
+                            cat   = (not valid) or (curr_err > 1e-12 and err > CFG_MOD.CAT_MULT * curr_err)
+                            rec = {
+                                'assumed_mode': assumed_mode,
+                                'method':       m,
+                                'is_trivial':   int(m in SKILL_REFERENCE_METHODS),
+                                'regime':       regime,
+                                'is_holdout':   is_holdout(regime),
+                                'noise':        sigma,
+                                'seed':         seed,
+                                'L_true':       L_true,
+                                'L_hat':        L_hat,
+                                'error':        err if valid else float('nan'),
+                                'valid':        int(valid),
+                                'catastrophic': int(cat),
+                                'ref_error':    ref_err,
+                                'skill':        skill_score(err, ref_err) if valid else float('nan'),
+                            }
+                            rec.update(skill_vs_table(err if valid else float('nan'), errs))
+                            rec.update(hm)
+                            records.append(rec)
+
+                    done += 1
+                    if verbose and done % max(1, total // 10) == 0:
+                        print(f'    [{done:>5}/{total}]  {100*done/total:5.1f}%'
+                              f'  mode={assumed_mode}  sigma={sigma:.3f}', flush=True)
+
+    df = pd.DataFrame(records)
+
+    def _agg(keys):
+        rows = []
+        for key_vals, sub_all in df.groupby(keys, sort=False):
+            for label, flag in (('core', 0), ('holdout', 1)):
+                part_all = sub_all[sub_all['is_holdout'] == flag]
+                sub = exclude_capped(part_all)
+                if sub.empty:
+                    continue
+                row = dict(zip(keys, key_vals))
+                row.update({
+                    'regime_set':        label,
+                    'n_capped_excluded': int(len(part_all) - len(sub)),
+                    'valid_rate':        round(float(sub['valid'].mean()), 4),
+                    'cat_rate':          round(float(sub['catastrophic'].mean()), 4),
+                    'med_error':         float(sub['error'].median()) if sub['error'].notna().any() else float('nan'),
+                    'med_skill':         float(sub['skill'].dropna().median()) if sub['skill'].notna().any() else float('nan'),
+                    'n':                 int(len(sub)),
+                })
+                row.update(aggregate_skill_vs(sub))
+                rows.append(row)
+        return pd.DataFrame(rows)
+
+    df_cons = _agg(['assumed_mode', 'method', 'target_g'])
+    df_cons_noise = _agg(['assumed_mode', 'method', 'target_g', 'noise'])
+    _save_csv(df_cons, out_dir, 'phase5b_sweep1_consumers.csv')
+    _save_csv(df_cons_noise, out_dir, 'phase5b_sweep1_consumers_noise.csv')
+    return df_cons, df_cons_noise
 
 
 # =============================================================================
@@ -759,9 +907,14 @@ def run_all(assumed_modes, window_lengths, catmult_values,
     print(f'  Dangerous set (Phase-1 artifact): {sorted(dangerous)}')
 
     print('\n  === SWEEP 1: Assumed-Asymptote (L_hat) Sensitivity ===')
+    print('  1a: cascade rows (features clamp L0 <= 0.5*min(window); near no-op by construction, kept and labelled)')
     df1g, df1r = sweep1_linf(assumed_modes, obs_idx, window_len_default,
                              noise_list, gap_fractions, n_seeds, out_dir,
                              core_regimes, holdout_regimes, verbose)
+    print('  1b: L_hat-consuming accelerators + constant_assumed under every mode')
+    df1c, df1cn = sweep1_consumers(assumed_modes, obs_idx, window_len_default,
+                                   noise_list, gap_fractions, n_seeds, out_dir,
+                                   core_regimes, holdout_regimes, verbose)
 
     print('\n  === SWEEP 2: Window Length Sensitivity ===')
     df2g, df2r = sweep2_window(window_lengths, obs_idx, noise_list,
@@ -783,6 +936,7 @@ def run_all(assumed_modes, window_lengths, catmult_values,
 
     return {
         'sweep1_global': df1g, 'sweep1_regime': df1r,
+        'sweep1_consumers': df1c, 'sweep1_consumers_noise': df1cn,
         'sweep2_global': df2g, 'sweep2_regime': df2r,
         'sweep3_champions': df3c, 'sweep3_global': df3g,
         'sweep3_concordance': df3cd,

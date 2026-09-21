@@ -34,7 +34,8 @@ Redesign v2
   * Core 18 regimes only (this phase feeds selector / cascade training).
   * Methods receive L_hat (ASSUMED_L_MODE "zero"); L_true is hidden.
   * Every record carries L_true, L_hat, target_g, achieved_g, n_f, capped,
-    skill (vs best-of-four trivial reference), is_trivial, is_oracle.
+    skill (hindsight best-of-four, strict), skill_vs_* / win_vs_* against each
+    deployable trivial, is_trivial, is_oracle.
 
 Reduced method set (9 methods covering all Phase 1 champions):
   current_value   baseline floor
@@ -69,7 +70,8 @@ from src.generators   import regime_functions
 from src.asymptote    import assumed_asymptote
 from src.pipeline     import (REFERENCE_METHODS, capped_block, exclude_capped,
                               horizon_meta, method_flags, resolve_regimes)
-from src.trivial      import ORACLE_METHODS, best_reference_error, skill_score
+from src.trivial      import (ORACLE_METHODS, aggregate_skill_vs, best_reference_error,
+                              skill_score, skill_vs_table)
 
 # ── Method pool ────────────────────────────────────────────────────────────────
 PHASE2_BASE_METHODS = [
@@ -391,6 +393,7 @@ def run_sweep(obs_idx_list: List[int],
                                 'ref_error':    ref_err,
                                 'skill':        skill_score(err, ref_err) if valid else float('nan'),
                             }
+                            rec.update(skill_vs_table(err if valid else float('nan'), errs))
                             rec.update(hm)
                             rec.update(method_flags(method))
                             sweep_records.append(rec)
@@ -432,6 +435,7 @@ def run_sweep(obs_idx_list: List[int],
             'med_skill':  _med(grp['skill']),
             'stability':  round(_stab(vr, cr, br), 4),
             'n_seeds':    int(len(grp)),
+            **aggregate_skill_vs(grp),
         })
 
     df_agg = pd.DataFrame(agg)

@@ -124,11 +124,13 @@ def plan(mode: str) -> list:
     c = C.PHASE5B[mode]
     r = resolve_regimes(c["core_regimes"], c["holdout_regimes"], True)
     base = len(c["noise_list"]) * c["n_seeds"] * len(r) * len(c["gap_fractions"])
+    from phases.phase5b import SWEEP1_METHODS
     s1 = len(c["assumed_modes"]) * base * 2
+    s1b = len(c["assumed_modes"]) * base * (len(SWEEP1_METHODS) + 3)
     s2 = len(c["window_lengths"]) * base * 2
     s3 = len(c["catmult_values"]) * base * (len(ACCEL_METHODS) + len(TRIVIAL_NON_ORACLE))
-    rows.append(("Phase 5b", s1 + s2 + s3, f"sweep1 {s1:,} + sweep2 {s2:,} + sweep3 {s3:,} "
-                                          f"({len(r)} regimes, {len(c['gap_fractions'])} strata)"))
+    rows.append(("Phase 5b", s1 + s1b + s2 + s3, f"sweep1a {s1:,} + sweep1b {s1b:,} + sweep2 {s2:,} + sweep3 {s3:,} "
+                                                f"({len(r)} regimes, {len(c['gap_fractions'])} strata)"))
 
     rd = C.REAL_DATA
     pairs = [(d, t) for d in rd["depths"] for t in rd["targets"] if d < t]

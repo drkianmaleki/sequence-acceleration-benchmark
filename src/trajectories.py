@@ -373,6 +373,79 @@ def perturb_iqr_real(window, idxs, method: str, future_x: float, cfg: dict,
     return float(q75 - q25)
 
 
+def curve_minimum_table(curves: dict, last_round: int = 500) -> pd.DataFrame:
+    """
+    Per recorded curve: the argmin round (1-based), the minimum, the value at
+    ``last_round`` (or the last recorded round if shorter) and the relative
+    rise from the minimum to it.  A target round beyond the argmin is a
+    post-minimum target: the curve has turned up and any extrapolation of the
+    descent is chasing a minimum that has already passed.
+    """
+    rows = []
+    for name, curve in curves.items():
+        v = np.asarray(curve, dtype=float)
+        n = len(v)
+        i = int(np.nanargmin(v))
+        end = min(last_round, n)
+        v_end = float(v[end - 1])
+        rows.append(dict(dataset=name, n_rounds=n, argmin_round=i + 1,
+                         min_value=float(v[i]), value_at_round=v_end, at_round=end,
+                         rise_from_min=((v_end - float(v[i])) / float(v[i])
+                                        if abs(float(v[i])) > 1e-12 else float('nan'))))
+    return pd.DataFrame(rows)
+
+
+def _auc_fail_vs_succ(iqr: np.ndarray, fail: np.ndarray):
+    """AUC = P(IQR_fail > IQR_succ) from the Mann-Whitney U statistic (ties one
+    half) and the two-sided p-value; NaN when either group is empty."""
+    from scipy.stats import mannwhitneyu
+    iqr = np.asarray(iqr, dtype=float)
+    fail = np.asarray(fail, dtype=bool)
+    ok = np.isfinite(iqr)
+    f, s = iqr[ok & fail], iqr[ok & ~fail]
+    if len(f) == 0 or len(s) == 0:
+        return float('nan'), float('nan'), len(f), len(s)
+    u = mannwhitneyu(f, s, alternative='two-sided')
+    return float(u.statistic) / (len(f) * len(s)), float(u.pvalue), len(f), len(s)
+
+
+REAL_STRATA = (('all', None), ('pre_min', 0), ('post_min', 1))
+
+
+def real_data_strata(df_sum: pd.DataFrame) -> pd.DataFrame:
+    """
+    Every real-data summary statistic three ways: all cells, pre-minimum
+    targets (target_round <= argmin_round) and post-minimum targets.  One row
+    per stratum: cell and failure counts (failure = cascade_skill >= 1, which
+    on these curves coincides with improvement < 0), medians of cascade
+    error / skill / improvement, the cascade's win rates against each
+    deployable trivial, and the perturbation-diagnostic AUC (higher
+    perturb_iqr read as 'failure') with its Mann-Whitney p-value.
+    """
+    from src.trivial import REFERENCE_TAGS
+    rows = []
+    for label, flag in REAL_STRATA:
+        sub = df_sum if flag is None else df_sum[df_sum['post_min_target'] == flag]
+        fail = (sub['cascade_skill'] >= 1.0).to_numpy()
+        auc, p, n_f, n_s = _auc_fail_vs_succ(sub['perturb_iqr'].to_numpy(), fail)
+        row = dict(stratum=label, n_cells=int(len(sub)), n_fail=int(fail.sum()),
+                   fail_rate=(round(float(fail.mean()), 4) if len(sub) else float('nan')),
+                   n_neg_improvement=int((sub['improvement'] < 0).sum()),
+                   med_cascade_err=float(sub['cascade_err'].median()) if len(sub) else float('nan'),
+                   med_cascade_skill=float(sub['cascade_skill'].median()) if len(sub) else float('nan'),
+                   med_improvement=float(sub['improvement'].median()) if len(sub) else float('nan'),
+                   med_perturb_iqr_fail=(float(sub.loc[fail, 'perturb_iqr'].median()) if fail.any() else float('nan')),
+                   med_perturb_iqr_succ=(float(sub.loc[~fail, 'perturb_iqr'].median()) if (~fail).any() else float('nan')),
+                   perturb_auc=auc, perturb_p=p, n_fail_auc=n_f, n_succ_auc=n_s,
+                   perturb_ordering=('failing > succeeding' if auc > 0.5 else 'failing < succeeding' if auc < 0.5
+                                     else 'no ordering') if np.isfinite(auc) else '')
+        for _, tag in REFERENCE_TAGS:
+            col = f'cascade_win_vs_{tag}'
+            row[f'win_rate_vs_{tag}'] = (round(float(sub[col].mean()), 4) if (col in sub and len(sub)) else float('nan'))
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
 def evaluate_recorded_curves(
     curves:               dict,
     depths:               list,
@@ -389,8 +462,12 @@ def evaluate_recorded_curves(
     compute L_hat from the assumed-asymptote mode (no oracle on real
     curves), extract features, apply the two-rule cascade, and predict the
     loss at the target round with richardson_1, rational_fit, the cascade's
-    choice and the four trivial reference methods.  Skill is
-    err / err(best of the four trivial references).
+    choice and the four trivial reference methods.  ``skill`` is
+    err / err(best of the four trivial references) -- the hindsight
+    best-of-four (strict) bar; ``skill_vs_*`` / ``win_vs_*`` are the
+    fixed-reference ratios and win flags against each trivial separately
+    (the summary carries them for the cascade as ``cascade_skill_vs_*`` /
+    ``cascade_win_vs_*``).
 
     Report-2 review (decision 5): every cell also carries ``perturb_iqr``,
     the perturbation IQR of the routed method (``selected_method``) at that
@@ -401,6 +478,12 @@ def evaluate_recorded_curves(
     ``phase2_features_path``, ``phase2_features_rows`` (0 when the file was
     absent and the mapping is 'unknown') and ``git_head``.
 
+    Prompt 5A: every cell also carries ``argmin_round`` (1-based round of the
+    curve's minimum), ``rise_from_min`` (relative rise from the minimum to
+    round 500) and ``post_min_target`` = (target_round > argmin_round), so
+    every summary can be split into pre- and post-minimum targets
+    (real_data_strata).
+
     Returns
     -------
     (df_long, df_summary)
@@ -410,7 +493,7 @@ def evaluate_recorded_curves(
     from src.accelerators import METHODS
     from src.pipeline import git_head
     from src.trivial import (SKILL_REFERENCE_METHODS, best_reference_error,
-                             skill_score)
+                             skill_score, skill_vs_table)
 
     assumed_mode = resolve_mode(assumed_mode)
     regime_centroids = None
@@ -426,10 +509,13 @@ def evaluate_recorded_curves(
 
     cfg = _DEFAULT_CFG.copy()
     long_rows, summary_rows = [], []
+    minima = curve_minimum_table(curves).set_index('dataset')
 
     for name, curve in curves.items():
         curve    = np.asarray(curve, dtype=float)
         n_rounds = len(curve)
+        argmin_round  = int(minima.loc[name, 'argmin_round'])
+        rise_from_min = float(minima.loc[name, 'rise_from_min'])
 
         for depth in depths:
             if depth >= n_rounds:
@@ -474,16 +560,20 @@ def evaluate_recorded_curves(
                 p_iqr = perturb_iqr_real(window, idxs, selected, fx, cfg,
                                          perturb_seed(name, depth))
 
+                post_min = int(target > argmin_round)
+
                 for m, p in preds.items():
                     e = errs[m]
                     long_rows.append(dict(
                         dataset=name, obs_depth=depth, target_round=target,
+                        argmin_round=argmin_round, post_min_target=post_min,
                         method=m, selected_method=selected,
                         is_cascade=int(m == 'cascade'),
                         is_trivial=int(m in SKILL_REFERENCE_METHODS),
                         prediction=p, true_val=true_val, error=e,
                         current_err=current_err, ref_error=ref_err,
                         skill=(skill_score(e, ref_err) if np.isfinite(e) else float('nan')),
+                        **skill_vs_table(e, errs),
                         perturb_iqr=p_iqr,
                         L_hat=L_hat, assumed_mode=assumed_mode,
                         nearest_regime=regime,
@@ -492,6 +582,8 @@ def evaluate_recorded_curves(
                 casc_err = errs['cascade']
                 summary_rows.append(dict(
                     dataset=name, obs_depth=depth, target_round=target,
+                    argmin_round=argmin_round, rise_from_min=rise_from_min,
+                    post_min_target=post_min,
                     selected_method=selected, cascade_pred=preds['cascade'],
                     true_val=true_val, cascade_err=casc_err,
                     richardson_err=errs['richardson_1'],
@@ -503,6 +595,7 @@ def evaluate_recorded_curves(
                     improvement=((current_err - casc_err) / current_err
                                  if (np.isfinite(casc_err) and current_err > 1e-10)
                                  else float('nan')),
+                    **{f'cascade_{k}': v for k, v in skill_vs_table(casc_err, errs).items()},
                     perturb_iqr=p_iqr,
                     L_hat=L_hat, assumed_mode=assumed_mode, nearest_regime=regime,
                     **{f: feats.get(f, np.nan) for f in FEATURE_COLS},

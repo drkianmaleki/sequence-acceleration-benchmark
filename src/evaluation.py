@@ -17,9 +17,13 @@ What changed relative to the rejected design
 * Horizons are per regime: n_f(regime, g) is the first n > obs_idx with
   gap(n) <= g * gap(obs_idx), capped at 50,000 (src.horizons).  Every record
   carries (target_g, achieved_g, n_f, capped).
-* The trivial comparators are methods.  Every record carries a skill score
-  err(method) / err(best of {constant_assumed, last_value, window_mean,
-  window_min}); the oracle is never in the denominator.
+* The trivial comparators are methods.  Every record carries two kinds of
+  skill (src.trivial): ``skill`` = err(method) / err(best of
+  {constant_assumed, last_value, window_mean, window_min}) -- the HINDSIGHT
+  best-of-four (strict) bar, aggregated as med_skill -- and the
+  fixed-reference columns skill_vs_{assumed,last,wmean,wmin} /
+  win_vs_{...} against each deployable trivial separately, aggregated as
+  med_skill_vs_* / win_rate_vs_*.  The oracle is never in a denominator.
 * Held-out regimes are evaluated but flagged is_holdout = 1 and pooled
   separately.  Pooled cross-regime tables exclude capped cells (reported in
   a separate capped block), sort by median error, and rank non-oracle
@@ -65,7 +69,9 @@ from src.horizons import horizon_for_gap, horizon_table
 from src.pipeline import (assign_ranks, capped_block, exclude_capped, median_skill,
                           unranked_block,
                           method_flags, resolve_regimes)
-from src.trivial import ORACLE_METHODS, best_reference_error, skill_score
+from src.trivial import (MED_SKILL_VS_COLS, ORACLE_METHODS, SKILL_VS_AGG_COLS,
+                         WIN_RATE_VS_COLS, aggregate_skill_vs, best_reference_error,
+                         skill_score, skill_vs_table)
 
 # ── Method metadata ────────────────────────────────────────────────────────────
 
@@ -276,7 +282,7 @@ def run_phase1(n_seeds:        int,
                         beats = valid and curr_err > 1e-12 and err < curr_err
                         impv  = ((curr_err / err) if (valid and err > 1e-12)
                                  else (1.0 if valid else float('nan')))
-                        records.append({
+                        rec = {
                             'regime':        regime,
                             'is_holdout':    holdout,
                             'noise':         sigma,
@@ -303,7 +309,10 @@ def run_phase1(n_seeds:        int,
                             'catastrophic':  int(cat),
                             'beats_current': int(beats),
                             'improve_ratio': impv if math.isfinite(impv) else float('nan'),
-                        })
+                        }
+                        # fixed-reference skill: err / err(each deployable trivial) + win flag
+                        rec.update(skill_vs_table(err if valid else float('nan'), errs))
+                        records.append(rec)
 
                 done += 1
                 if verbose and done % max(1, total_seq // 20) == 0:
@@ -347,6 +356,7 @@ def run_phase1(n_seeds:        int,
             'med_skill':    _median(grp['skill']),
             'stability':    round(stability_score(vr, cr, br, cfg_ref), 4),
             'n_seeds':      int(len(grp)),
+            **aggregate_skill_vs(grp),       # med_skill_vs_* / win_rate_vs_* over seeds
         })
     df_agg = pd.DataFrame(agg_records)
 
@@ -359,7 +369,8 @@ def run_phase1(n_seeds:        int,
         cols = ['method', 'family', 'method_type', 'is_trivial', 'is_oracle',
                 'regime_set', 'target_g', 'valid_rate', 'cat_rate', 'beats_rate',
                 'med_error', 'med_improve', 'med_skill', 'stability',
-                'n_regimes', 'n_cells', 'n_capped_excluded', 'rank', 'rank_eligible']
+                'n_regimes', 'n_cells', 'n_capped_excluded', 'rank', 'rank_eligible',
+                *SKILL_VS_AGG_COLS]
         if df.empty:
             return pd.DataFrame(columns=cols)
         pooled = exclude_capped(df)
@@ -379,6 +390,7 @@ def run_phase1(n_seeds:        int,
                     'med_improve': float('nan'), 'med_skill': float('nan'),
                     'stability': float('nan'), 'n_regimes': 0, 'n_cells': 0,
                     'n_capped_excluded': n_excl,
+                    **{c: float('nan') for c in SKILL_VS_AGG_COLS},
                 })
                 continue
             vr = float(grp['valid_rate'].mean())
@@ -402,6 +414,10 @@ def run_phase1(n_seeds:        int,
                 'n_regimes':   int(grp['regime'].nunique()),
                 'n_cells':     int(len(grp)),
                 'n_capped_excluded': n_excl,
+                # fixed-reference skill pooled over cells: median of the per-cell
+                # medians, mean of the per-cell win rates
+                **{c: _median(grp[c]) for c in MED_SKILL_VS_COLS},
+                **{c: round(float(grp[c].mean()), 4) for c in WIN_RATE_VS_COLS},
             })
         metric = CFG_MOD.RANK_METRIC
         out = assign_ranks(pd.DataFrame(rows), metric, group_cols=['target_g'])

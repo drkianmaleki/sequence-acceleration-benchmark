@@ -44,6 +44,7 @@ import numpy as np
 from typing import List
 from scipy.optimize import curve_fit
 from scipy.special import comb as sp_comb
+from scipy.special import poch as sp_poch
 
 # ── Internal helpers ───────────────────────────────────────────────────────────
 
@@ -695,9 +696,21 @@ def accel_levin_v2(seq, indices, future_x: float, cfg: dict) -> float:
 
 def _weniger_delta(seq, indices, order: int, tol: float = 1e-14) -> float:
     """
-    Weniger delta transformation.
-    Uses the sequence values themselves as remainder estimates: w_n = s_n.
-    Same formula as Levin with w_n = s_n.  [WE89]
+    Weniger delta transformation of order k (d-type remainder estimate)  [WE89].
+
+        delta_k = N_k / D_k,
+        N_k = sum_{j=0}^{k} (-1)^j C(k,j) (n0+j+1)_{k-1} s_{n+j} / w_{n+j}
+        D_k = sum_{j=0}^{k} (-1)^j C(k,j) (n0+j+1)_{k-1}         / w_{n+j}
+
+    with the remainder estimate  w_n = Delta(s_n) = s_{n+1} - s_n  and the
+    Pochhammer weight (x)_{k-1} = x (x+1) ... (x+k-2) (scipy.special.poch;
+    equal to the power x^{k-1} for k <= 2).  The last order+2 window values
+    supply the order+1 differences.  A remainder estimate below tol gives NaN.
+
+    Correction (2026-09, redesign v2 Prompt 5A): the previous implementation
+    used w_n = s_n, so s_n cancelled in coeff * s_n and the numerator reduced
+    to the k-th difference of a degree-(k-1) polynomial, identically zero
+    for k = 1, 2; weniger_d1 / weniger_d2 returned 0 for every input.
     """
     need = order + 2
     if len(seq) < need:
@@ -707,14 +720,18 @@ def _weniger_delta(seq, indices, order: int, tol: float = 1e-14) -> float:
     idx = np.asarray(indices[-need:], dtype=float)
     n0  = float(idx[0])
     k   = order
+    w   = np.diff(s)                    # d-type remainder estimates, length order+1
+
+    if len(w) < k + 1:
+        return np.nan
 
     N_num = 0.0
     D_num = 0.0
     for j in range(k + 1):
         sign  = (-1.0) ** j
         binom = float(sp_comb(k, j, exact=True))
-        beta  = (n0 + j + 1.0) ** (k - 1) if k > 1 else 1.0
-        wj    = s[j]
+        beta  = float(sp_poch(n0 + j + 1.0, k - 1))
+        wj    = w[j]
         if abs(wj) < tol:
             return np.nan
         coeff = sign * binom * beta / wj

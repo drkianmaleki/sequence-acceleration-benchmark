@@ -25,11 +25,12 @@ Fragments (paper_fragments/, one tabular per file, booktabs, no \\begin{table})
   f02_ranking_g{0.5,0.1,0.02}.tex   main ranking (accelerators above the validity floor) + unranked block
   f03_skill_summary.tex             fraction of cells with median skill < 1 per family, per stratum, core | held-out
   f04_classical_noop.tex            the 23 classical variants vs the +/-10 % band, improvement factor and skill
-  f05_sweep1_modes.tex              assumed-asymptote mode sweep (Phase 5b sweep 1)
+  f05_sweep1_modes.tex              assumed-asymptote mode sweep, cascade rows (Phase 5b sweep 1a; clamped features)
+  f05b_sweep1_consumers_{core,holdout}.tex   sweep 1b: L_hat-consuming accelerators + constant_assumed under every mode (when the file exists)
   f06_generalisation.tex            held-out vs core rank shift per method
   f07_real_data_v2.tex              real-data re-evaluation over the (depth x target) grid, with skill
   f07b_real_data_legacy18.tex       the preserved 18-cell legacy real-data run
-  f08_real_perturb_diagnostic.tex   perturb_iqr of the routed method vs cell failure on the 90-cell grid (AUC)
+  f08_real_perturb_diagnostic.tex   perturb_iqr of the routed method vs cell failure: all cells, pre-/post-minimum targets, by routed method (AUC)
   f09a_selectors_phase3.tex         Phase 3 selectors, mean stability per stratum + leave-one-regime-out
   f09b_ensemble_phase5a_core.tex    Phase 5a selectors / ensembles, core, error and skill per stratum
   f09c_ensemble_phase5a_holdout.tex Phase 5a, held-out regimes
@@ -308,11 +309,11 @@ def f01():
                  f"{st['n_beat_err']} of 51 ({st['n_eligible']} rank-eligible)", fil, flt + ", is_trivial == 0",
                  "count(med_error < min med_error of the four deployable trivials)")
             fact(sec, f"g={gname(g)} {label}: accelerators with pooled med. skill < 1", f"{st['n_beat_skill']} of 51", fil,
-                 flt + ", is_trivial == 0", "count(med_skill < 1); skill = err / best-of-four trivial error per cell, pooled median")
+                 flt + ", is_trivial == 0", "count(med_skill < 1); skill = hindsight best-of-four (strict): err / best-of-four trivial error per cell, pooled median")
             fact(sec, f"g={gname(g)} {label}: median accelerator", f"med. err {st['med_e']:.4f}, med. skill {st['med_s']:.3f}",
                  fil, flt + ", is_trivial == 0", "median over the 51 accelerators of med_error / med_skill")
     frag("f01_trivial_baseline.tex", "l" + "r" * 8, rows, SRC_G,
-         "per stratum; oracle excluded from every count; skill = err / best-of-four deployable trivial per cell",
+         "per stratum; oracle excluded from every count; skill = hindsight best-of-four (strict): err / best-of-four deployable trivial per cell",
          "Trivial comparators vs accelerators: the four deployable trivials, the oracle constant as a labelled reference, "
          "the rank-1 accelerator of each regime set, the median accelerator, and how many of the 51 accelerators beat the best "
          "deployable trivial (count by pooled median error / count with pooled median skill < 1)",
@@ -415,7 +416,7 @@ def f03():
          ["results/phase1/phase1_aggregated.csv (per (method, regime, noise, g) cell: median skill over 30 seeds)"],
          "capped == 0, is_oracle == 0; a cell counts when its median-seed skill is < 1 (NaN median skill counts as not < 1)",
          "Skill summary: fraction of (method x regime x noise) cells whose median skill is below 1 (the method beat the "
-         "best-of-four deployable trivial on the median seed), per family, per stratum, core vs held-out",
+         "hindsight best-of-four deployable trivial (strict) on the median seed), per family, per stratum, core vs held-out",
          notes=["K = methods in the family; T = method type (\\TE trajectory extrapolator / \\LE limit estimator)"])
 
 
@@ -514,6 +515,38 @@ def f05():
 # ═════════════════════════════════════════════════════════════════════════════
 # F06  held-out vs core generalisation
 # ═════════════════════════════════════════════════════════════════════════════
+def f05b():
+    path = os.path.join(RES, "phase5b", "phase5b_sweep1_consumers.csv")
+    if not os.path.exists(path):
+        print("  (phase5b_sweep1_consumers.csv absent: fragment f05b skipped; produced by a run at or after Prompt 5A)")
+        return
+    Cn = pd.read_csv(path)
+    from phases.phase5b import SWEEP1_METHODS
+    modes = [m for m in C.ASSUMED_L_MODES if m in set(Cn.assumed_mode)]
+    gs = [g for g in STRATA if g in set(Cn.target_g)]
+    head = [r"Method & mode & " + " & ".join(rf"\multicolumn{{4}}{{c}}{{$g = {gname(g)}$}}" for g in gs) + r" \\",
+            "".join(rf"\cmidrule(lr){{{3 + 4 * i}-{6 + 4 * i}}}" for i in range(len(gs))),
+            r" & & " + " & ".join(r"med.\ err & skill & win/assumed & $\rhoC$" for _ in gs) + r" \\", r"\midrule"]
+    for rs in ("core", "holdout"):
+        rows = list(head)
+        for m in SWEEP1_METHODS:
+            for i, mode in enumerate(modes):
+                cells = []
+                for g in gs:
+                    r = Cn[(Cn.method == m) & (Cn.assumed_mode == mode) & (Cn.regime_set == rs) & (Cn.target_g == g)]
+                    if len(r):
+                        r = r.iloc[0]
+                        cells += [f4(float(r.med_error)), f3(float(r.med_skill)), f3(float(r.win_rate_vs_assumed)), f3(float(r.cat_rate))]
+                    else:
+                        cells += ["--"] * 4
+                rows.append(f"{mth(m) if i == 0 else ''} & {esc(mode)} & " + " & ".join(cells) + r" \\")
+            rows.append(r"\addlinespace[1pt]")
+        frag(f"f05b_sweep1_consumers_{rs}.tex", "ll" + "rrrr" * len(gs), rows,
+             ["results/phase5b/phase5b_sweep1_consumers.csv (Phase 5b sweep 1b; capped excluded; pooled over noise)"],
+             f"regime_set == {rs}; skill = hindsight best-of-four (strict); win/assumed = win rate vs constant_assumed under the same mode",
+             f"Assumed-asymptote sweep 1b, {rs} regimes: the L_hat-consuming accelerators and constant_assumed under every mode")
+
+
 def f06():
     head = [r"Method & \multicolumn{3}{c}{$g = 0.5$} & \multicolumn{5}{c}{$g = 0.1$} & \multicolumn{3}{c}{$g = 0.02$} \\",
             r"\cmidrule(lr){2-4}\cmidrule(lr){5-9}\cmidrule(lr){10-12}",
@@ -563,8 +596,29 @@ def f06():
 # ═════════════════════════════════════════════════════════════════════════════
 # F07  real data v2 grid, and the legacy 18-cell table
 # ═════════════════════════════════════════════════════════════════════════════
-def f07():
+def real_summary_with_minima():
+    """real_data_summary_v2.csv plus argmin_round / post_min_target, computed from
+    the recorded curves when the summary predates those columns."""
     S = read("real_data", "real_data_summary_v2.csv")
+    curves = read("real_data", "real_data_curves.csv")
+    minima = {}
+    for d in [c for c in curves.columns if c != "round"]:
+        v = curves[d].to_numpy(dtype=float)
+        i = int(np.nanargmin(v))
+        minima[d] = dict(argmin_round=i + 1, min_value=float(v[i]), value_at_500=float(v[min(500, len(v)) - 1]),
+                         rise_from_min=(float(v[min(500, len(v)) - 1]) - float(v[i])) / float(v[i]))
+    if "post_min_target" not in S.columns:
+        S["argmin_round"] = S.dataset.map(lambda d: minima[d]["argmin_round"])
+        S["rise_from_min"] = S.dataset.map(lambda d: minima[d]["rise_from_min"])
+        S["post_min_target"] = (S.target_round > S.argmin_round).astype(int)
+    return S, minima
+
+
+REAL_STRATA = (("all", None), ("pre-minimum", 0), ("post-minimum", 1))
+
+
+def f07():
+    S, minima = real_summary_with_minima()
     targets = sorted(S.target_round.unique())
     ABBR = {"richardson_1": "R1", "rational_fit": "RF"}
     head = [r"Dataset & $\nobs$ & " + " & ".join(rf"\multicolumn{{3}}{{c}}{{target round {int(t)}}}" for t in targets) + r" \\",
@@ -581,6 +635,8 @@ def f07():
                     r = r.iloc[0]
                     sk = float(r.cascade_skill)
                     sks = (r"\textbf{" + f2(sk) + "}") if sk >= 1 else f2(sk)
+                    if int(r.post_min_target) == 1:
+                        sks += r"$^{+}$"
                     cells += [ABBR.get(r.selected_method, esc(r.selected_method)), f4(float(r.cascade_err)), sks]
                 else:
                     cells += ["--"] * 3
@@ -592,12 +648,32 @@ def f07():
     nfail = [int((S[S.target_round == t].cascade_skill >= 1).sum()) for t in targets]
     rows.append(r"\multicolumn{2}{l}{median skill / cells with skill $\geq 1$ (of 30)} & " +
                 " & ".join(f" & & {m} / {n}" for m, n in zip(med, nfail)) + r" \\")
+    for label, flag in REAL_STRATA[1:]:
+        sub = S if flag is None else S[S.post_min_target == flag]
+        rows.append(rf"\multicolumn{{2}}{{l}}{{{label} targets: cells / skill $\geq 1$ / median skill}} & " +
+                    " & ".join(f" & & {len(sub[sub.target_round == t])} / {int((sub[sub.target_round == t].cascade_skill >= 1).sum())} / "
+                               f"{sub[sub.target_round == t].cascade_skill.median():.2f}" if len(sub[sub.target_round == t]) else " & & --"
+                               for t in targets) + r" \\")
+    for d, m in minima.items():
+        fact("real data (v2)", f"{d}: recorded-curve minimum", f"argmin round {m['argmin_round']}, min {m['min_value']:.5f}, "
+             f"value at round 500 {m['value_at_500']:.5f}, rise from minimum {100 * m['rise_from_min']:+.2f}%",
+             "results/real_data/real_data_curves.csv", f"column {d}", "argmin over rounds (1-based); (v[500] - min) / min")
+    for label, flag in REAL_STRATA:
+        sub = S if flag is None else S[S.post_min_target == flag]
+        fact("real data (v2)", f"{label} targets: cells / cascade skill >= 1 / median skill / median improvement",
+             f"{len(sub)} / {int((sub.cascade_skill >= 1).sum())} / {sub.cascade_skill.median():.3f} / {sub.improvement.median():+.3f}",
+             "results/real_data/real_data_summary_v2.csv", "all rows" if flag is None else f"post_min_target == {flag} (target_round > argmin_round)",
+             "count(cascade_skill >= 1); median(cascade_skill); median(improvement)")
+        for col, tag in (("cascade_win_vs_assumed", "constant_assumed"), ("cascade_win_vs_last", "last_value")):
+            if col in sub.columns:
+                fact("real data (v2)", f"{label} targets: cascade win rate vs {tag}", f"{sub[col].mean():.3f}",
+                     "results/real_data/real_data_summary_v2.csv", "as above", f"mean({col})")
     n_fail = int((S.cascade_skill >= 1).sum())
     n_neg = int((S.improvement < 0).sum())
     fact("real data (v2)", "cells on the grid", f"{len(S)} = 6 datasets x 5 depths x 3 targets",
          "results/real_data/real_data_summary_v2.csv", "all rows", "row count")
     fact("real data (v2)", "median cascade skill over the 90 cells", f"{S.cascade_skill.median():.3f}",
-         "results/real_data/real_data_summary_v2.csv", "all rows", "median(cascade_skill); skill = cascade_err / best-of-four trivial error")
+         "results/real_data/real_data_summary_v2.csv", "all rows", "median(cascade_skill); skill = hindsight best-of-four (strict): cascade_err / best-of-four trivial error")
     fact("real data (v2)", "cells with cascade skill >= 1 (cascade no better than the best trivial)", f"{n_fail} of 90",
          "results/real_data/real_data_summary_v2.csv", "all rows", "count(cascade_skill >= 1)")
     fact("real data (v2)", "cells with negative improvement over the current value", f"{n_neg} of 90",
@@ -620,7 +696,7 @@ def f07():
          ["results/real_data/real_data_summary_v2.csv (recorded XGBoost validation curves re-evaluated under the v2 design; "
           "L_hat mode zero; cascade = Phase-2 rules on the window features)"],
          "all 90 cells; routed: R1 = richardson_1, RF = rational_fit; err = |cascade prediction - recorded value at the "
-         "target round|; skill = err / best-of-four trivial error on the same cell, bold when >= 1",
+         "target round|; skill = hindsight best-of-four (strict): err / best-of-four trivial error on the same cell, bold when >= 1; a trailing + marks a post-minimum target (target round beyond the recorded curve's argmin)",
          "Real-data re-evaluation over the (depth x target) grid: routed method, cascade error and skill per cell")
 
     # legacy 18-cell run, preserved as its own fragment
@@ -660,7 +736,7 @@ def f07():
 # F08  real-data perturbation diagnostic
 # ═════════════════════════════════════════════════════════════════════════════
 def f08():
-    S = read("real_data", "real_data_summary_v2.csv")
+    S, _ = real_summary_with_minima()
     S = S[S.perturb_iqr.notna()].copy()
     defs = [("skill $\\geq 1$", S.cascade_skill >= 1.0, "cascade_skill >= 1"),
             ("improvement $< 0$", S.improvement < 0, "improvement < 0"),
@@ -686,6 +762,11 @@ def f08():
     for dlabel, fail, dexpr in defs:
         res[dexpr] = auc_row("all 90", S, fail, dlabel, dexpr)
     rows.append(r"\addlinespace[2pt]")
+    for label, flag in REAL_STRATA[1:]:
+        sub = S[S.post_min_target == flag]
+        fail = (sub.cascade_skill >= 1.0) | (sub.improvement < 0)
+        res[f"either|{label}"] = auc_row(f"{label} targets ({len(sub)})", sub, fail, "either", f"either, post_min_target == {flag}")
+    rows.append(r"\addlinespace[2pt]")
     for m in ("richardson_1", "rational_fit"):
         sub = S[S.selected_method == m]
         fail = (sub.cascade_skill >= 1.0) | (sub.improvement < 0)
@@ -706,6 +787,13 @@ def f08():
             rr = res[k]
             if rr is not None:
                 answer += f" With {lab}: AUC = {rr['auc']:.3f}, p = {rr['p']:.3f}, {rr['order']} (n_fail = {rr['n_f']})."
+        for label, _ in REAL_STRATA[1:]:
+            rr = res.get(f"either|{label}")
+            if rr is not None:
+                answer += (f" Within {label} targets only: AUC = {rr['auc']:.3f}, p = {rr['p']:.3f}, {rr['order']} "
+                           f"(n_fail = {rr['n_f']} of {rr['n_f'] + rr['n_s']}).")
+            else:
+                answer += f" Within {label} targets: one group empty, no AUC."
         for m in ("richardson_1", "rational_fit"):
             rr = res.get(f"either|{m}")
             if rr is not None:
@@ -719,7 +807,8 @@ def f08():
     frag("f08_real_perturb_diagnostic.tex", "llrrrrrrl", rows,
          ["results/real_data/real_data_summary_v2.csv (perturb_iqr = IQR of the routed method's prediction over 5 "
           "evaluations on 2 %-perturbed windows, crc32 seed per (dataset, depth))"],
-         "all 90 cells; AUC = P(IQR_fail > IQR_succ) from the Mann-Whitney U statistic (ties count one half); p two-sided",
+         "all 90 cells, then pre-minimum (target round <= argmin round of the recorded curve) and post-minimum targets, then by routed method; "
+         "AUC = P(IQR_fail > IQR_succ) from the Mann-Whitney U statistic (ties count one half); p two-sided",
          "Real-data perturbation diagnostic: does the routed method's perturb_iqr separate failing cells from succeeding ones?",
          notes=answer_lines)
     return answer_lines
@@ -801,10 +890,10 @@ def f09():
                 fact("ensembles (Phase 5a)", f"{sel} ({label}) at g={gname(HEADLINE_G)}",
                      f"mean err {r.mean_error:.6f}, median err {r.median_error:.6f}, med. skill {r.med_skill:.4f} (n = {int(r.n)})",
                      f"results/phase5a/{path}", f"selector == {sel}, target_g == {HEADLINE_G}",
-                     "mean/median of the selector's absolute error over records; med_skill = median over records of err / best-of-four trivial")
+                     "mean/median of the selector's absolute error over records; med_skill = hindsight best-of-four (strict), median over records of err / best-of-four trivial")
         frag(fname, "l" + "rr" + "rrr" + "rr", rows,
              [f"results/phase5a/{path} ({label} regimes; obs 30/60/90/120 x 3 noise x 20 seeds; capped cells excluded)"],
-             "all selectors; error = |prediction - true value at n_f|; skill = err / best-of-four trivial error per record, median over records",
+             "all selectors; error = |prediction - true value at n_f|; skill = hindsight best-of-four (strict): err / best-of-four trivial error per record, median over records",
              f"Phase 5a selectors and ensembles, {label} regimes: median error and median skill per stratum "
              f"(mean error at the headline stratum), oracle_51 vs constant_oracle vs the fixed defaults")
 
@@ -997,8 +1086,39 @@ def named_facts():
     fact(sec, "mechanism", "exact-zero differences on noise-free plateaus give zero denominators (DENOM_TOL) in the Shanks/Wynn/Levin/Brezinski/Weniger/Anderson transforms; the estimate is NaN, the record invalid",
          "src/accelerators.py", "-", "-")
 
-    # richardson_3 by depth and the record-level skill split: raw files
+    # richardson_3 by depth: committed aggregate when present (Prompt 5A), else the raw file
     sec = "richardson_3 validity by depth"
+    vpath = os.path.join(RES, "phase5a", "phase5a_validity_by_depth.csv")
+    if os.path.exists(vpath):
+        V = pd.read_csv(vpath)
+        r3 = V[V.method == "richardson_3"].groupby("obs_idx").apply(lambda g: (g.valid_rate * g.n).sum() / g.n.sum())
+        fact(sec, "richardson_3 valid rate by observation depth (committed aggregate)",
+             ", ".join(f"obs {int(d)}: {v:.3f}" for d, v in r3.items()),
+             "results/phase5a/phase5a_validity_by_depth.csv", "method == richardson_3", "n-weighted mean of valid_rate over noise levels per obs_idx")
+        low = (V[(V.is_trivial == 0) & (V.obs_idx == V.obs_idx.min())].groupby("method")
+               .apply(lambda g: (g.valid_rate * g.n).sum() / g.n.sum()).sort_values().head(8))
+        fact(sec, f"least valid accelerators at obs {int(V.obs_idx.min())} (committed aggregate)",
+             ", ".join(f"{m} {v:.3f}" for m, v in low.items()), "results/phase5a/phase5a_validity_by_depth.csv",
+             f"obs_idx == {int(V.obs_idx.min())}, is_trivial == 0", "n-weighted valid_rate per method")
+    G1 = G_CORE[G_CORE.target_g == HEADLINE_G]
+    if "win_rate_vs_assumed" in G1.columns:
+        for m in ("log_linear", "rational_fit", "richardson_1", "single_exp_fit"):
+            r = G1[G1.method == m]
+            if len(r):
+                r = r.iloc[0]
+                fact("trivial baseline", f"{m} g={gname(HEADLINE_G)} core: fixed-reference win rates (vs assumed / last / wmean / wmin)",
+                     f"{r.win_rate_vs_assumed:.3f} / {r.win_rate_vs_last:.3f} / {r.win_rate_vs_wmean:.3f} / {r.win_rate_vs_wmin:.3f}; "
+                     f"median skill vs assumed {r.med_skill_vs_assumed:.3f}, vs last {r.med_skill_vs_last:.3f}",
+                     SRC_G[0], f"method == {m}, target_g == {HEADLINE_G}", "win_rate_vs_* = mean over cells of the per-cell win rate; med_skill_vs_* = median over cells")
+    cpath = os.path.join(RES, "phase5b", "phase5b_sweep1_consumers.csv")
+    if os.path.exists(cpath):
+        Cn = pd.read_csv(cpath)
+        for m in ("log_linear", "rational_fit", "richardson_1", "constant_assumed"):
+            sub = Cn[(Cn.method == m) & (Cn.regime_set == "core") & (Cn.target_g == HEADLINE_G)]
+            if len(sub):
+                fact("sweep 1 (assumed asymptote)", f"sweep 1b, {m} at g={gname(HEADLINE_G)} core: median error by L_hat mode",
+                     ", ".join(f"{r.assumed_mode}: {r.med_error:.4f} (skill {r.med_skill:.2f}, win vs assumed {r.win_rate_vs_assumed:.2f})" for _, r in sub.iterrows()),
+                     "results/phase5b/phase5b_sweep1_consumers.csv", f"method == {m}, regime_set == core, target_g == {HEADLINE_G}", "med_error / med_skill / win_rate_vs_assumed per assumed_mode")
     raw = os.path.join(RES, "phase5a", "phase5a_raw.csv")
     if not ARGS.no_raw and os.path.exists(raw):
         df = pd.read_csv(raw, usecols=["obs_idx", "noise", "method", "valid", "is_holdout", "target_g", "capped", "skill", "error", "ref_error", "regime"])
@@ -1030,7 +1150,7 @@ def named_facts():
         rf = df[(df.method == "rational_fit") & (df.target_g == HEADLINE_G) & (df.is_holdout == 0) & (df.capped == 0)]
         n_lt, n_gt = int((rf.skill < 1).sum()), int((rf.skill > 1).sum())
         fact("ensembles (Phase 5a)", f"fixed rational_fit, core g={gname(HEADLINE_G)}: records with skill < 1 / > 1",
-             f"{n_lt} / {n_gt} of {len(rf)} ({100 * n_lt / len(rf):.1f}% beat the best-of-four trivial); this is why its median skill prints as 1.0000",
+             f"{n_lt} / {n_gt} of {len(rf)} ({100 * n_lt / len(rf):.1f}% beat the hindsight best-of-four trivial); this is why its median skill prints as 1.0000",
              "results/phase5a/phase5a_raw.csv", f"method == rational_fit, target_g == {HEADLINE_G}, is_holdout == 0, capped == 0",
              "count(skill < 1), count(skill > 1)")
     else:
@@ -1125,7 +1245,7 @@ def write_index():
 def main():
     print(f"make_paper_tables.py (redesign v2): results = {rel(RES)}, out = {rel(OUT)}, facts = {rel(ARGS.facts)}")
     print(f"  code {CODE_HEAD}, results as of {RESULTS_HEAD}; dangerous = {sorted(DANGEROUS)}")
-    f01(); f02(); f03(); f04(); f05(); f06(); f07()
+    f01(); f02(); f03(); f04(); f05(); f05b(); f06(); f07()
     answer = f08()
     f09(); f10(); f11()
     named_facts()

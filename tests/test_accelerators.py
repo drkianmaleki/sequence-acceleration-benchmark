@@ -35,6 +35,7 @@ import os
 import sys
 import math
 import numpy as np
+import pytest
 import pandas as pd
 
 # Path setup: works when run as script or as module from project root
@@ -316,6 +317,22 @@ def test_baseline_is_not_reported_as_an_improvement():
     baseline = df[df["method"] == "current_value"]
     assert not baseline.empty
     assert baseline["passed"].sum() == 0
+
+
+@pytest.mark.parametrize("method", ["weniger_d1", "weniger_d2"])
+def test_weniger_recovers_geometric_limit(method):
+    """Weniger delta (d-type remainder) is exact on s_n = 0.3 + 0.5 * 0.9**n.
+
+    Regression for the Prompt-5A correction: the previous implementation used
+    w_n = s_n and returned 0 for every input (it never saw the sequence).
+    """
+    from src.accelerators import METHODS
+    n = np.arange(31, 91)
+    seq = list(0.3 + 0.5 * 0.9 ** n)
+    cfg = {"L_inf": 0.0, "min_valid": -0.5, "max_valid": 500.0}
+    est = METHODS[method](seq, list(n), 1000.0, cfg)
+    assert np.isfinite(est)
+    assert abs(est - 0.3) <= 1e-12, f"{method}: {est}"
 
 
 if __name__ == "__main__":

@@ -24,16 +24,17 @@ if _ROOT not in sys.path:
 import src.config as CFG_MOD
 from src.dangerous import load_dangerous
 from src.pipeline import resolve_regimes
-from phases.phase5b import run_all, ALL_METHODS
+from phases.phase5b import run_all, ALL_METHODS, SWEEP1_METHODS, LHAT_CONSUMERS
 
 
 def n_evaluations(cfg: dict) -> dict:
     regimes = resolve_regimes(cfg['core_regimes'], cfg['holdout_regimes'], True)
     base = len(cfg['noise_list']) * cfg['n_seeds'] * len(regimes) * len(cfg['gap_fractions'])
-    n1 = len(cfg['assumed_modes']) * base * 2
+    n1 = len(cfg['assumed_modes']) * base * 2                          # 1a cascade (2 methods)
+    n1b = len(cfg['assumed_modes']) * base * (len(SWEEP1_METHODS) + 3)  # 1b consumers + 3 trivial refs
     n2 = len(cfg['window_lengths']) * base * 2
     n3 = len(cfg['catmult_values']) * base * len(ALL_METHODS)
-    return {'sweep1': n1, 'sweep2': n2, 'sweep3': n3, 'total': n1 + n2 + n3}
+    return {'sweep1': n1, 'sweep1b': n1b, 'sweep2': n2, 'sweep3': n3, 'total': n1 + n1b + n2 + n3}
 
 
 def parse_args():
@@ -70,7 +71,8 @@ def main():
     print(f'  seeds:      {cfg["n_seeds"]}')
     print(f'  regimes:    {len(regimes)} (core + held-out)')
     print(f'  dangerous:  {len(dangerous)} per artifact')
-    print(f'  Sweep 1 evals: {counts["sweep1"]:,}')
+    print(f'  Sweep 1 evals: {counts["sweep1"]:,} (1a cascade, clamped features) + '
+          f'{counts["sweep1b"]:,} (1b: {len(SWEEP1_METHODS)} L_hat consumers + 3 references)')
     print(f'  Sweep 2 evals: {counts["sweep2"]:,}')
     print(f'  Sweep 3 evals: {counts["sweep3"]:,}')
     print(f'  Output dir: {out_dir}')
@@ -117,6 +119,23 @@ def main():
         tag = ' (oracle)' if row['assumed_mode'] == 'oracle' else ''
         print(f"  {row['assumed_mode']:>8} {prec:>10.3f} "
               f"{row['recall']:>8.3f} {row['mean_gain']:>10.4f}  {robust}{tag}")
+
+    df1c = results['sweep1_consumers']
+    subc = df1c[(df1c['target_g'] == g_head) & (df1c['regime_set'] == 'core')]
+    print(f'\n  SWEEP 1b — L_hat consumers + constant_assumed vs mode '
+          f'(g={g_head:g}, core, pooled over noise, capped excluded): median error / '
+          f'median skill (hindsight best-of-four, strict) / win rate vs constant_assumed')
+    modes = [m for m in CFG_MOD.ASSUMED_L_MODES if m in set(subc['assumed_mode'])]
+    print(f"  {'method':<20}" + ''.join(f"  {m:>21}" for m in modes))
+    print('  ' + '-' * (20 + 23 * len(modes)))
+    for m in SWEEP1_METHODS:
+        cells = []
+        for mode in modes:
+            r = subc[(subc['method'] == m) & (subc['assumed_mode'] == mode)]
+            cells.append(f"{r['med_error'].iloc[0]:.4f}/{r['med_skill'].iloc[0]:.2f}/{r['win_rate_vs_assumed'].iloc[0]:.2f}"
+                         if len(r) else '--')
+        print(f"  {m:<20}" + ''.join(f"  {c:>21}" for c in cells))
+    print(f"  (the 1a cascade rows above are labelled: {df1g['note'].iloc[0] if 'note' in df1g and len(df1g) else ''})")
 
     sub2 = df2g[(df2g['target_g'] == g_head) & (df2g['noise'] == sig0)
                 & (df2g['regime_set'] == 'core')]
