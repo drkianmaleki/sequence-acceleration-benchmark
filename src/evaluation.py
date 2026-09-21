@@ -3,7 +3,7 @@ evaluation.py
 =============
 Main benchmark loop (Phase 1) under redesign v2.
 
-Grid:  56 methods (51 accelerators + 5 trivial comparators)
+Grid:  54 methods (49 accelerators + 5 trivial comparators; counts derived from the registry)
        x (18 core + 6 held-out) regimes x noise levels x seeds
        x gap-stratified horizons g in config.HORIZON_GAP_FRACTIONS
 
@@ -96,7 +96,6 @@ FAMILY = {
     'levin_t1': 'levin',  'levin_t2': 'levin',
     'levin_u1': 'levin',  'levin_u2': 'levin',
     'levin_v1': 'levin',  'levin_v2': 'levin',
-    'weniger_d1': 'weniger',   'weniger_d2': 'weniger',
     'brezinski_theta1': 'brezinski', 'brezinski_theta2': 'brezinski',
     'neville_2': 'neville', 'neville_3': 'neville', 'neville_4': 'neville',
     'anderson_1': 'anderson','anderson_2': 'anderson',

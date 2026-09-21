@@ -1,8 +1,12 @@
 """
 accelerators.py
 ===============
-All 51 sequence-acceleration methods organised by family, plus the five
-trivial comparators of redesign v2 (src/trivial.py): 56 registered methods.
+The 49 evaluated sequence-acceleration methods organised in 12 families, plus
+the five trivial comparators of redesign v2 (src/trivial.py): 54 registered
+methods (METHOD_NAMES).  The Weniger delta pair (weniger_d1 / weniger_d2) was
+retired from the roster in Prompt 5B: after the Prompt-5A correction it is
+numerically identical to levin_t1 / levin_t2 (tests/test_accelerators.py
+asserts the identity); the implementation is kept under RETIRED_METHODS.
 
 Each accelerator has the unified signature:
     method(seq, indices, future_x, cfg) -> float
@@ -582,10 +586,19 @@ def _levin_transform(seq, indices, order: int, variant: str,
 
     with  beta(j,k) = (n0+j+1)^{k-1}  for k > 1, else 1.0
 
-    Remainder estimates (variants):
-        't': w_n = Delta(s_n) = s_{n+1} - s_n
-        'u': w_n = (n+1) * Delta(s_n)
+    Remainder estimates (variants; the names are this codebase's, the
+    correspondence to Weniger 1989 is given so the two families can be compared):
+        't': w_n = Delta(s_n) = s_{n+1} - s_n     the FORWARD-difference remainder
+             (Weniger's d~-type, eq. (7.3-6) with the difference taken forward;
+             not the backward difference s_n - s_{n-1} of Levin's original t)
+        'u': w_n = (n+1) * Delta(s_n)              Levin's u-type with the same
+             forward difference
         'v': w_n = Delta(s_n)*Delta(s_{n+1}) / (Delta(s_{n+1}) - Delta(s_n))
+             the ratio-of-differences (v-type) form
+    With the power weight beta(j,k) = (n0+j+1)^(k-1) the 't' variant of order
+    k <= 2 coincides with Weniger's delta transformation of the same order
+    (whose Pochhammer weight (n0+j+1)_(k-1) equals the power for k <= 2);
+    see _weniger_delta.  Names unchanged; no numerical change was made.
 
     Point counts per variant:
         't', 'u': need = order + 2   (order+1 diffs from order+2 values)
@@ -711,6 +724,13 @@ def _weniger_delta(seq, indices, order: int, tol: float = 1e-14) -> float:
     used w_n = s_n, so s_n cancelled in coeff * s_n and the numerator reduced
     to the k-th difference of a degree-(k-1) polynomial, identically zero
     for k = 1, 2; weniger_d1 / weniger_d2 returned 0 for every input.
+
+    Retired from the roster (Prompt 5B): for k <= 2 the Pochhammer weight
+    equals the power weight of _levin_transform(..., 't'), which uses the same
+    forward-difference remainder, so the corrected weniger_d1 / weniger_d2 are
+    identical to levin_t1 / levin_t2 to machine precision
+    (tests/test_accelerators.py::test_weniger_equals_levin_t).  The function
+    and its two wrappers are kept (RETIRED_METHODS) and tested, not evaluated.
     """
     need = order + 2
     if len(seq) < need:
@@ -1098,9 +1118,7 @@ METHODS = {
     "levin_u2":           accel_levin_u2,
     "levin_v1":           accel_levin_v1,
     "levin_v2":           accel_levin_v2,
-    # Family 9 — Weniger
-    "weniger_d1":         accel_weniger_d1,
-    "weniger_d2":         accel_weniger_d2,
+    # (Family 9, Weniger, retired in Prompt 5B: see RETIRED_METHODS below)
     # Family 10 — Brezinski Theta
     "brezinski_theta1":   accel_brezinski_theta1,
     "brezinski_theta2":   accel_brezinski_theta2,
@@ -1126,3 +1144,10 @@ METHODS.update(_TRIVIAL_METHODS)
 METHODS["last_value"] = accel_current_value
 
 METHOD_NAMES = list(METHODS.keys())
+
+# Implemented, tested, not evaluated: the Weniger delta pair is numerically
+# identical to levin_t1 / levin_t2 for orders 1 and 2 (see _weniger_delta).
+RETIRED_METHODS = {
+    "weniger_d1": accel_weniger_d1,
+    "weniger_d2": accel_weniger_d2,
+}

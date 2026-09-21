@@ -50,18 +50,14 @@ import src.config as CFG_MOD
 from src.accelerators import METHODS
 from src.generators   import regime_functions
 from src.asymptote    import assumed_asymptote
-from src.pipeline     import (REFERENCE_METHODS, capped_block, exclude_capped,
+from src.pipeline     import (PHASE2_POOL, REFERENCE_METHODS, capped_block, exclude_capped,
                               horizon_meta, is_holdout, method_flags,
                               resolve_regimes)
 from src.trivial      import (REFERENCE_TAGS, best_reference_error, skill_score,
                               skill_vs_from_arrays, skill_vs_table)
 
 # ── Method set ─────────────────────────────────────────────────────────────────
-PHASE4_METHODS = [
-    'current_value', 'richardson_1', 'richardson_a10',
-    'single_exp_fit', 'rational_fit', 'pade_22',
-    'log_linear', 'weniger_d2', 'anderson_1',
-]
+PHASE4_METHODS = list(PHASE2_POOL)     # src.pipeline: the 9-method pool (levin_t2 since Prompt 5B)
 # Evaluated for skill but without diagnostics (they are constants of the window)
 EXTRA_REFERENCES = [m for m in REFERENCE_METHODS if m not in PHASE4_METHODS]
 EVAL_METHODS = PHASE4_METHODS + EXTRA_REFERENCES
@@ -70,7 +66,7 @@ METHOD_COLOURS = {
     'current_value':  '#888888', 'richardson_1':   '#f4a261',
     'richardson_a10': '#e76f51', 'single_exp_fit': '#2196f3',
     'rational_fit':   '#1565c0', 'pade_22':        '#e91e63',
-    'log_linear':     '#00897b', 'weniger_d2':     '#9c27b0',
+    'log_linear':     '#00897b', 'levin_t2':       '#9c27b0',
     'anderson_1':     '#795548',
 }
 

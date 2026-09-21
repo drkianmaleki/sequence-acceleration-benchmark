@@ -79,7 +79,7 @@ CFG = {
 }
 
 # Trivial comparators are not accelerators: excluded from the analytic harness
-# (Report-1 review decision).  Phase 0 tests the 51 accelerators only.
+# (Report-1 review decision).  Phase 0 tests the accelerator roster only.
 PHASE0_METHODS = [m for m in METHOD_NAMES if m not in TRIVIAL_METHOD_NAMES]
 
 # ── Analytic sequences ─────────────────────────────────────────────────────────
@@ -326,13 +326,39 @@ def test_weniger_recovers_geometric_limit(method):
     Regression for the Prompt-5A correction: the previous implementation used
     w_n = s_n and returned 0 for every input (it never saw the sequence).
     """
-    from src.accelerators import METHODS
+    from src.accelerators import RETIRED_METHODS
     n = np.arange(31, 91)
     seq = list(0.3 + 0.5 * 0.9 ** n)
     cfg = {"L_inf": 0.0, "min_valid": -0.5, "max_valid": 500.0}
-    est = METHODS[method](seq, list(n), 1000.0, cfg)
+    est = RETIRED_METHODS[method](seq, list(n), 1000.0, cfg)
     assert np.isfinite(est)
     assert abs(est - 0.3) <= 1e-12, f"{method}: {est}"
+
+
+@pytest.mark.parametrize("order", [1, 2])
+def test_weniger_equals_levin_t(order):
+    """The corrected Weniger delta of order k <= 2 IS this codebase's Levin 't'.
+
+    Both use the forward-difference remainder w_n = s_{n+1} - s_n; the
+    Pochhammer weight (n0+j+1)_{k-1} of the delta transform equals the power
+    weight (n0+j+1)^{k-1} of Levin for k = 1, 2.  Checked to machine precision
+    on the 96 audit windows of tests/test_input_dependence.py (NaN on the same
+    windows).  This is why weniger_d1 / weniger_d2 were retired from the
+    roster in Prompt 5B (RETIRED_METHODS): the pair duplicates levin_t1 / t2.
+    """
+    from src.accelerators import _levin_transform, _weniger_delta
+    from tests.test_input_dependence import windows
+    checked = 0
+    for regime, sigma, seed, seq, idx in windows():
+        a = _weniger_delta(list(seq), list(idx), order)
+        b = _levin_transform(list(seq), list(idx), order, "t")
+        if math.isnan(a) or math.isnan(b):
+            assert math.isnan(a) and math.isnan(b), (regime, sigma, seed, a, b)
+            continue
+        assert abs(a - b) <= 1e-12 * max(1.0, abs(a)), (regime, sigma, seed, order, a, b)
+        checked += 1
+    assert checked >= 90
+    assert "weniger_d1" not in METHOD_NAMES and "weniger_d2" not in METHOD_NAMES
 
 
 if __name__ == "__main__":

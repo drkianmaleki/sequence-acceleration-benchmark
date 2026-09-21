@@ -9,7 +9,7 @@ set from the Phase-1 output and write the artifact that later phases read.
 
 Criterion (src/dangerous.py): pooled stability S < 0 on the core regimes,
 pooled over the gap strata and noise levels, capped cells excluded, oracle
-excluded.  Only the 51 accelerators are eligible; the trivial comparators are
+excluded.  Only the accelerators are eligible; the trivial comparators are
 scored and printed for the record but never written to the artifact.
 Exit status 0 on success, 1 when the Phase-1 table is missing.
 

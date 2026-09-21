@@ -4,7 +4,7 @@ Benchmark code for the paper:
 
 > Maleki, K. (2026). **Finite-Horizon Learning-Curve Prediction for Gradient Boosting: Why Sequence Acceleration Fails and Simple Curve Fits Suffice.** *Machine Learning* (in revision; title as submitted).
 
-Given the validation-loss trajectory of a gradient-boosting run, predict the loss at a specified future round. The repository evaluates **51 sequence-acceleration methods from 13 families** — Richardson extrapolation, Padé approximants, parametric curve fits, and the classical algebraic accelerators (Shanks, Wynn ε/ρ, Levin, Brezinski, Weniger, Anderson) — **against five trivial comparators**, on **18 core and 6 held-out synthetic convergence regimes** with hidden, heterogeneous asymptotes, three noise levels, three gap-defined prediction horizons and 30 seeds (**362,880 evaluations** in the main benchmark; **2.86 M** central evaluations across all phases, plus 6 M diagnostic calls), and re-evaluates six recorded real XGBoost curves (OpenML ids 1590, 1461, 1596, 23512, 41150, 41168) on a 90-cell (depth × target) grid.
+Given the validation-loss trajectory of a gradient-boosting run, predict the loss at a specified future round. The repository evaluates **49 sequence-acceleration methods from 12 families** — Richardson extrapolation, Padé approximants, parametric curve fits, and the classical algebraic accelerators (Shanks, Wynn ε/ρ, Levin, Brezinski, Anderson) — **against five trivial comparators**, on **18 core and 6 held-out synthetic convergence regimes** with hidden, heterogeneous asymptotes, three noise levels, three gap-defined prediction horizons and 30 seeds (**349,920 evaluations** in the main benchmark; **2.96 M** central evaluations across all phases, plus 5.8 M diagnostic calls), and re-evaluates six recorded real XGBoost curves (OpenML ids 1590, 1461, 1596, 23512, 41150, 41168) on a 90-cell (depth × target) grid.
 
 This is **redesign v2** (2026-09). The design of the originally submitted version was rejected in review because (a) every regime shared one true asymptote L* = 0.01, (b) that exact value was handed to every method as the "assumed" asymptote, and (c) the headline horizons sat where the target had already converged, so a predictor that simply returned the constant beat every method. Each ingredient is removed here; the numbers behind the revised paper are in `FACTS.md` and `paper_fragments/`, generated from the committed `results/` by one script.
 
@@ -72,13 +72,13 @@ The script reads the per-stratum result files (never the legacy-named headline c
 
 | Script | Phase | Grid (full) | Wall (full run) |
 |---|---|---|---|
-| `scripts/run_phase0_tests.py` | analytic unit tests | 51 accelerators × 4 sequences | 2 s |
-| `scripts/run_phase1.py --full` | main benchmark | 24 regimes × 30 seeds × 3 noise × 3 strata × 56 methods (n_obs = 90) | 31 min |
+| `scripts/run_phase0_tests.py` | analytic unit tests | 49 accelerators × 4 sequences | 2 s |
+| `scripts/run_phase1.py --full` | main benchmark | 24 regimes × 30 seeds × 3 noise × 3 strata × 54 methods (n_obs = 90) | 31 min |
 | `scripts/derive_dangerous.py` | dangerous artifact | reads `phase1_aggregated.csv` | 1 s |
 | `scripts/run_phase2.py --full` | failure detection | 13 depths × 5 noise × 20 seeds × 18 core regimes × 3 strata × 11 methods | 16 min |
 | `scripts/run_phase3.py --full` | adaptive selection | analysis of Phase 2 | 5 s |
 | `scripts/run_phase4.py --full` | perturbation / shift diagnostics | 4 depths × 3 noise × 20 seeds × 24 regimes × 3 strata × 13 methods (+1.56 M diagnostic calls) | 30 min |
-| `scripts/run_phase5a.py --full [--jobs N]` | ensemble ablation | 4 depths × 3 noise × 20 seeds × 24 regimes × 3 strata × 56 methods (+4.4 M perturbation calls) | 2.5 h |
+| `scripts/run_phase5a.py --full [--jobs N]` | ensemble ablation | 4 depths × 3 noise × 20 seeds × 24 regimes × 3 strata × 54 methods (+4.2 M perturbation calls) | 2.5 h |
 | `scripts/run_phase5b.py --full` | sensitivity sweeps | sweep 1a cascade vs assumed asymptote (clamped features, labelled), sweep 1b the 10 L_hat-consuming accelerators + `constant_assumed` under the 5 modes, window length, CAT_MULT; 2 strata | 38 min (+ sweep 1b, not yet timed) |
 | `scripts/run_real_data.py` | recorded-curve re-evaluation | 6 datasets × 5 depths × 3 targets × 7 methods; every summary three ways (all / pre-minimum / post-minimum targets) | 5 s |
 
@@ -93,7 +93,7 @@ pip install pytest
 pytest tests/          # 342 tests
 ```
 
-`test_generators.py` checks the invariants each synthetic regime must satisfy (in particular that the noiseless generator output equals the truth function at every n; a mismatch there is silent at run time). `test_accelerators.py` verifies the 51 method implementations on four analytic sequences with known limits. `test_redesign.py` locks in the redesign: hidden heterogeneous asymptotes, the `L_true` / `L̂` separation (no method reads `cfg["L_true"]`), gap-defined horizons and capping, the trivial comparators and skill, the held-out split, the rank floor, and a regression test that reproduces the referee's finding under `ASYMPTOTE_MODE = "legacy"`. `test_pipeline_v2.py` covers the shared pipeline helpers, the dangerous artifact, the Phase-5a serial-vs-parallel byte identity and the real-data provenance columns. `test_input_dependence.py` is the permanent guard against degenerate accelerators: on 96 generated windows every accelerator must react to a 1 % window perturbation on ≥ 90 % of the windows where it is finite and may coincide with a deployable trivial on ≤ 10 % of them (`current_value` exempt); it also measures the L_hat-consumer list that Phase 5b sweep 1b evaluates. It was added after `weniger_d1/d2` were found to return 0 for every input (fixed in `src/accelerators.py::_weniger_delta`, d-type remainder `w_n = Δs_n` with Pochhammer weights).
+`test_generators.py` checks the invariants each synthetic regime must satisfy (in particular that the noiseless generator output equals the truth function at every n; a mismatch there is silent at run time). `test_accelerators.py` verifies the 49 method implementations on four analytic sequences with known limits, checks that the retired Weniger pair recovers a geometric limit, and asserts its identity with `levin_t1/t2`. `test_redesign.py` locks in the redesign: hidden heterogeneous asymptotes, the `L_true` / `L̂` separation (no method reads `cfg["L_true"]`), gap-defined horizons and capping, the trivial comparators and skill, the held-out split, the rank floor, and a regression test that reproduces the referee's finding under `ASYMPTOTE_MODE = "legacy"`. `test_pipeline_v2.py` covers the shared pipeline helpers, the dangerous artifact, the Phase-5a serial-vs-parallel byte identity and the real-data provenance columns. `test_input_dependence.py` is the permanent guard against degenerate accelerators: on 96 generated windows every accelerator must react to a 1 % window perturbation on ≥ 90 % of the windows where it is finite and may coincide with a deployable trivial on ≤ 10 % of them (`current_value` exempt); it also measures the L_hat-consumer list that Phase 5b sweep 1b evaluates. It was added after `weniger_d1/d2` were found to return 0 for every input (fixed in `src/accelerators.py::_weniger_delta`, forward-difference remainder `w_n = Δs_n` with Pochhammer weights); the corrected pair turned out to be numerically identical to `levin_t1/t2` (this codebase's Levin `t` uses the same forward-difference remainder, and the Pochhammer and power weights coincide for orders ≤ 2), so it was retired from the roster and `levin_t2` took its place in the 9-method Phase 2/3/4 pool.
 
 ---
 
@@ -102,7 +102,7 @@ pytest tests/          # 342 tests
 ```
 sequence-acceleration-benchmark/
 ├── src/
-│   ├── accelerators.py     51 accelerator implementations (+ the trivial comparators registered as methods)
+│   ├── accelerators.py     49 accelerator implementations (+ the trivial comparators registered as methods; the retired Weniger pair under RETIRED_METHODS)
 │   ├── trivial.py          the five trivial comparators, best_reference_error, skill_score, skill_vs_table (fixed-reference skill)
 │   ├── asymptote.py        assumed-asymptote modes (zero / half / oracle / double / winmin)
 │   ├── generators.py       18 core + 6 held-out regimes, hidden per-(regime, seed) L_true

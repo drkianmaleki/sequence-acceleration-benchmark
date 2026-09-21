@@ -258,7 +258,7 @@ def test_trivial_methods_are_registered_and_flagged():
     assert "constant_oracle" not in SKILL_REFERENCE_METHODS
     assert set(SKILL_REFERENCE_METHODS) == {
         "constant_assumed", "last_value", "window_mean", "window_min"}
-    assert len(METHOD_NAMES) == 56 and len(set(METHOD_NAMES)) == 56
+    assert len(set(METHOD_NAMES)) == len(METHOD_NAMES) == 49 + 5   # 49 accelerators + 5 trivial comparators (Prompt 5B)
 
 
 def test_skill_score_definition():

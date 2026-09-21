@@ -92,7 +92,7 @@ METHOD_COLOURS = {
     'rational_fit':     '#1565c0',
     'pade_22':          '#e91e63',
     'log_linear':       '#00897b',
-    'weniger_d2':       '#9c27b0',
+    'levin_t2':         '#9c27b0',
     'anderson_1':       '#795548',
     'constant_assumed': '#212121',
 }
@@ -214,7 +214,7 @@ def _apply_enhanced_cascade(row: pd.Series) -> str:
         return 'rational_fit'
     if (math.isfinite(curv) and curv > 0.50
             and math.isfinite(d_cv) and d_cv < 0.05):
-        return 'weniger_d2'
+        return 'levin_t2'
     if (math.isfinite(osc) and osc > 0.30
             and math.isfinite(d_cv) and d_cv > 0.20):
         return 'log_linear'

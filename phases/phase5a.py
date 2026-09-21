@@ -5,10 +5,13 @@ Phase 5A — Full-Pool Ensemble with Ablation.
 
 Key ablation questions
 -----------------------
-Q1. Does the 51-accelerator pool beat the 9-method pool?  diag_9 vs diag_51
-Q2. Does weighting beat equal?         equal_51 vs diag_51
-Q3. Does threshold filter beat equal?  equal_51 vs threshold_ens_010
-Q4. How much does oracle improve?      oracle_9 vs oracle_51
+Q1. Does the full accelerator pool beat the 9-method pool?  diag_9 vs diag_<N>
+Q2. Does weighting beat equal?         equal_<N> vs diag_<N>
+Q3. Does threshold filter beat equal?  equal_<N> vs threshold_ens_010
+Q4. How much does oracle improve?      oracle_9 vs oracle_<N>
+    (<N> = the roster size, src.pipeline.N_ACCEL, 49 since Prompt 5B; the
+    selector names oracle_<N>, equal_ensemble_<N>, diag_ensemble_<N>,
+    capped_diag_<N> are built from it, never hard-coded)
 Q5. Where is the residual gap?         per-regime decomposition
 Q6. Are dangerous methods auto-IDed?   method weight ranking
 
@@ -18,7 +21,7 @@ Redesign v2
     raw record carries target_g, achieved_g, n_f, capped, L_true, L_hat,
     skill (hindsight best-of-four, strict), skill_vs_* / win_vs_* against each
     deployable trivial, is_trivial, is_oracle, is_holdout, is_dangerous.
-  * The ensemble / oracle pool is the 51 accelerators.  The five trivial
+  * The ensemble / oracle pool is the accelerator roster (N_ACCEL).  The five trivial
     comparators are evaluated and reported as fixed reference selectors
     (constant_oracle labelled) but never mixed into an ensemble.
   * The dangerous set is read from the Phase-1 artifact
@@ -61,20 +64,23 @@ from src.accelerators import METHODS
 from src.generators   import regime_functions
 from src.asymptote    import assumed_asymptote
 from src.dangerous    import load_dangerous
-from src.pipeline     import (ACCEL_METHODS, capped_block, exclude_capped,
+from src.pipeline     import (PHASE2_POOL, ACCEL_METHODS, capped_block, exclude_capped,
                               horizon_meta, is_holdout, method_flags,
                               resolve_regimes)
 from src.trivial      import (MED_SKILL_VS_COLS, REFERENCE_TAGS, TRIVIAL_METHOD_NAMES,
                               WIN_RATE_VS_COLS, best_reference_error, skill_score,
                               skill_vs_from_arrays, skill_vs_table)
 
-PHASE2_METHODS = [
-    'current_value', 'richardson_1', 'richardson_a10',
-    'single_exp_fit', 'rational_fit', 'pade_22',
-    'log_linear', 'weniger_d2', 'anderson_1',
-]
+PHASE2_METHODS = list(PHASE2_POOL)     # src.pipeline: the 9-method pool (levin_t2 since Prompt 5B)
 
-POOL         = list(ACCEL_METHODS)                 # 51 accelerators (ensembles, oracles)
+POOL         = list(ACCEL_METHODS)                 # the accelerator roster (ensembles, oracles)
+N_POOL       = len(POOL)                           # 49 since Prompt 5B; selector names derive from it
+ORACLE_POOL  = f'oracle_{N_POOL}'
+EQUAL_POOL   = f'equal_ensemble_{N_POOL}'
+DIAG_POOL    = f'diag_ensemble_{N_POOL}'
+CAPPED_POOL  = f'capped_diag_{N_POOL}'
+ABL_THRESHOLD_VS_EQUAL = f'threshold_vs_equal_{N_POOL}'
+ABL_DIAG_VS_EQUAL      = f'diag_vs_equal_{N_POOL}'
 EVAL_METHODS = POOL + list(TRIVIAL_METHOD_NAMES)   # + 5 trivial comparators (reference rows)
 TRIVIAL_SELECTORS = list(TRIVIAL_METHOD_NAMES)
 _SKILL_VS_RECORD  = [f'skill_vs_{t}' for _, t in REFERENCE_TAGS] + [f'win_vs_{t}' for _, t in REFERENCE_TAGS]
@@ -414,9 +420,9 @@ def _compute_ensembles(grp, true_val, pool, phase2_methods, slope, r2, dangerous
 
     # ── Oracles ───────────────────────────────────────────────────────────────
     e9  = [_err(m) for m in phase2_methods if math.isfinite(_err(m))]
-    e51 = [_err(m) for m in pool           if math.isfinite(_err(m))]
+    e_pool = [_err(m) for m in pool           if math.isfinite(_err(m))]
     out['oracle_9']  = min(e9)  if e9  else float('nan')
-    out['oracle_51'] = min(e51) if e51 else float('nan')
+    out[ORACLE_POOL] = min(e_pool) if e_pool else float('nan')
 
     safe = [m for m in pool if m not in dangerous]
 
@@ -425,7 +431,7 @@ def _compute_ensembles(grp, true_val, pool, phase2_methods, slope, r2, dangerous
         ests = [_est(m) for m in p_ if math.isfinite(_est(m))]
         return abs(float(np.median(ests)) - true_val) if ests else float('nan')
 
-    out['equal_ensemble_51']   = _equal_ens(pool)
+    out[EQUAL_POOL]   = _equal_ens(pool)
     out['equal_ensemble_9']    = _equal_ens(phase2_methods)
     out['equal_ensemble_safe'] = _equal_ens(safe)
 
@@ -441,7 +447,7 @@ def _compute_ensembles(grp, true_val, pool, phase2_methods, slope, r2, dangerous
         w = np.array(ws); w /= w.sum()
         return abs(float(np.dot(w, ests)) - true_val)
 
-    out['diag_ensemble_51']   = _diag_ens(pool)
+    out[DIAG_POOL]   = _diag_ens(pool)
     out['diag_ensemble_9']    = _diag_ens(phase2_methods)
     out['diag_ensemble_safe'] = _diag_ens(safe)
 
@@ -460,7 +466,7 @@ def _compute_ensembles(grp, true_val, pool, phase2_methods, slope, r2, dangerous
         ws /= ws.sum()
         return abs(float(np.dot(ws, ests)) - true_val)
 
-    out['capped_diag_51']   = _capped_diag_ens(pool)
+    out[CAPPED_POOL]   = _capped_diag_ens(pool)
     out['capped_diag_safe'] = _capped_diag_ens(safe)
 
     # ── Threshold ensemble: filter high-IQR, then equal weight ────────────────
@@ -487,16 +493,16 @@ def _compute_ensembles(grp, true_val, pool, phase2_methods, slope, r2, dangerous
 
 
 SELECTORS = [
-    'oracle_51',
+    ORACLE_POOL,
     'oracle_9',
     'threshold_ens_010',
     'threshold_ens_050',
     'threshold_ens_safe',
-    'capped_diag_51',
+    CAPPED_POOL,
     'capped_diag_safe',
-    'diag_ensemble_51',
+    DIAG_POOL,
     'diag_ensemble_safe',
-    'equal_ensemble_51',
+    EQUAL_POOL,
     'equal_ensemble_safe',
     'diag_ensemble_9',
     'equal_ensemble_9',
@@ -507,16 +513,16 @@ SELECTORS = [
 ] + TRIVIAL_SELECTORS
 
 SELECTOR_COLOURS = {
-    'oracle_51':          '#000000',
+    ORACLE_POOL:          '#000000',
     'oracle_9':           '#444444',
     'threshold_ens_010':  '#2e7d32',
     'threshold_ens_050':  '#66bb6a',
     'threshold_ens_safe': '#a5d6a7',
-    'capped_diag_51':     '#1a237e',
+    CAPPED_POOL:          '#1a237e',
     'capped_diag_safe':   '#3949ab',
-    'diag_ensemble_51':   '#7986cb',
+    DIAG_POOL:            '#7986cb',
     'diag_ensemble_safe': '#9fa8da',
-    'equal_ensemble_51':  '#1565c0',
+    EQUAL_POOL:           '#1565c0',
     'equal_ensemble_safe':'#42a5f5',
     'diag_ensemble_9':    '#ff9800',
     'equal_ensemble_9':   '#ffc107',
@@ -655,13 +661,13 @@ def aggregate_results(df, out_dir, dangerous, default_g=None):
     for g in sorted(core['target_g'].unique()):
         sub = core[core['target_g'] == g]
         comparisons = [
-            ('threshold_ens_010', 'equal_ensemble_51',  'threshold_vs_equal_51'),
+            ('threshold_ens_010', EQUAL_POOL,  ABL_THRESHOLD_VS_EQUAL),
             ('threshold_ens_010', 'fixed_rational',     'threshold_vs_rational'),
-            ('capped_diag_51',    'equal_ensemble_51',  'capped_diag_vs_equal'),
-            ('diag_ensemble_51',  'equal_ensemble_51',  'diag_vs_equal_51'),
+            (CAPPED_POOL,    EQUAL_POOL,  'capped_diag_vs_equal'),
+            (DIAG_POOL,  EQUAL_POOL,  ABL_DIAG_VS_EQUAL),
             ('diag_ensemble_9',   'equal_ensemble_9',   'weighting_gain_9'),
             ('threshold_ens_010', 'threshold_ens_safe', 'filter_benefit'),
-            ('equal_ensemble_51', 'equal_ensemble_9',   'pool_expansion_gain'),
+            (EQUAL_POOL, 'equal_ensemble_9',   'pool_expansion_gain'),
             ('threshold_ens_010', 'constant_assumed',   'threshold_vs_constant_assumed'),
             ('fixed_rational',    'window_min',         'rational_vs_window_min'),
         ]
@@ -699,14 +705,14 @@ def aggregate_results(df, out_dir, dangerous, default_g=None):
     gap_rows = []
     for (obs_idx, g), sub in core.groupby(['obs_idx', 'target_g']):
         for sel in ['threshold_ens_010', 'threshold_ens_safe',
-                    'diag_ensemble_51', 'equal_ensemble_51', 'fixed_rational',
+                    DIAG_POOL, EQUAL_POOL, 'fixed_rational',
                     'constant_assumed']:
             if sel not in sub.columns:
                 continue
-            idx = sub[sel].notna() & sub['oracle_51'].notna()
+            idx = sub[sel].notna() & sub[ORACLE_POOL].notna()
             if idx.sum() == 0:
                 continue
-            gap = float((sub.loc[idx, sel] - sub.loc[idx, 'oracle_51']).mean())
+            gap = float((sub.loc[idx, sel] - sub.loc[idx, ORACLE_POOL]).mean())
             gap_rows.append({
                 'obs_idx': obs_idx, 'target_g': g,
                 'selector': sel, 'mean_gap_vs_oracle': round(gap, 6),
@@ -781,8 +787,8 @@ def fig_p5a_02_by_sigma(df_sigma, out_dir, default_g=None):
     """Mean error by sigma level for key selectors at the headline stratum."""
     if df_sigma.empty:
         return ''
-    key_sels = ['oracle_51', 'threshold_ens_010', 'capped_diag_51',
-                'equal_ensemble_51', 'fixed_rational', 'fixed_richardson',
+    key_sels = [ORACLE_POOL, 'threshold_ens_010', CAPPED_POOL,
+                EQUAL_POOL, 'fixed_rational', 'fixed_richardson',
                 'constant_assumed']
     key_sels = [s for s in key_sels if s in df_sigma['selector'].unique()]
     g        = _headline(df_sigma, default_g)
@@ -850,7 +856,7 @@ def fig_p5a_04_obs_gap(df_gap, out_dir, default_g=None):
         return ''
     obs_vals = sorted(df_gap['obs_idx'].unique())
     key_sels = ['threshold_ens_010', 'threshold_ens_safe',
-                'equal_ensemble_51', 'fixed_rational', 'constant_assumed']
+                EQUAL_POOL, 'fixed_rational', 'constant_assumed']
     key_sels = [s for s in key_sels if s in df_gap['selector'].unique()]
     g        = _headline(df_gap, default_g)
     sub      = df_gap[df_gap['target_g'] == g]
@@ -867,7 +873,7 @@ def fig_p5a_04_obs_gap(df_gap, out_dir, default_g=None):
 
     ax.axhline(0, color='black', lw=0.8, ls='--', alpha=0.4, label='Oracle (gap = 0)')
     ax.set_xlabel('obs_idx  (observation depth)', fontsize=10)
-    ax.set_ylabel('Mean error gap vs oracle_51', fontsize=10)
+    ax.set_ylabel(f'Mean error gap vs {ORACLE_POOL}', fontsize=10)
     ax.set_title(f'Figure P5A-4 — Oracle Gap vs Observation Depth  (g = {g:g})',
                  fontsize=10, fontweight='bold')
     ax.set_xticks(obs_vals)

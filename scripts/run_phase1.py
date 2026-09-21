@@ -44,6 +44,7 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 import src.config as CFG_MOD
+from src.trivial import TRIVIAL_METHOD_NAMES
 from src.accelerators import METHOD_NAMES
 from src.evaluation import run_phase1
 from src.horizons import format_horizon_table
@@ -96,7 +97,8 @@ def main():
     print('=' * 72)
     print(f'  Regimes       : {n_core} core'
           + (f' + {len(regimes) - n_core} held-out' if include_holdout else ''))
-    print(f'  Methods       : {len(METHOD_NAMES)} (51 accelerators + 5 trivial comparators)')
+    print(f'  Methods       : {len(METHOD_NAMES)} ({len(METHOD_NAMES) - len(TRIVIAL_METHOD_NAMES)} accelerators + '
+          f'{len(TRIVIAL_METHOD_NAMES)} trivial comparators)')
     print(f'  Seeds         : {cfg["n_seeds"]}')
     print(f'  Noise         : {cfg["noise_levels"]}')
     print(f'  Gap strata g  : {cfg["gap_fractions"]}  (headline g = {CFG_MOD.HEADLINE_G}; '

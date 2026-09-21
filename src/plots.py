@@ -35,7 +35,6 @@ FAMILY_COLOURS = {
     'wynn_rho':   '#8bc34a',
     'pade':       '#e91e63',
     'levin':      '#9c27b0',
-    'weniger':    '#673ab7',
     'brezinski':  '#ff9800',
     'neville':    '#00bcd4',
     'anderson':   '#795548',

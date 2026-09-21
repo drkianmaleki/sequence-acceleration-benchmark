@@ -36,7 +36,7 @@ def fig1():
                    color="#c62828" if d else "#1565c0", alpha=0.85,
                    linewidths=1.2, zorder=3)
     for m in ["rational_fit", "richardson_1", "current_value",
-              "richardson_a20", "weniger_d2", "linear", "log_linear", "pade_22"]:
+              "richardson_a20", "levin_t2", "linear", "log_linear", "pade_22"]:
         r = g[g.method == m].iloc[0]
         ax.annotate(m, (r.med_error, 100 * r.cat_rate),
                     textcoords="offset points", xytext=(8, 4), fontsize=7.2)

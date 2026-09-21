@@ -45,7 +45,8 @@ Reduced method set (9 methods covering all Phase 1 champions):
   rational_fit    Short-horizon winner
   pade_22         Rational-decay specialist
   log_linear      Oscillatory-exponential specialist
-  weniger_d2      Staircase specialist
+  levin_t2        Staircase specialist (Prompt 5B: replaces weniger_d2, to which the
+                  corrected weniger_d2 is numerically identical)
   anderson_1      Stable limit-estimator fallback
 
 Author : Kian Maleki
@@ -68,22 +69,14 @@ import src.config as CFG_MOD
 from src.accelerators import METHODS
 from src.generators   import regime_functions
 from src.asymptote    import assumed_asymptote
-from src.pipeline     import (REFERENCE_METHODS, capped_block, exclude_capped,
+from src.pipeline     import (PHASE2_POOL, REFERENCE_METHODS, capped_block, exclude_capped,
                               horizon_meta, method_flags, resolve_regimes)
 from src.trivial      import (ORACLE_METHODS, aggregate_skill_vs, best_reference_error,
                               skill_score, skill_vs_table)
 
 # ── Method pool ────────────────────────────────────────────────────────────────
 PHASE2_BASE_METHODS = [
-    'current_value',
-    'richardson_1',
-    'richardson_a10',
-    'single_exp_fit',
-    'rational_fit',
-    'pade_22',
-    'log_linear',
-    'weniger_d2',
-    'anderson_1',
+    *PHASE2_POOL,        # src.pipeline: one definition for Phases 2, 3, 4 and 5a
 ]
 # Redesign v2: the trivial constant predictors are first-class comparators.
 PHASE2_METHODS = PHASE2_BASE_METHODS + ['constant_assumed', 'constant_oracle']
@@ -103,7 +96,7 @@ METHOD_COLOURS = {
     'rational_fit':     '#1565c0',
     'pade_22':          '#e91e63',
     'log_linear':       '#00897b',
-    'weniger_d2':       '#9c27b0',
+    'levin_t2':         '#9c27b0',
     'anderson_1':       '#795548',
     'constant_assumed': '#212121',
     'constant_oracle':  '#000000',
@@ -262,7 +255,7 @@ CANDIDATE_RULES = [
     # R2-based rules — primary detection signal
     ('richardson_r2', '<', 0.50, 'pade_22'),
     ('richardson_r2', '<', 0.50, 'rational_fit'),
-    ('richardson_r2', '<', 0.50, 'weniger_d2'),
+    ('richardson_r2', '<', 0.50, 'levin_t2'),
     ('richardson_r2', '<', 0.70, 'rational_fit'),
     ('richardson_r2', '<', 0.70, 'log_linear'),
     ('richardson_r2', '<', 0.85, 'rational_fit'),
@@ -274,12 +267,12 @@ CANDIDATE_RULES = [
     ('oscillation_idx', '>', 0.05, 'log_linear'),
     ('oscillation_idx', '>', 0.10, 'log_linear'),
     ('oscillation_idx', '>', 0.20, 'log_linear'),
-    ('oscillation_idx', '>', 0.05, 'weniger_d2'),
+    ('oscillation_idx', '>', 0.05, 'levin_t2'),
     # Curvature-based rules
     ('curvature_idx', '>', 0.10, 'rational_fit'),
     ('curvature_idx', '>', 0.20, 'pade_22'),
     # Ratio-consistency rules — targeting staircase/plateau
-    ('diff_ratio_cv', '<', 0.01, 'weniger_d2'),
+    ('diff_ratio_cv', '<', 0.01, 'levin_t2'),
     ('diff_ratio_cv', '<', 0.05, 'pade_22'),
     # Noise-based rules
     ('noise_var', '>', 1e-5, 'richardson_a10'),

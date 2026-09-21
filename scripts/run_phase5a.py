@@ -29,7 +29,8 @@ if _ROOT not in sys.path:
 import src.config as CFG_MOD
 from src.dangerous import load_dangerous
 from src.pipeline import resolve_regimes
-from phases.phase5a import run_all, SELECTORS, EPS, POOL, EVAL_METHODS, default_jobs
+from phases.phase5a import (run_all, SELECTORS, EPS, POOL, EVAL_METHODS, default_jobs,
+                            ORACLE_POOL, EQUAL_POOL, CAPPED_POOL)
 
 
 def n_evaluations(cfg: dict) -> dict:
@@ -64,7 +65,7 @@ def _print_comparison(df_comp, g, n_show=14):
         marker = ''
         if row['selector'] == 'threshold_ens_010':
             marker = '  <-- Phase 5A best?'
-        elif row['selector'] == 'oracle_51':
+        elif row['selector'] == ORACLE_POOL:
             marker = '  <-- upper bound'
         elif row['selector'] == 'fixed_rational':
             marker = '  <-- fixed baseline'
@@ -138,8 +139,8 @@ def main():
 
     if not df_sigma.empty:
         print(f'\n  Performance by sigma level  (g = {g_head:g}):')
-        key_sels = ['oracle_51', 'threshold_ens_010', 'capped_diag_51',
-                    'equal_ensemble_51', 'fixed_rational', 'constant_assumed']
+        key_sels = [ORACLE_POOL, 'threshold_ens_010', CAPPED_POOL,
+                    EQUAL_POOL, 'fixed_rational', 'constant_assumed']
         key_sels = [s for s in key_sels if s in df_sigma['selector'].unique()]
         sigmas   = sorted(df_sigma['noise'].unique())
         header = f"  {'Selector':<26}" + ''.join(f"  {'sigma='+str(s)[:8]:>12}" for s in sigmas)

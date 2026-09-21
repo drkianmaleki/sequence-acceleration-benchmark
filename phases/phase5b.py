@@ -42,7 +42,7 @@ Redesign v2
     rows are pooled over the core regimes with capped cells excluded
     (regime_set = 'core'); held-out regimes get their own pooled rows
     (regime_set = 'holdout'); per-regime rows flag capped cells.
-  * Sweep 3 ranks the 51 accelerators plus the four non-oracle trivial
+  * Sweep 3 ranks the accelerator roster (N_ACCEL) plus the four non-oracle trivial
     comparators; the oracle never enters a ranking.  A method takes a rank
     only with valid_rate >= config.RANK_MIN_VALID (rank / rank_eligible
     columns); below-floor methods are listed in phase5b_sweep3_unranked.csv
@@ -87,16 +87,12 @@ from src.asymptote    import assumed_asymptote
 from src.dangerous    import load_dangerous
 from src.trivial      import (SKILL_REFERENCE_METHODS, aggregate_skill_vs,
                               best_reference_error, skill_score, skill_vs_table)
-from src.pipeline     import (ACCEL_METHODS, TRIVIAL_NON_ORACLE, assign_ranks,
+from src.pipeline     import (PHASE2_POOL, ACCEL_METHODS, TRIVIAL_NON_ORACLE, assign_ranks,
                               exclude_capped, horizon_meta, is_holdout,
                               method_flags, resolve_regimes, unranked_block)
 
 # ── Method sets ────────────────────────────────────────────────────────────────
-CASCADE_METHODS = [
-    'current_value', 'richardson_1', 'richardson_a10',
-    'single_exp_fit', 'rational_fit', 'pade_22',
-    'log_linear', 'weniger_d2', 'anderson_1',
-]
+CASCADE_METHODS = list(PHASE2_POOL)     # src.pipeline: the 9-method pool (levin_t2 since Prompt 5B)
 
 # Sweep 3 ranks accelerators and the deployable trivial comparators; no oracle.
 ALL_METHODS = list(ACCEL_METHODS) + list(TRIVIAL_NON_ORACLE)

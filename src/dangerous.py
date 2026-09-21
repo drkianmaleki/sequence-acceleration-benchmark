@@ -16,7 +16,7 @@ load_dangerous(); if the artifact is missing they stop with instructions,
 which is how the pipeline ordering (Phase 1 -> derivation -> Phases 2-5)
 is enforced.  reproduce_all.py runs the derivation step explicitly.
 
-Report-2 review (decision 2): only the 51 accelerators (src.pipeline
+Report-2 review (decision 2): only the accelerators (src.pipeline
 .ACCEL_METHODS) are eligible for the dangerous flag.  The non-oracle trivial
 comparators are still scored (and printed by the derivation script, for the
 record) but they are never written to the artifact: neither into
@@ -50,7 +50,7 @@ def derive_dangerous(df_agg: pd.DataFrame) -> Tuple[FrozenSet[str], pd.DataFrame
 
     Rules: core regimes only (is_holdout == 0), capped cells excluded,
     oracle excluded, pooled over strata, noise levels and regimes.  Only the
-    51 accelerators are eligible for the flag (``eligible`` column); the
+    accelerators are eligible for the flag (``eligible`` column); the
     non-oracle trivial comparators are scored for the record but can never
     be dangerous.
     Returns (dangerous, table) where table has one row per scored method
@@ -106,7 +106,7 @@ def write_artifact(dangerous: FrozenSet[str], table: pd.DataFrame,
     """
     bad = sorted(set(dangerous) - _ELIGIBLE)
     if bad:
-        raise ValueError(f"only the 51 accelerators can be dangerous; got {bad}")
+        raise ValueError(f"only the {len(_ELIGIBLE)} accelerators can be dangerous; got {bad}")
     if "eligible" in table.columns:
         table = table[table["eligible"] == 1]
     else:
@@ -118,7 +118,7 @@ def write_artifact(dangerous: FrozenSet[str], table: pd.DataFrame,
         "criterion": ("pooled stability S = valid_rate - W_CAT*cat_rate + "
                       "W_BEATS*beats_rate < 0 on core regimes, pooled over "
                       "gap strata and noise, capped cells excluded, oracle excluded; "
-                      "the 51 accelerators only (trivial comparators never eligible)"),
+                      f"the {len(_ELIGIBLE)} accelerators only (trivial comparators never eligible)"),
         "pool": "accelerators",
         "n_pool": len(_ELIGIBLE),
         "W_CAT": CFG_MOD.W_CAT, "W_BEATS": CFG_MOD.W_BEATS,

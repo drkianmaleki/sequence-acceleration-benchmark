@@ -43,7 +43,7 @@ and carry `rank` / `rank_eligible`; the below-floor methods form an
 
 | path | content |
 |---|---|
-| `phase0_unit_tests.csv/.txt` | analytic unit tests of the 51 accelerators |
+| `phase0_unit_tests.csv/.txt` | analytic unit tests of the 49 accelerators |
 | `phase1/phase1_global.csv`, `phase1_global_holdout.csv` | pooled ranking per stratum, core / held-out |
 | `phase1/phase1_aggregated.csv` | one row per (method, regime, noise, g): valid / cat / beats rate, median error, improvement, `med_skill` (hindsight best-of-four, strict), `med_skill_vs_*` / `win_rate_vs_*` against each deployable trivial |
 | `phase1/phase1_unranked.csv`, `phase1_capped.csv`, `phase1_horizons.csv`, `phase1_heatmap_g*.csv`, `phase1_regime_best.csv` | floor block, capped block, horizon search, per-regime stability maps, per-regime champions |

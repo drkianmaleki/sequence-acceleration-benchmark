@@ -4,8 +4,8 @@ reproduce_all.py  (redesign v2)
 Single entry point that reproduces every result of the redesign-v2 pipeline
 in the required order:
 
-    Phase 0   analytic unit tests of the 51 accelerators
-    Phase 1   main benchmark (24 regimes x 30 seeds x 3 noise x 3 gap strata x 56 methods)
+    Phase 0   analytic unit tests of the accelerator roster (49 since Prompt 5B)
+    Phase 1   main benchmark (24 regimes x 30 seeds x 3 noise x 3 gap strata x 54 methods)
     derive    dangerous-method re-derivation  ->  results/phase1/dangerous_methods.json
     Phase 2   failure detection (13 depths, core regimes)
     Phase 3   adaptive selection (analysis of Phase 2)
@@ -86,8 +86,8 @@ def plan(mode: str) -> list:
     from phases.phase4 import PHASE4_METHODS, EVAL_METHODS as P4_EVAL
 
     rows = []
-    # Phase 0: 51 accelerators x 4 analytic cases
-    rows.append(("Phase 0", len(ACCEL_METHODS) * 4, "51 accelerators x 4 analytic cases (trivials excluded)"))
+    # Phase 0: the accelerator roster x 4 analytic cases
+    rows.append(("Phase 0", len(ACCEL_METHODS) * 4, f"{len(ACCEL_METHODS)} accelerators x 4 analytic cases (trivials excluded)"))
 
     c = C.PHASE1[mode]
     r = resolve_regimes(c["core_regimes"], c["holdout_regimes"], True)

@@ -69,10 +69,10 @@ def test_resolve_regimes_and_pools():
         resolve_regimes(["stretched_exp"])                    # not a core regime
     with pytest.raises(ValueError):
         resolve_regimes(None, ["single_exp"])                 # not a held-out regime
-    assert len(ACCEL_METHODS) == 51
+    assert len(ACCEL_METHODS) == len(METHOD_NAMES) - len(TRIVIAL_METHOD_NAMES) == 49
     assert not set(ACCEL_METHODS) & set(TRIVIAL_METHOD_NAMES)
     assert set(TRIVIAL_NON_ORACLE) == {"constant_assumed", "window_mean", "window_min", "last_value"}
-    assert len(METHOD_NAMES) == 56
+    assert len(METHOD_NAMES) == len(ACCEL_METHODS) + len(TRIVIAL_METHOD_NAMES)
 
 
 # ── dangerous derivation and artifact ─────────────────────────────────────────
@@ -119,7 +119,7 @@ def test_dangerous_derivation_rules_and_artifact(tmp_path):
     payload = load_artifact(path)
     assert payload["schema"] == "dangerous_methods/v2"
     assert payload["dangerous_methods"] == [A]
-    assert payload["pool"] == "accelerators" and payload["n_pool"] == 51
+    assert payload["pool"] == "accelerators" and payload["n_pool"] == len(ACCEL_METHODS)
     written = {r["method"] for r in payload["table"]}
     assert written == {A, B, C}                                 # trivials never written
     assert load_dangerous(path) == frozenset({A})
@@ -363,6 +363,6 @@ def test_phase5a_block_parallel_byte_identical(tmp_path):
 
 def test_phase0_harness_excludes_trivials():
     from tests.test_accelerators import PHASE0_METHODS, CFG
-    assert len(PHASE0_METHODS) == 51
+    assert len(PHASE0_METHODS) == len(ACCEL_METHODS)
     assert not set(PHASE0_METHODS) & set(TRIVIAL_METHOD_NAMES)
     assert "L_true" not in CFG
