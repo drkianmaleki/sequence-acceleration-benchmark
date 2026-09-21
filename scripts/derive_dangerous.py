@@ -12,6 +12,9 @@ pooled over the gap strata and noise levels, capped cells excluded, oracle
 excluded.  Only the 51 accelerators are eligible; the trivial comparators are
 scored and printed for the record but never written to the artifact.
 Exit status 0 on success, 1 when the Phase-1 table is missing.
+
+The artifact's "source" field is the repo-relative path of the Phase-1 table
+(results/phase1/phase1_aggregated.csv), so the committed JSON is machine-independent.
 """
 
 import argparse
@@ -47,7 +50,11 @@ def main() -> int:
     print("=" * 72)
     df = pd.read_csv(src_csv)
     dangerous, table = derive_dangerous(df)
-    out = write_artifact(dangerous, table, args.out, source=os.path.abspath(src_csv))
+    # Provenance: the artifact records its source as a repo-relative POSIX path
+    # (the absolute path of the machine that ran the pipeline carries no
+    # information for a fresh clone and differs between checkouts).
+    source = os.path.relpath(os.path.abspath(src_csv), _ROOT).replace(os.sep, "/")
+    out = write_artifact(dangerous, table, args.out, source=source)
 
     n_elig = int(table["eligible"].sum())
     n_triv = int((table["eligible"] == 0).sum())

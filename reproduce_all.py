@@ -1,24 +1,40 @@
 """
-reproduce_all.py  (v2)
-======================
+reproduce_all.py  (redesign v2)
+===============================
 Single entry point that reproduces every result of the redesign-v2 pipeline
 in the required order:
 
-    Phase 0  -> Phase 1  -> dangerous re-derivation  -> Phases 2, 3, 4, 5a, 5b
-             -> real-data re-evaluation of the recorded curves
+    Phase 0   analytic unit tests of the 51 accelerators
+    Phase 1   main benchmark (24 regimes x 30 seeds x 3 noise x 3 gap strata x 56 methods)
+    derive    dangerous-method re-derivation  ->  results/phase1/dangerous_methods.json
+    Phase 2   failure detection (13 depths, core regimes)
+    Phase 3   adaptive selection (analysis of Phase 2)
+    Phase 4   perturbation / shift diagnostics (4 depths)
+    Phase 5a  full-pool ensemble ablation (4 depths; (obs_idx x noise) blocks
+              evaluated in cpu_count() - 1 worker processes; byte-identical output
+              for any job count, see scripts/run_phase5a.py --jobs)
+    Phase 5b  sensitivity sweeps (assumed asymptote, window length, CAT_MULT)
+    real data re-evaluation of the recorded XGBoost curves on the (depth x target) grid
 
 The dangerous-method set is derived from Phase-1 output into
-results/phase1/dangerous_methods.json; phases 5a/5b refuse to run without
+results/phase1/dangerous_methods.json; phases 2-5 refuse to run without
 that artifact, so the ordering is enforced by construction and executed
-explicitly here.
+explicitly here.  A failed Phase 1 or derivation stops the run; any other
+failure is reported in the summary table and the remaining steps still run.
 
 Usage
 -----
-    python reproduce_all.py                # full run
+    python reproduce_all.py                # full run (4.4 h on 8 cores: Phase 1 31 min,
+                                           # Phase 2 16 min, Phase 4 30 min, Phase 5a 2.5 h,
+                                           # Phase 5b 38 min; measured 2026-09-21)
     python reproduce_all.py --quick        # 2 seeds, 2 regimes per group, 2 noise
-                                           # levels: every phase end to end (~10 min)
+                                           # levels: every phase end to end (~2-3 min)
     python reproduce_all.py --plan         # print the evaluation counts per phase
     python reproduce_all.py --skip-real-data
+
+Afterwards:
+    python scripts/check_dangerous.py      # artifact still matches Phase 1
+    python scripts/make_paper_tables.py    # paper_fragments/ + FACTS.md
 
 Per-phase grids live in src/config.py (PHASE1 ... PHASE5B, REAL_DATA).
 Results are only meaningful alongside the commit that produced them, so

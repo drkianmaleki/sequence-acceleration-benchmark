@@ -12,9 +12,9 @@
     0.1,
     0.02
   ],
-  "source": "C:\\Users\\kianu\\Dropbox\\Projects\\Ongoing\\Accelerator_project\\code\\results\\phase1\\phase1_aggregated.csv",
-  "git_head": "0375f24",
-  "created": "2026-09-21T00:06:04",
+  "source": "results/phase1/phase1_aggregated.csv",
+  "git_head": "43eb1be",
+  "created": "2026-09-21T10:20:22",
   "dangerous_methods": [
     "geom_avg_diff",
     "linear",
