@@ -1315,9 +1315,9 @@ def named_facts():
     # pipeline provenance
     sec = "pipeline provenance"
     fact(sec, "results commit", RESULTS_HEAD, "git log -1 -- results", "-", "-")
-    fact(sec, "full run", "2026-09-20 23:35 to 2026-09-21 03:58, 15,783 s; Phase 1 1,839 s, Phase 2 979 s, Phase 4 1,797 s, Phase 5a 8,868 s (--jobs 7, 5 perturbation trials), Phase 5b 2,287 s",
-         "REPORT_3B_full_run.txt; REPORT_3B.md", "-", "-")
-    fact(sec, "evaluation counts (central)", "Phase 1 362,880; Phase 2 772,200; Phase 4 224,640 (+1,555,200 diagnostic calls); Phase 5a 967,680 (+4,406,400 perturbation calls); Phase 5b 532,800; real data 630",
+    fact(sec, "full run", "2026-09-21 11:38 to 17:00, 19,302 s; Phase 1 1,729 s, Phase 2 876 s, Phase 4 2,079 s, Phase 5a 9,223 s (--jobs 7, 5 perturbation trials), Phase 5b 5,375 s",
+         "REPORT_5B_full_run.txt; REPORT_5B.md", "-", "-")
+    fact(sec, "evaluation counts (central)", "Phase 0 196; Phase 1 349,920; Phase 2 772,200 (+2 skill-reference calls per cell); Phase 4 224,640 (+1,555,200 diagnostic calls); Phase 5a 933,120 (+4,233,600 perturbation calls); Phase 5b 717,120 (sweep 1a 28,800 + 1b 201,600 + 2 28,800 + 3 457,920); real data 630; TOTAL 2,997,826",
          "python reproduce_all.py --plan", "-", "-")
     fact(sec, "design constants", f"L_true log-uniform on {C.L_TRUE_RANGE} per (regime, seed); L_hat mode {C.ASSUMED_L_MODE}; strata g = {STRATA} (headline {HEADLINE_G}); "
          f"n_obs = {C.OBS_IDX}, window {C.WINDOW_LEN}; horizon cap {C.HORIZON_N_CAP}; rank floor valid_rate >= {C.RANK_MIN_VALID}; "
