@@ -432,7 +432,7 @@ def test_run_phase1_records_carry_horizons_and_skill(tmp_path):
     assert "constant_oracle" in set(g.method)               # shown, unranked
     assert set(res["global_holdout"].regime_set) == {"holdout"}
     assert "constant_oracle" not in set(res["regime_best"].best_by_skill)
-    assert "constant_oracle" not in set(res["regime_best"].best_by_stability)
+    assert "constant_oracle" not in set(res["regime_best"].best_by_error)
     assert "phase1_capped.csv" in {p.name for p in tmp_path.iterdir()}
 
     for f in ("phase1_records.csv", "phase1_aggregated.csv", "phase1_global.csv",

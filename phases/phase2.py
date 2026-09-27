@@ -120,8 +120,6 @@ def _cfg(future_idx: int, L_hat: float, L_true: Optional[float] = None) -> dict:
         'win_shifts':     CFG_MOD.WIN_SHIFTS,
         'perturb_trials': CFG_MOD.PERTURB_TRIALS,
         'perturb_scale':  CFG_MOD.PERTURB_SCALE,
-        'W_CAT':          CFG_MOD.W_CAT,
-        'W_BEATS':        CFG_MOD.W_BEATS,
         'future_idx':     future_idx,
     }
     if L_true is not None:
@@ -132,10 +130,6 @@ def _cfg(future_idx: int, L_hat: float, L_true: Optional[float] = None) -> dict:
 def _valid(v: float, cfg: dict) -> bool:
     return bool(math.isfinite(v) and
                 cfg['min_valid'] <= v <= cfg['max_valid'])
-
-
-def _stab(vr: float, cr: float, br: float) -> float:
-    return vr - CFG_MOD.W_CAT * cr + CFG_MOD.W_BEATS * br
 
 
 def _med(series) -> float:
@@ -368,7 +362,6 @@ def run_sweep(obs_idx_list: List[int],
                             valid = math.isfinite(err)
                             cat   = (not valid) or (
                                 curr_err > 1e-12 and err > CFG_MOD.CAT_MULT * curr_err)
-                            beats = valid and curr_err > 1e-12 and err < curr_err
                             impv  = ((curr_err / err) if (valid and err > 1e-12)
                                      else (1.0 if valid else float('nan')))
                             rec = {
@@ -381,7 +374,6 @@ def run_sweep(obs_idx_list: List[int],
                                 'L_hat':        L_hat,
                                 'valid':        int(valid),
                                 'catastrophic': int(cat),
-                                'beats':        int(beats),
                                 'error':        err if valid else float('nan'),
                                 'impv':         impv if math.isfinite(impv) else float('nan'),
                                 'ref_error':    ref_err,
@@ -410,7 +402,6 @@ def run_sweep(obs_idx_list: List[int],
         method, regime, obs_idx, sigma, g = keys
         vr = grp['valid'].mean()
         cr = grp['catastrophic'].mean()
-        br = grp['beats'].mean()
         agg.append({
             'method':     method,   'regime':     regime,
             'obs_idx':    obs_idx,  'noise':      sigma,
@@ -424,10 +415,8 @@ def run_sweep(obs_idx_list: List[int],
             'is_oracle':  int(grp['is_oracle'].iloc[0]),
             'valid_rate': round(vr, 4),
             'cat_rate':   round(cr, 4),
-            'beats_rate': round(br, 4),
             'med_error':  _med(grp['error']),
             'med_skill':  _med(grp['skill']),
-            'stability':  round(_stab(vr, cr, br), 4),
             'n_seeds':    int(len(grp)),
             **aggregate_skill_vs(grp),
         })

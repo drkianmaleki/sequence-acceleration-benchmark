@@ -13,7 +13,7 @@ in the required order:
     Phase 5a  full-pool ensemble ablation (4 depths; (obs_idx x noise) blocks
               evaluated in cpu_count() - 1 worker processes; byte-identical output
               for any job count, see scripts/run_phase5a.py --jobs)
-    Phase 5b  sensitivity sweeps (assumed asymptote, window length, CAT_MULT)
+    Phase 5b  sensitivity sweeps (assumed asymptote, window length)
     real data re-evaluation of the recorded XGBoost curves on the (depth x target) grid
 
 The dangerous-method set is derived from Phase-1 output into
@@ -129,9 +129,8 @@ def plan(mode: str) -> list:
     s1 = len(c["assumed_modes"]) * base * 2
     s1b = len(c["assumed_modes"]) * base * (len(SWEEP1_METHODS) + 3)
     s2 = len(c["window_lengths"]) * base * 2
-    s3 = len(c["catmult_values"]) * base * (len(ACCEL_METHODS) + len(TRIVIAL_NON_ORACLE))
-    rows.append(("Phase 5b", s1 + s1b + s2 + s3, f"sweep1a {s1:,} + sweep1b {s1b:,} + sweep2 {s2:,} + sweep3 {s3:,} "
-                                                f"({len(r)} regimes, {len(c['gap_fractions'])} strata)"))
+    rows.append(("Phase 5b", s1 + s1b + s2, f"sweep1a {s1:,} + sweep1b {s1b:,} + sweep2 {s2:,} "
+                                           f"({len(r)} regimes, {len(c['gap_fractions'])} strata)"))
 
     rd = C.REAL_DATA
     pairs = [(d, t) for d in rd["depths"] for t in rd["targets"] if d < t]

@@ -102,24 +102,22 @@ MIN_VALID: float = -0.5      # estimates below this are invalid
 MAX_VALID: float = 500.0     # estimates above this are invalid
 DENOM_TOL: float = 1e-14     # denominator near-zero threshold
 
-# ── Stability diagnostics ──────────────────────────────────────────────────────
-CAT_MULT:       float = 5.0  # catastrophic = error > CAT_MULT × baseline error
+# ── Catastrophe threshold and perturbation / shift diagnostics ────────────────
+CAT_MULT:       float = 5.0  # catastrophic = error > CAT_MULT × last-value error
 WIN_SHIFTS      = [-2, -1, 0, 1, 2]   # window-start offsets for shift IQR
 PERTURB_TRIALS: int   = 5
 PERTURB_SCALE:  float = 0.02           # relative perturbation magnitude
 
-# ── Stability score weights ────────────────────────────────────────────────────
-# score = valid_rate - W_CAT * cat_rate + W_BEATS * beats_rate
-W_CAT:   float = 2.0
-W_BEATS: float = 0.4
-
-# ── Dangerous-method set ───────────────────────────────────────────────────────
-# Redesign v2: the dangerous set (pooled stability S < 0 over the core
-# regimes, pooled over strata, capped cells excluded, oracle excluded) is
-# RE-DERIVED from Phase 1 output by scripts/derive_dangerous.py and written
-# to DANGEROUS_ARTIFACT.  Phases 2-5 read the artifact through
-# src.dangerous.load_dangerous(); reproduce_all.py enforces the ordering
-# Phase 1 -> derivation -> Phases 2-5.
+# ── Excluded-method set ────────────────────────────────────────────────────────
+# Redesign v2: an accelerator is excluded when its pooled valid rate over the
+# core regimes at the Phase-1 depth (pooled over the gap strata and noise
+# levels with equal cell weights, capped cells excluded, oracle excluded) is
+# below RANK_MIN_VALID.  The set is RE-DERIVED from Phase 1 output by
+# scripts/derive_dangerous.py and written to DANGEROUS_ARTIFACT.  Phases 2-5
+# read the artifact through src.dangerous.load_dangerous(); reproduce_all.py
+# enforces the ordering Phase 1 -> derivation -> Phases 2-5.
+# `dangerous` is the legacy implementation name for the exclusion condition
+# (pooled validity below RANK_MIN_VALID); the paper calls it the excluded set.
 DANGEROUS_ARTIFACT: str = "results/phase1/dangerous_methods.json"
 
 # LEGACY ONLY.  The hard-coded set of the rejected design (shared L* = 0.01,
@@ -208,14 +206,12 @@ PHASE5A = {
 PHASE5B = {
     "full": dict(assumed_modes=list(ASSUMED_L_MODES),
                  window_lengths=[20, 40, 60, 80, 100],
-                 catmult_values=[2.0, 5.0, 10.0],
                  obs_idx=OBS_IDX, window_len_default=WINDOW_LEN,
                  noise_list=[0.0, 0.005, 0.020],
                  gap_fractions=PHASE5B_GAP_FRACTIONS, n_seeds=20,
                  core_regimes=None, holdout_regimes=None),
     "quick": dict(assumed_modes=list(ASSUMED_L_MODES),
                   window_lengths=[20, 60, 100],
-                  catmult_values=[2.0, 10.0],
                   obs_idx=OBS_IDX, window_len_default=WINDOW_LEN,
                   noise_list=QUICK_NOISE_LEVELS,
                   gap_fractions=PHASE5B_GAP_FRACTIONS, n_seeds=QUICK_N_SEEDS,

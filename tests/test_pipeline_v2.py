@@ -107,53 +107,66 @@ def test_accelerator_roster_is_exactly_the_expected_list():
     assert set(METHOD_NAMES) <= set(FAMILY)
 
 
-# ── dangerous derivation and artifact ─────────────────────────────────────────
+# ── excluded-set derivation and artifact ("dangerous" is the legacy name) ────
 
-def _agg_row(method, regime, g, vr, cr, br, capped=0, hold=0, oracle=0, trivial=0):
+def _agg_row(method, regime, g, vr, cr, me=0.01, capped=0, hold=0, oracle=0, trivial=0):
     return dict(method=method, regime=regime, target_g=g, noise=0.0,
-                valid_rate=vr, cat_rate=cr, beats_rate=br, capped=capped,
+                valid_rate=vr, cat_rate=cr, med_error=me, capped=capped,
                 is_holdout=hold, is_oracle=oracle, is_trivial=trivial)
 
 
 def test_dangerous_derivation_rules_and_artifact(tmp_path):
-    A, B, C = "neville_2", "richardson_1", "shanks_1"       # accelerators (eligible)
+    A, B, C, D = "neville_2", "richardson_1", "shanks_1", "pade_22"   # accelerators (eligible)
     rows = [
-        # A: S < 0 on the non-capped core cells -> dangerous
-        _agg_row(A, "r1", 0.5, 0.5, 0.9, 0.1),
-        _agg_row(A, "r1", 0.1, 0.5, 0.9, 0.1),
+        # A: pooled valid_rate 0.85 on the non-capped core cells -> excluded (below 0.9)
+        _agg_row(A, "r1", 0.5, 0.80, 0.30, me=0.02),
+        _agg_row(A, "r1", 0.1, 0.90, 0.30, me=0.03),
         # A looks perfect on a CAPPED cell and on a held-out regime: both ignored
-        _agg_row(A, "r2", 0.1, 1.0, 0.0, 1.0, capped=1),
-        _agg_row(A, "h1", 0.1, 1.0, 0.0, 1.0, hold=1),
-        # B: safe
-        _agg_row(B, "r1", 0.5, 1.0, 0.0, 0.8),
-        _agg_row(B, "r1", 0.1, 1.0, 0.1, 0.5),
-        # C: awful only on held-out cells -> not dangerous (core-only rule)
-        _agg_row(C, "r1", 0.1, 1.0, 0.0, 0.2),
-        _agg_row(C, "h1", 0.1, 0.0, 1.0, 0.0, hold=1),
-        # trivial comparator with S < 0: scored, never dangerous, never in the artifact
-        _agg_row("window_mean", "r1", 0.1, 0.5, 0.9, 0.0, trivial=1),
-        # trivial comparator that is fine: scored only
-        _agg_row("last_value", "r1", 0.1, 1.0, 0.0, 0.0, trivial=1),
-        # oracle: never scored
-        _agg_row("constant_oracle", "r1", 0.1, 1.0, 0.0, 1.0, oracle=1, trivial=1),
+        _agg_row(A, "r2", 0.1, 1.0, 0.0, capped=1),
+        _agg_row(A, "h1", 0.1, 1.0, 0.0, hold=1),
+        # B: pooled valid_rate 0.95 -> kept, whatever its catastrophe rate
+        _agg_row(B, "r1", 0.5, 1.00, 0.90),
+        _agg_row(B, "r1", 0.1, 0.90, 0.90),
+        # C: awful only on held-out cells -> kept (core-only rule)
+        _agg_row(C, "r1", 0.1, 1.0, 0.0),
+        _agg_row(C, "h1", 0.1, 0.0, 1.0, hold=1),
+        # D: exactly at the floor -> kept (the criterion is strictly below)
+        _agg_row(D, "r1", 0.1, 0.9, 0.5),
+        # trivial comparator with low validity: tabulated, never excluded, never in the artifact
+        _agg_row("window_mean", "r1", 0.1, 0.5, 0.9, trivial=1),
+        # trivial comparator that is fine: tabulated only
+        _agg_row("last_value", "r1", 0.1, 1.0, 0.0, trivial=1),
+        # oracle: never tabulated
+        _agg_row("constant_oracle", "r1", 0.1, 1.0, 0.0, oracle=1, trivial=1),
     ]
     df = pd.DataFrame(rows)
     dangerous, table = derive_dangerous(df)
     assert dangerous == frozenset({A})                          # accelerators only
-    assert set(table.method) == {A, B, C, "window_mean", "last_value"}   # trivials scored
+    assert set(table.method) == {A, B, C, D, "window_mean", "last_value"}   # trivials tabulated
     t = table.set_index("method")
-    assert t.loc[A].n_cells == 2 and t.loc[A].stability == pytest.approx(0.5 - 2 * 0.9 + 0.4 * 0.1, abs=1e-4)
-    assert t.loc["window_mean"].stability < 0 and t.loc["window_mean"].dangerous == 0
+    assert t.loc[A].n_cells == 2 and t.loc[A].valid_rate == pytest.approx(0.85, abs=1e-4)
+    assert t.loc[A].med_error == pytest.approx(0.025)          # descriptive, not part of the criterion
+    assert t.loc[B].valid_rate == pytest.approx(0.95) and t.loc[B].dangerous == 0 and t.loc[B].cat_rate == pytest.approx(0.9)
+    assert t.loc[D].valid_rate == pytest.approx(0.9) and t.loc[D].dangerous == 0
+    assert t.loc["window_mean"].valid_rate < CFG_MOD.RANK_MIN_VALID and t.loc["window_mean"].dangerous == 0
     assert t.loc["window_mean"].eligible == 0 and t.loc[A].eligible == 1
     assert set(table.loc[table.eligible == 1, "method"]) <= set(ACCEL_METHODS)
+    assert list(table.valid_rate) == sorted(table.valid_rate)  # sorted by valid_rate ascending
+    assert list(table.columns) == ["method", "is_trivial", "eligible", "valid_rate", "cat_rate",
+                                   "med_error", "n_cells", "dangerous"]
 
     path = write_artifact(dangerous, table, str(tmp_path / "d.json"), source="unit test")
     payload = load_artifact(path)
-    assert payload["schema"] == "dangerous_methods/v2"
+    assert payload["schema"] == "dangerous_methods/v3"
     assert payload["dangerous_methods"] == [A]
+    assert payload["rank_min_valid"] == CFG_MOD.RANK_MIN_VALID
+    assert "RANK_MIN_VALID" in payload["criterion"]
+    assert set(payload) == {"schema", "criterion", "legacy_name", "pool", "n_pool", "rank_min_valid",
+                            "asymptote_mode", "assumed_mode", "gap_fractions", "source", "git_head",
+                            "created", "dangerous_methods", "table"}
     assert payload["pool"] == "accelerators" and payload["n_pool"] == len(ACCEL_METHODS)
     written = {r["method"] for r in payload["table"]}
-    assert written == {A, B, C}                                 # trivials never written
+    assert written == {A, B, C, D}                              # trivials never written
     assert load_dangerous(path) == frozenset({A})
     with pytest.raises(ValueError):                             # a trivial can never be written
         write_artifact(frozenset({"window_mean"}), table, str(tmp_path / "bad.json"))
@@ -165,6 +178,11 @@ def test_dangerous_derivation_rules_and_artifact(tmp_path):
 
     with pytest.raises(ValueError):
         derive_dangerous(df.drop(columns=["capped"]))           # pre-v2 table refused
+    with open(path, encoding="utf-8") as fh:                    # a v2 artifact is refused
+        old = fh.read().replace("dangerous_methods/v3", "dangerous_methods/v2")
+    (tmp_path / "v2.json").write_text(old, encoding="utf-8")
+    with pytest.raises(ValueError):
+        load_artifact(str(tmp_path / "v2.json"))
 
 
 # ── Phase 1: schema, capped exclusion, ranking by median error ────────────────
@@ -194,12 +212,32 @@ def test_phase1_capped_exclusion_schema_and_ranking(tmp_path):
     assert (cap.n_f == 50000).all()
 
     best = res["regime_best"]
-    assert {"best_by_skill", "best_skill", "best_by_stability"} <= set(best.columns)
-    assert list(best.columns).index("best_by_skill") < list(best.columns).index("best_by_stability")
+    assert list(best.columns) == [
+        "regime", "is_holdout", "target_g", "n_f", "achieved_g", "capped",
+        "best_by_skill", "best_skill", "family", "method_type", "skill_best_med_error",
+        "skill_best_valid_rate", "skill_best_cat_rate",
+        "best_by_error", "err_best_med_error", "err_best_valid_rate", "err_best_cat_rate",
+        "n_at_floor", "oracle_med_error"]
     assert "constant_oracle" not in set(best.best_by_skill)
+    assert "constant_oracle" not in set(best.best_by_error)
+    assert (best.n_at_floor >= 1).all()
 
     agg = res["aggregated"]
-    assert {"is_trivial", "is_oracle", "is_holdout", "L_true", "L_hat"} <= set(agg.columns)
+    from src.trivial import REFERENCE_TAGS
+    # the descriptive panel of the seeds (src.panels.error_panel) next to the
+    # existing columns; nothing else
+    assert list(agg.columns) == [
+        "method", "family", "method_type", "is_trivial", "is_oracle", "regime", "is_holdout",
+        "noise", "target_g", "n_f", "achieved_g", "capped", "L_true", "L_hat",
+        "n_total", "n_valid", "valid_rate", "cat_rate", "mean_error", "sd_error", "med_error",
+        "q25_error", "q75_error", "p90_error", "med_improve", "med_skill", "n_seeds",
+        *[c for _, t in REFERENCE_TAGS for c in (f"med_skill_vs_{t}", f"win_rate_vs_{t}")]]
+    assert (agg.n_seeds == agg.n_total).all()
+    ok = agg[agg.n_valid > 0]
+    assert (ok.q25_error <= ok.med_error + 1e-15).all() and (ok.med_error <= ok.q75_error + 1e-15).all()
+    assert (ok.q75_error <= ok.p90_error + 1e-15).all() and (agg.n_valid <= agg.n_total).all()
+    assert "E_last" in rec.columns and rec.loc[rec.method == "last_value", "E_last"].equals(
+        rec.loc[rec.method == "last_value", "error"])
     dangerous, table = derive_dangerous(agg)
     assert "constant_oracle" not in set(table.method)
     assert (tmp_path / "phase1_capped.csv").exists()

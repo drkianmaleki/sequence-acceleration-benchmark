@@ -1,25 +1,32 @@
 """
 dangerous.py
 ============
-The dangerous-method set under redesign v2.
+The excluded-method set under redesign v2.
 
-A method is dangerous when its pooled stability score
+``dangerous`` is the legacy implementation name for the exclusion condition
+(pooled validity below config.RANK_MIN_VALID); the paper calls it the
+excluded set.  The name is kept in the code, the artifact path and the
+column names so that every phase reads one artifact under one name.
 
-    S = valid_rate - W_CAT * cat_rate + W_BEATS * beats_rate
+An accelerator is excluded when its pooled valid rate on the core regimes at
+the Phase-1 depth is below config.RANK_MIN_VALID: uncapped cells only, the
+oracle excluded, pooled over the gap strata and noise levels with equal cell
+weights (the mean of the per-cell valid_rate of phase1_aggregated.csv).  No
+composite score enters the criterion; the pooled catastrophe rate and median
+error are recorded alongside for the reader, never used to decide.
 
-is negative on the core regimes, pooled over the three gap strata and the
-noise levels, with capped cells excluded and the oracle comparator excluded.
 The set is derived from results/phase1/phase1_aggregated.csv by
 scripts/derive_dangerous.py and stored in the artifact
-config.DANGEROUS_ARTIFACT (JSON).  Phases 2-5 obtain it through
-load_dangerous(); if the artifact is missing they stop with instructions,
-which is how the pipeline ordering (Phase 1 -> derivation -> Phases 2-5)
-is enforced.  reproduce_all.py runs the derivation step explicitly.
+config.DANGEROUS_ARTIFACT (JSON, schema "dangerous_methods/v3").  Phases 2-5
+obtain it through load_dangerous(); if the artifact is missing they stop with
+instructions, which is how the pipeline ordering (Phase 1 -> derivation ->
+Phases 2-5) is enforced.  reproduce_all.py runs the derivation step
+explicitly.
 
 Report-2 review (decision 2): only the accelerators (src.pipeline
-.ACCEL_METHODS) are eligible for the dangerous flag.  The non-oracle trivial
-comparators are still scored (and printed by the derivation script, for the
-record) but they are never written to the artifact: neither into
+.ACCEL_METHODS) are eligible for the flag.  The non-oracle trivial
+comparators are still tabulated (and printed by the derivation script, for
+the record) but they are never written to the artifact: neither into
 ``dangerous_methods`` nor into the artifact's ``table``.
 """
 
@@ -36,6 +43,10 @@ from src.pipeline import ACCEL_METHODS
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _ELIGIBLE = frozenset(ACCEL_METHODS)
+SCHEMA = "dangerous_methods/v3"
+CRITERION = ("pooled valid_rate < RANK_MIN_VALID on the core regimes at the Phase-1 depth, "
+             "pooled over gap strata and noise, capped cells excluded, oracle excluded; "
+             "accelerators only")
 
 
 def artifact_path(path: Optional[str] = None) -> str:
@@ -46,17 +57,18 @@ def artifact_path(path: Optional[str] = None) -> str:
 
 def derive_dangerous(df_agg: pd.DataFrame) -> Tuple[FrozenSet[str], pd.DataFrame]:
     """
-    Derive the dangerous set from a Phase-1 aggregated table.
+    Derive the excluded set from a Phase-1 aggregated table.
 
     Rules: core regimes only (is_holdout == 0), capped cells excluded,
-    oracle excluded, pooled over strata, noise levels and regimes.  Only the
-    accelerators are eligible for the flag (``eligible`` column); the
-    non-oracle trivial comparators are scored for the record but can never
-    be dangerous.
-    Returns (dangerous, table) where table has one row per scored method
-    with the pooled rates, S, eligibility and the flag.
+    oracle excluded, pooled over strata, noise levels and regimes with equal
+    cell weights.  A method is flagged when it is eligible (an accelerator)
+    and its pooled valid_rate is below config.RANK_MIN_VALID.  The non-oracle
+    trivial comparators are tabulated for the record but can never be flagged.
+    Returns (dangerous, table); the table has one row per tabulated method
+    with the pooled valid_rate, cat_rate and med_error, the cell count, the
+    eligibility and the flag, sorted by valid_rate ascending.
     """
-    required = {"method", "valid_rate", "cat_rate", "beats_rate", "capped",
+    required = {"method", "valid_rate", "cat_rate", "med_error", "capped",
                 "is_holdout", "is_oracle"}
     missing = required - set(df_agg.columns)
     if missing:
@@ -65,23 +77,24 @@ def derive_dangerous(df_agg: pd.DataFrame) -> Tuple[FrozenSet[str], pd.DataFrame
     pool = df_agg[(df_agg["is_holdout"] == 0) & (df_agg["is_oracle"] == 0)]
     if CFG_MOD.EXCLUDE_CAPPED_FROM_POOLED:
         pool = pool[pool["capped"] == 0]
+    floor = float(CFG_MOD.RANK_MIN_VALID)
     rows = []
     for method, grp in pool.groupby("method", sort=False):
         vr = float(grp["valid_rate"].mean())
         cr = float(grp["cat_rate"].mean())
-        br = float(grp["beats_rate"].mean())
-        s = vr - CFG_MOD.W_CAT * cr + CFG_MOD.W_BEATS * br
+        me = grp["med_error"].dropna()
         eligible = method in _ELIGIBLE
         rows.append({
             "method": method,
             "is_trivial": int(grp["is_trivial"].iloc[0]) if "is_trivial" in grp else 0,
             "eligible": int(eligible),
             "valid_rate": round(vr, 4), "cat_rate": round(cr, 4),
-            "beats_rate": round(br, 4), "stability": round(s, 4),
+            "med_error": float(me.median()) if len(me) else float("nan"),
             "n_cells": int(len(grp)),
-            "dangerous": int(eligible and s < 0.0),
+            "dangerous": int(eligible and vr < floor),
         })
-    table = (pd.DataFrame(rows).sort_values("stability").reset_index(drop=True))
+    table = (pd.DataFrame(rows).sort_values(["valid_rate", "method"])
+                                .reset_index(drop=True))
     dangerous = frozenset(table.loc[table["dangerous"] == 1, "method"])
     assert dangerous <= _ELIGIBLE
     return dangerous, table
@@ -114,14 +127,14 @@ def write_artifact(dangerous: FrozenSet[str], table: pd.DataFrame,
     p = artifact_path(path)
     os.makedirs(os.path.dirname(p), exist_ok=True)
     payload = {
-        "schema": "dangerous_methods/v2",
-        "criterion": ("pooled stability S = valid_rate - W_CAT*cat_rate + "
-                      "W_BEATS*beats_rate < 0 on core regimes, pooled over "
-                      "gap strata and noise, capped cells excluded, oracle excluded; "
-                      f"the {len(_ELIGIBLE)} accelerators only (trivial comparators never eligible)"),
+        "schema": SCHEMA,
+        "criterion": CRITERION,
+        "legacy_name": ("'dangerous' is the legacy implementation name for the exclusion "
+                        "condition (pooled validity below RANK_MIN_VALID); the paper calls "
+                        "it the excluded set"),
         "pool": "accelerators",
         "n_pool": len(_ELIGIBLE),
-        "W_CAT": CFG_MOD.W_CAT, "W_BEATS": CFG_MOD.W_BEATS,
+        "rank_min_valid": float(CFG_MOD.RANK_MIN_VALID),
         "asymptote_mode": CFG_MOD.ASYMPTOTE_MODE,
         "assumed_mode": CFG_MOD.ASSUMED_L_MODE,
         "gap_fractions": list(CFG_MOD.HORIZON_GAP_FRACTIONS),
@@ -147,14 +160,15 @@ def load_artifact(path: Optional[str] = None) -> Dict:
             "(reproduce_all.py does this in order) before phases 2-5.")
     with open(p, encoding="utf-8") as fh:
         payload = json.load(fh)
-    if payload.get("schema") != "dangerous_methods/v2":
-        raise ValueError(f"{p}: unexpected schema {payload.get('schema')!r}")
+    if payload.get("schema") != SCHEMA:
+        raise ValueError(f"{p}: unexpected schema {payload.get('schema')!r}; "
+                         f"expected {SCHEMA!r} (re-run scripts/derive_dangerous.py)")
     return payload
 
 
 def load_dangerous(path: Optional[str] = None, required: bool = True) -> FrozenSet[str]:
     """
-    The dangerous set phases 2-5 consume.  With required=False a missing
+    The excluded set phases 2-5 consume.  With required=False a missing
     artifact yields an empty set (for optional figure scripts); pipeline
     phases keep the default and fail loudly.
     """

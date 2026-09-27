@@ -1157,18 +1157,25 @@ def f12():
 # ═════════════════════════════════════════════════════════════════════════════
 def named_facts():
     sec = "dangerous set"
-    fact(sec, "dangerous accelerators (redesign v2, derived from the full Phase 1)", ", ".join(sorted(DANGEROUS)),
+    fact(sec, "excluded accelerators ('dangerous' is the legacy implementation name; derived from the full Phase 1)", ", ".join(sorted(DANGEROUS)) or "none",
          "results/phase1/dangerous_methods.json", "dangerous_methods", ARTIFACT["criterion"])
+    fact(sec, "criterion", f"{ARTIFACT['criterion']}; floor RANK_MIN_VALID = {ARTIFACT.get('rank_min_valid')} (config.RANK_MIN_VALID = {C.RANK_MIN_VALID}); "
+         "no composite score enters the exclusion",
+         "results/phase1/dangerous_methods.json", "criterion, rank_min_valid", "valid_rate = mean over uncapped core cells of the per-cell valid rate (equal cell weights)")
     fact(sec, "identical to the legacy hard-coded set?", f"{'YES' if DANGEROUS == LEGACY else 'NO'}: +{sorted(DANGEROUS - LEGACY)} -{sorted(LEGACY - DANGEROUS)}",
          "results/phase1/dangerous_methods.json vs src/config.py LEGACY_DANGEROUS_METHODS", "-", "set difference")
-    tab = pd.DataFrame(ARTIFACT["table"]).sort_values("stability")
-    fact(sec, "pooled S of the dangerous eight", "; ".join(f"{r.method} {r.stability:+.4f}" for _, r in tab[tab.dangerous == 1].iterrows()),
-         "results/phase1/dangerous_methods.json", "table, dangerous == 1", "S = valid_rate - 2.0 cat_rate + 0.4 beats_rate")
-    safe = tab[tab.dangerous == 0].iloc[0]
-    fact(sec, "nearest non-dangerous accelerator", f"{safe.method} S = {safe.stability:+.4f}", "results/phase1/dangerous_methods.json", "table, dangerous == 0", "min S")
+    tab = pd.DataFrame(ARTIFACT["table"]).sort_values(["valid_rate", "method"])
+    fact(sec, "pooled valid rate of each excluded method (cat_rate, median error alongside)",
+         "; ".join(f"{r.method} valid {r.valid_rate:.4f} (cat {r.cat_rate:.4f}, med. err {r.med_error:.4f})" for _, r in tab[tab.dangerous == 1].iterrows()) or "none",
+         "results/phase1/dangerous_methods.json", "table, dangerous == 1", "valid_rate; cat_rate and med_error are descriptive, not part of the criterion")
+    kept = tab[tab.dangerous == 0]
+    if len(kept):
+        safe = kept.iloc[0]
+        fact(sec, "lowest valid rate among the non-excluded accelerators", f"{safe.method} valid {safe.valid_rate:.4f} (cat {safe.cat_rate:.4f}, med. err {safe.med_error:.4f})",
+             "results/phase1/dangerous_methods.json", "table, dangerous == 0", "min valid_rate")
     fact(sec, "scope of the derivation", f"Phase 1 only: obs_idx = {C.PHASE1['full']['obs_idx']}, noise {C.PHASE1['full']['noise_levels']}, "
-         f"{C.PHASE1['full']['n_seeds']} seeds, 18 core regimes, pooled over the three strata, capped cells excluded",
-         "src/config.py PHASE1; scripts/derive_dangerous.py", "-", "the derivation reads phase1_aggregated.csv and nothing else; no depth other than 90 enters it")
+         f"{C.PHASE1['full']['n_seeds']} seeds, the core regimes, pooled over the three strata with equal cell weights, capped cells excluded",
+         "src/config.py PHASE1; scripts/derive_dangerous.py", "-", "the derivation reads phase1_aggregated.csv and nothing else; no depth other than the Phase-1 depth enters it")
     fact(sec, "artifact provenance", f"git_head {ARTIFACT.get('git_head')}, created {ARTIFACT.get('created')}, source {ARTIFACT.get('source')}, pool {ARTIFACT.get('pool')} (n_pool {ARTIFACT.get('n_pool')})",
          "results/phase1/dangerous_methods.json", "-", "header fields")
 
@@ -1322,8 +1329,8 @@ def named_facts():
     fact(sec, "evaluation counts (central)", "Phase 0 196; Phase 1 349,920; Phase 2 772,200 (+2 skill-reference calls per cell); Phase 4 224,640 (+1,555,200 diagnostic calls); Phase 5a 933,120 (+4,233,600 perturbation calls); Phase 5b 717,120 (sweep 1a 28,800 + 1b 201,600 + 2 28,800 + 3 457,920); real data 630; TOTAL 2,997,826",
          "python reproduce_all.py --plan", "-", "-")
     fact(sec, "design constants", f"L_true log-uniform on {C.L_TRUE_RANGE} per (regime, seed); L_hat mode {C.ASSUMED_L_MODE}; strata g = {STRATA} (headline {HEADLINE_G}); "
-         f"n_obs = {C.OBS_IDX}, window {C.WINDOW_LEN}; horizon cap {C.HORIZON_N_CAP}; rank floor valid_rate >= {C.RANK_MIN_VALID}; "
-         f"CAT_MULT {C.CAT_MULT}; S = valid - {C.W_CAT} cat + {C.W_BEATS} beats", "src/config.py", "-", "-")
+         f"n_obs = {C.OBS_IDX}, window {C.WINDOW_LEN}; horizon cap {C.HORIZON_N_CAP}; rank floor valid_rate >= {C.RANK_MIN_VALID} "
+         f"(also the exclusion criterion of the dangerous artifact); CAT_MULT {C.CAT_MULT}; no composite score", "src/config.py", "-", "-")
 
 
 # ═════════════════════════════════════════════════════════════════════════════

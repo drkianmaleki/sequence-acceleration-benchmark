@@ -1,7 +1,7 @@
 """
 run_phase4.py
 =============
-Phase 4 entry point — Stability Diagnostic Stress Testing (redesign v2).
+Phase 4 entry point — Perturbation-Diagnostic Stress Testing (redesign v2).
 
     python scripts/run_phase4.py --quick     config.PHASE4["quick"]
     python scripts/run_phase4.py --full      config.PHASE4["full"]
@@ -36,7 +36,7 @@ def n_evaluations(cfg: dict) -> dict:
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description='Phase 4 — Stability diagnostics (v2)')
+    p = argparse.ArgumentParser(description='Phase 4 — Perturbation diagnostics (v2)')
     g = p.add_mutually_exclusive_group(required=True)
     g.add_argument('--quick', action='store_true')
     g.add_argument('--full',  action='store_true')
@@ -54,7 +54,7 @@ def main():
     regimes = resolve_regimes(cfg['core_regimes'], cfg['holdout_regimes'], True)
 
     print('=' * 72)
-    print(f'  PHASE 4 — Stability Diagnostic Stress Testing  [{mode.upper()}, redesign v2]')
+    print(f'  PHASE 4 — Perturbation-Diagnostic Stress Testing  [{mode.upper()}, redesign v2]')
     print('=' * 72)
     print(f'  obs_idx    : {cfg["obs_idx_list"]}')
     print(f'  noise      : {cfg["noise_list"]}')

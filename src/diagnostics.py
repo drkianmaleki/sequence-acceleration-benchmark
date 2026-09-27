@@ -1,17 +1,17 @@
 """
 diagnostics.py
 ==============
-Stability diagnostics and trajectory feature extraction.
+Perturbation diagnostics and trajectory feature extraction.
 
-Stability diagnostics
----------------------
-Five diagnostics are computed for every (method, sequence) pair:
-    valid_rate       -- fraction of estimates within validity bounds
-    cat_rate         -- fraction flagged as catastrophic failures
-    shift_iqr        -- IQR of estimates across small window shifts
-    perturb_iqr      -- IQR of estimates under tiny value perturbations
-    order_iqr        -- IQR of estimates across adjacent method orders
-                        (e.g., shanks_1 vs shanks_2 vs shanks_3)
+Perturbation diagnostics
+------------------------
+Two run-time diagnostics of one (method, window) pair, both IQRs of the
+method's own estimates under small changes of its input:
+    shift_iqr        -- IQR of estimates across small window-start shifts
+    perturb_iqr      -- IQR of estimates under tiny multiplicative value
+                        perturbations
+They are trust signals a deployment could compute; no score is formed from
+them.
 
 Trajectory features
 -------------------
@@ -41,7 +41,7 @@ def is_valid(v: float, cfg: dict) -> bool:
                 and cfg.get("min_valid", -0.5) <= v <= cfg.get("max_valid", 500.0))
 
 
-# ── Stability diagnostics ──────────────────────────────────────────────────────
+# ── Perturbation diagnostics ───────────────────────────────────────────────────
 
 def compute_shift_iqr(method_fn, seq: List[float], indices: List[int],
                       future_x: float, cfg: dict) -> float:
@@ -95,20 +95,6 @@ def compute_perturb_iqr(method_fn, seq: List[float], indices: List[int],
     if len(ests) < 2:
         return float("inf")
     return float(np.subtract(*np.percentile(ests, [75, 25])))
-
-
-def stability_score(valid_rate: float, cat_rate: float,
-                    beats_rate: float, cfg: dict) -> float:
-    """
-    Composite stability score.
-
-        score = valid_rate - W_CAT * cat_rate + W_BEATS * beats_rate
-
-    Weights are read from cfg (defaults: W_CAT=2.0, W_BEATS=0.4).
-    """
-    w_cat   = cfg.get("W_CAT",   2.0)
-    w_beats = cfg.get("W_BEATS", 0.4)
-    return valid_rate - w_cat * cat_rate + w_beats * beats_rate
 
 
 # ── Trajectory feature extraction ─────────────────────────────────────────────

@@ -35,8 +35,14 @@ What changed relative to the rejected design
 
 Outputs (out_dir)
 -----------------
-    phase1_records.csv          one row per (regime, noise, seed, g, method)
-    phase1_aggregated.csv       per (method, regime, noise, g)
+    phase1_records.csv          one row per (regime, noise, seed, g, method);
+                                carries E_last, the last-value error of the seed
+    phase1_aggregated.csv       per (method, regime, noise, g): the descriptive
+                                panel of the seeds (src.panels.error_panel:
+                                n_total, n_valid, valid_rate, cat_rate, and,
+                                conditional on validity, mean / sd / median /
+                                q25 / q75 / p90 error; win_rate_vs_last) plus
+                                the skill columns
     phase1_global.csv           pooled over the core regimes, per (method, g),
                                 capped cells excluded, sorted by med_error
     phase1_global_holdout.csv   the same over the held-out regimes
@@ -45,11 +51,16 @@ Outputs (out_dir)
     phase1_unranked.csv         the unranked block: methods below the
                                 validity floor (valid_rate < RANK_MIN_VALID)
                                 in the pooled tables, with valid_rate
-    phase1_regime_best.csv      best_by_skill (primary) and best_by_stability
-                                per (regime, g), oracle excluded
+    phase1_regime_best.csv      best_by_skill (primary) and best_by_error
+                                (lowest median error among the methods at or
+                                above the validity floor) per (regime, g),
+                                oracle excluded
     phase1_horizons.csv         n_f / achieved_g per (regime, g), seed 0 for
                                 seed-dependent shapes
-    phase1_heatmap_g{g}.csv     method x regime stability per stratum
+    phase1_heatmap_g{g}.csv     method x regime median error per stratum
+                                (median over the noise levels of the cell
+                                med_error; conditional on validity)
+    phase1_heatmap_valid_g{g}.csv   the matching method x regime valid rate
 
 Author : Kian Maleki
 Date   : 2026-05-24 (v1), 2026-09-19 (redesign v2)
@@ -67,6 +78,7 @@ from src.accelerators import METHODS, METHOD_NAMES
 from src.asymptote import assumed_asymptote, resolve_mode
 from src.generators import HOLDOUT, regime_functions
 from src.horizons import horizon_for_gap, horizon_table
+from src.panels import error_panel
 from src.pipeline import (assign_ranks, capped_block, exclude_capped, median_skill,
                           unranked_block,
                           method_flags, resolve_regimes)
@@ -156,8 +168,6 @@ def build_cfg(future_idx: int, L_hat: float, L_true: Optional[float] = None) -> 
         'win_shifts':     CFG_MOD.WIN_SHIFTS,
         'perturb_trials': CFG_MOD.PERTURB_TRIALS,
         'perturb_scale':  CFG_MOD.PERTURB_SCALE,
-        'W_CAT':          CFG_MOD.W_CAT,
-        'W_BEATS':        CFG_MOD.W_BEATS,
         'future_idx':     future_idx,
     }
     if L_true is not None:
@@ -168,13 +178,6 @@ def build_cfg(future_idx: int, L_hat: float, L_true: Optional[float] = None) -> 
 def is_valid(v: float, cfg: dict) -> bool:
     return bool(math.isfinite(v)
                 and cfg['min_valid'] <= v <= cfg['max_valid'])
-
-
-def stability_score(valid_r: float, cat_r: float,
-                    beats_r: float, cfg: dict) -> float:
-    return (valid_r
-            - cfg['W_CAT']   * cat_r
-            + cfg['W_BEATS'] * beats_r)
 
 
 def _median(values) -> float:
@@ -281,7 +284,6 @@ def run_phase1(n_seeds:        int,
                         cat   = (not valid) or (
                                     curr_err > 1e-12
                                     and err > CFG_MOD.CAT_MULT * curr_err)
-                        beats = valid and curr_err > 1e-12 and err < curr_err
                         impv  = ((curr_err / err) if (valid and err > 1e-12)
                                  else (1.0 if valid else float('nan')))
                         rec = {
@@ -305,11 +307,11 @@ def run_phase1(n_seeds:        int,
                             'curr_val':      curr_val,
                             'estimate':      est if valid else float('nan'),
                             'error':         err if valid else float('nan'),
+                            'E_last':        errs['last_value'],
                             'ref_error':     ref_err,
                             'skill':         skill_score(err, ref_err) if valid else float('nan'),
                             'valid':         int(valid),
                             'catastrophic':  int(cat),
-                            'beats_current': int(beats),
                             'improve_ratio': impv if math.isfinite(impv) else float('nan'),
                         }
                         # fixed-reference skill: err / err(each deployable trivial) + win flag
@@ -326,15 +328,14 @@ def run_phase1(n_seeds:        int,
         print(f'  [{total_seq}/{total_seq}] 100.0%  Done.\n')
 
     df_rec  = pd.DataFrame(records)
-    cfg_ref = build_cfg(0, 0.0)
 
-    # ── Aggregate per (method, regime, noise, g) ───────────────────────────────
+    # ── Aggregate per (method, regime, noise, g): the descriptive panel of the
+    #    seeds (src.panels.error_panel) plus the skill columns.  Rates are
+    #    rounded to four decimals like every rate in this table.
     agg_records = []
     for (method, regime, sigma, g), grp in df_rec.groupby(
             ['method', 'regime', 'noise', 'target_g'], sort=False):
-        vr = float(grp['valid'].mean())
-        cr = float(grp['catastrophic'].mean())
-        br = float(grp['beats_current'].mean())
+        panel = error_panel(grp['error'], grp['valid'], grp['catastrophic'], grp['E_last'])
         agg_records.append({
             'method':       method,
             'family':       FAMILY.get(method, 'unknown'),
@@ -350,15 +351,21 @@ def run_phase1(n_seeds:        int,
             'capped':       int(grp['capped'].max()),
             'L_true':       _median(grp['L_true']),
             'L_hat':        _median(grp['L_hat']),
-            'valid_rate':   round(vr, 4),
-            'cat_rate':     round(cr, 4),
-            'beats_rate':   round(br, 4),
-            'med_error':    _median(grp['error']),
+            'n_total':      panel['n_total'],
+            'n_valid':      panel['n_valid'],
+            'valid_rate':   round(panel['valid_rate'], 4),
+            'cat_rate':     round(panel['cat_rate'], 4),
+            'mean_error':   panel['mean_error'],
+            'sd_error':     panel['sd_error'],
+            'med_error':    panel['med_error'],
+            'q25_error':    panel['q25_error'],
+            'q75_error':    panel['q75_error'],
+            'p90_error':    panel['p90_error'],
             'med_improve':  _median(grp['improve_ratio']),
             'med_skill':    _median(grp['skill']),
-            'stability':    round(stability_score(vr, cr, br, cfg_ref), 4),
             'n_seeds':      int(len(grp)),
             **aggregate_skill_vs(grp),       # med_skill_vs_* / win_rate_vs_* over seeds
+            'win_rate_vs_last': round(panel['win_rate_vs_last'], 4),
         })
     df_agg = pd.DataFrame(agg_records)
 
@@ -369,8 +376,8 @@ def run_phase1(n_seeds:        int,
     # methods stay in the table unranked and form the unranked block.
     def _pool(df: pd.DataFrame, label: str) -> pd.DataFrame:
         cols = ['method', 'family', 'method_type', 'is_trivial', 'is_oracle',
-                'regime_set', 'target_g', 'valid_rate', 'cat_rate', 'beats_rate',
-                'med_error', 'med_improve', 'med_skill', 'stability',
+                'regime_set', 'target_g', 'valid_rate', 'cat_rate',
+                'med_error', 'med_improve', 'med_skill',
                 'n_regimes', 'n_cells', 'n_capped_excluded', 'rank', 'rank_eligible',
                 *SKILL_VS_AGG_COLS]
         if df.empty:
@@ -388,16 +395,15 @@ def run_phase1(n_seeds:        int,
                     'is_oracle': FLAGS[method]['is_oracle'],
                     'regime_set': label, 'target_g': g,
                     'valid_rate': float('nan'), 'cat_rate': float('nan'),
-                    'beats_rate': float('nan'), 'med_error': float('nan'),
+                    'med_error': float('nan'),
                     'med_improve': float('nan'), 'med_skill': float('nan'),
-                    'stability': float('nan'), 'n_regimes': 0, 'n_cells': 0,
+                    'n_regimes': 0, 'n_cells': 0,
                     'n_capped_excluded': n_excl,
                     **{c: float('nan') for c in SKILL_VS_AGG_COLS},
                 })
                 continue
             vr = float(grp['valid_rate'].mean())
             cr = float(grp['cat_rate'].mean())
-            br = float(grp['beats_rate'].mean())
             rows.append({
                 'method':      method,
                 'family':      FAMILY.get(method, 'unknown'),
@@ -408,11 +414,9 @@ def run_phase1(n_seeds:        int,
                 'target_g':    g,
                 'valid_rate':  round(vr, 4),
                 'cat_rate':    round(cr, 4),
-                'beats_rate':  round(br, 4),
                 'med_error':   _median(grp['med_error']),
                 'med_improve': _median(grp['med_improve']),
                 'med_skill':   _median(grp['med_skill']),
-                'stability':   round(stability_score(vr, cr, br, cfg_ref), 4),
                 'n_regimes':   int(grp['regime'].nunique()),
                 'n_cells':     int(len(grp)),
                 'n_capped_excluded': n_excl,
@@ -432,7 +436,7 @@ def run_phase1(n_seeds:        int,
 
     # ── Unranked block: below the validity floor (shown, never ranked) ────────
     unranked_cols = ['regime_set', 'target_g', 'method', 'method_type', 'valid_rate',
-                     'cat_rate', 'med_error', 'med_skill', 'stability', 'n_cells']
+                     'cat_rate', 'med_error', 'med_skill', 'n_cells']
     df_unranked = pd.concat([unranked_block(df_global, unranked_cols),
                              unranked_block(df_global_holdout, unranked_cols)],
                             ignore_index=True)
@@ -441,28 +445,32 @@ def run_phase1(n_seeds:        int,
     df_capped = capped_block(df_agg, keys=['regime', 'is_holdout', 'target_g', 'method'],
                              value_cols=['med_error', 'med_skill', 'valid_rate'])
 
-    # ── Per-regime recommendation: best_by_skill (primary), best_by_stability ──
+    # ── Per-regime recommendation: best_by_skill (primary) and best_by_error ──
+    # best_by_error follows the rank rule of the pooled tables: among the
+    # non-oracle methods whose valid_rate (mean over the noise levels) is at
+    # or above config.RANK_MIN_VALID, the lowest median error, ties by name.
+    # A (regime, g) where no method reaches the floor gets an empty name and
+    # NaN statistics rather than a below-floor pick.
     best_rows = []
     for (regime, g), grp in df_agg.groupby(['regime', 'target_g'], sort=False):
         pool = grp[grp['is_oracle'] == 0]
         per_method = (pool.groupby('method')
                           .agg(valid_rate=('valid_rate', 'mean'),
                                cat_rate=('cat_rate', 'mean'),
-                               beats_rate=('beats_rate', 'mean'),
                                med_error=('med_error', 'median'),
                                med_improve=('med_improve', 'median'),
                                med_skill=('med_skill', 'median'))
                           .reset_index())
-        per_method['stability'] = [
-            stability_score(r.valid_rate, r.cat_rate, r.beats_rate, cfg_ref)
-            for r in per_method.itertuples()]
         with_skill = per_method[per_method['med_skill'].notna()]
         by_skill = (with_skill.sort_values(['med_skill', 'med_error']).iloc[0]
                     if len(with_skill) else None)
-        by_stab = per_method.sort_values(['stability', 'med_error'],
-                                         ascending=[False, True]).iloc[0]
+        eligible = per_method[(per_method['valid_rate'] >= CFG_MOD.RANK_MIN_VALID)
+                              & per_method['med_error'].notna()]
+        by_err = (eligible.sort_values(['med_error', 'method']).iloc[0]
+                  if len(eligible) else None)
         oracle = grp[grp['is_oracle'] == 1]
         bs_name = by_skill['method'] if by_skill is not None else ''
+        be_name = by_err['method'] if by_err is not None else ''
         best_rows.append({
             'regime':                 regime,
             'is_holdout':             int(regime in HOLDOUT),
@@ -481,9 +489,14 @@ def run_phase1(n_seeds:        int,
                                        if by_skill is not None else float('nan')),
             'skill_best_cat_rate':    (round(float(by_skill['cat_rate']), 4)
                                        if by_skill is not None else float('nan')),
-            'best_by_stability':      by_stab['method'],
-            'stab_best_stability':    round(float(by_stab['stability']), 4),
-            'stab_best_med_error':    float(by_stab['med_error']),
+            'best_by_error':          be_name,
+            'err_best_med_error':     (float(by_err['med_error'])
+                                       if by_err is not None else float('nan')),
+            'err_best_valid_rate':    (round(float(by_err['valid_rate']), 4)
+                                       if by_err is not None else float('nan')),
+            'err_best_cat_rate':      (round(float(by_err['cat_rate']), 4)
+                                       if by_err is not None else float('nan')),
+            'n_at_floor':             int(len(eligible)),
             'oracle_med_error':       _median(oracle['med_error']) if len(oracle) else float('nan'),
         })
     df_best = pd.DataFrame(best_rows)
@@ -491,20 +504,18 @@ def run_phase1(n_seeds:        int,
     # ── Horizon table (seed 0 for seed-dependent shapes) ───────────────────────
     df_hz = horizon_table(regimes, obs_idx, gap_fractions, seed=0)
 
-    # ── Heatmaps (one per stratum) ─────────────────────────────────────────────
-    heatmaps = {}
+    # ── Heatmaps (one per stratum): method x regime median error (median over
+    #    the noise levels of the cell med_error, conditional on validity) and
+    #    the matching valid rate (mean over the noise levels) ────────────────
+    heatmaps, heatmaps_valid = {}, {}
     for g in gap_fractions:
         sub = df_agg[df_agg['target_g'] == g]
         pooled = (sub.groupby(['method', 'regime'])
-                     .agg(vr=('valid_rate', 'mean'),
-                          cr=('cat_rate', 'mean'),
-                          br=('beats_rate', 'mean'))
+                     .agg(med_error=('med_error', 'median'),
+                          valid_rate=('valid_rate', 'mean'))
                      .reset_index())
-        pooled['stability'] = (pooled['vr']
-                               - CFG_MOD.W_CAT * pooled['cr']
-                               + CFG_MOD.W_BEATS * pooled['br'])
-        heatmaps[g] = pooled.pivot(index='method', columns='regime',
-                                   values='stability')
+        heatmaps[g] = pooled.pivot(index='method', columns='regime', values='med_error')
+        heatmaps_valid[g] = pooled.pivot(index='method', columns='regime', values='valid_rate')
 
     # ── Save ───────────────────────────────────────────────────────────────────
     def _save(df: pd.DataFrame, name: str, **kw):
@@ -522,7 +533,8 @@ def run_phase1(n_seeds:        int,
     _save(df_best,           'phase1_regime_best.csv',    index=False)
     _save(df_hz,             'phase1_horizons.csv',       index=False)
     for g, hm in heatmaps.items():
-        _save(hm.round(4), f'phase1_heatmap_g{g:g}.csv')
+        _save(hm, f'phase1_heatmap_g{g:g}.csv')
+        _save(heatmaps_valid[g].round(4), f'phase1_heatmap_valid_g{g:g}.csv')
 
     return {
         'records':        df_rec,
@@ -534,4 +546,5 @@ def run_phase1(n_seeds:        int,
         'regime_best':    df_best,
         'horizons':       df_hz,
         'heatmaps':       heatmaps,
+        'heatmaps_valid': heatmaps_valid,
     }

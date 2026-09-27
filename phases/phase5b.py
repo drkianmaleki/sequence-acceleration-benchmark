@@ -3,9 +3,11 @@ phase5b.py
 ==========
 Phase 5B — Sensitivity Analysis (redesign v2).
 
-Three sweeps test whether the key findings are robust to the main modelling
+Two sweeps test whether the key findings are robust to the main modelling
 assumptions.  All sweeps evaluate at the gap strata in
-config.PHASE5B_GAP_FRACTIONS (g = 0.5 and 0.1), with n_obs = 90.
+config.PHASE5B_GAP_FRACTIONS (g = 0.5 and 0.1), with n_obs = 90.  The former
+CAT_MULT sweep (sweep 3) ranked every method by the retired composite score S
+and was removed with that score; its outputs remain at commit 842ddb9.
 
 Sweep 1 — assumed-asymptote (L_hat) sensitivity
 -----------------------------------------------
@@ -33,8 +35,7 @@ Two parts (Prompt 5A):
       rate, median error, median skill (hindsight best-of-four, strict),
       med_skill_vs_* and win_rate_vs_* against each deployable trivial.
 
-Sweep 2 — Window length sensitivity  (window_len in {20, 40, 60, 80, 100})
-Sweep 3 — CAT_MULT sensitivity       (CAT_MULT in {2, 5, 10})
+Sweep 2 — Window length sensitivity  (window_len in config.PHASE5B["window_lengths"])
 
 Redesign v2
 -----------
@@ -42,12 +43,9 @@ Redesign v2
     rows are pooled over the core regimes with capped cells excluded
     (regime_set = 'core'); held-out regimes get their own pooled rows
     (regime_set = 'holdout'); per-regime rows flag capped cells.
-  * Sweep 3 ranks the accelerator roster (N_ACCEL) plus the four non-oracle trivial
-    comparators; the oracle never enters a ranking.  A method takes a rank
-    only with valid_rate >= config.RANK_MIN_VALID (rank / rank_eligible
-    columns); below-floor methods are listed in phase5b_sweep3_unranked.csv
-    and the concordance is computed over ranked methods.  The dangerous flag
-    comes from the Phase-1 artifact.
+  * The phase consumes nothing from the excluded-method artifact any more;
+    run_all still loads it as the pipeline-ordering guard (Phase 1 ->
+    derivation -> Phases 2-5) that every later phase applies.
 
 Output files
 ------------
@@ -57,11 +55,7 @@ phase5b_sweep1_consumers.csv   L_hat-consuming accelerators + constant_assumed v
 phase5b_sweep1_consumers_noise.csv   the same per noise level
 phase5b_sweep2_global.csv      Cascade metrics vs window_len (pooled)
 phase5b_sweep2_regime.csv      Cascade metrics vs window_len (per regime)
-phase5b_sweep3_champions.csv   Regime champions at each CAT_MULT
-phase5b_sweep3_global.csv      Global stability rankings at each CAT_MULT
-phase5b_sweep3_unranked.csv    Below-floor methods (unranked, valid_rate shown)
-phase5b_sweep3_concordance.csv Kendall tau between CAT_MULT rankings
-figure_p5b_01_linf.png / figure_p5b_02_window.png / figure_p5b_03_catmult.png
+figure_p5b_01_linf.png / figure_p5b_02_window.png
 
 Author : Kian Maleki
 Date   : 2026-05-24 (v1), 2026-09-19 (redesign v2)
@@ -70,7 +64,6 @@ Date   : 2026-05-24 (v1), 2026-09-19 (redesign v2)
 import os, math, warnings
 import numpy as np
 import pandas as pd
-from scipy.stats import kendalltau
 from scipy.optimize import curve_fit
 from typing import List, Dict, Optional
 
@@ -87,15 +80,11 @@ from src.asymptote    import assumed_asymptote
 from src.dangerous    import load_dangerous
 from src.trivial      import (SKILL_REFERENCE_METHODS, aggregate_skill_vs,
                               best_reference_error, skill_score, skill_vs_table)
-from src.pipeline     import (PHASE2_POOL, ACCEL_METHODS, TRIVIAL_NON_ORACLE, assign_ranks,
-                              exclude_capped, horizon_meta, is_holdout,
-                              method_flags, resolve_regimes, unranked_block)
+from src.pipeline     import (PHASE2_POOL, exclude_capped, horizon_meta, is_holdout,
+                              resolve_regimes)
 
 # ── Method sets ────────────────────────────────────────────────────────────────
-CASCADE_METHODS = list(PHASE2_POOL)     # src.pipeline: the 9-method pool (levin_t2 since Prompt 5B)
-
-# Sweep 3 ranks accelerators and the deployable trivial comparators; no oracle.
-ALL_METHODS = list(ACCEL_METHODS) + list(TRIVIAL_NON_ORACLE)
+CASCADE_METHODS = list(PHASE2_POOL)     # src.pipeline: the Phase-2 pool the cascade routes within
 
 # Accelerators whose output depends on the assumed asymptote L_hat (their
 # output differs between L_hat = 0 and L_hat = 0.5 * min(window) on at least
@@ -113,7 +102,7 @@ FIG_DPI = 150
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
-def _cfg(fid, L_hat, cat_mult=None):
+def _cfg(fid, L_hat):
     """L_hat is the ASSUMED asymptote (src.asymptote), never L_true."""
     return {
         'L_inf':     float(L_hat),
@@ -121,17 +110,11 @@ def _cfg(fid, L_hat, cat_mult=None):
         'min_valid': CFG_MOD.MIN_VALID,
         'max_valid': CFG_MOD.MAX_VALID,
         'denom_tol': CFG_MOD.DENOM_TOL,
-        'W_CAT':     CFG_MOD.W_CAT,
-        'W_BEATS':   CFG_MOD.W_BEATS,
-        'CAT_MULT':  cat_mult if cat_mult is not None else CFG_MOD.CAT_MULT,
     }
 
 def _valid(v, cfg):
     return bool(math.isfinite(v) and
                 cfg['min_valid'] <= v <= cfg['max_valid'])
-
-def _stability(vr, cr, br, cfg):
-    return vr - cfg['W_CAT'] * cr + cfg['W_BEATS'] * br
 
 def _save(fig, path):
     fig.savefig(path, dpi=FIG_DPI, bbox_inches='tight')
@@ -552,214 +535,6 @@ def sweep2_window(window_lengths, obs_idx, noise_list, gap_fractions,
 
 
 # =============================================================================
-# SWEEP 3 — CAT_MULT SENSITIVITY
-# =============================================================================
-
-def sweep3_catmult(catmult_values, obs_idx, window_len, noise_list,
-                   gap_fractions, n_seeds, out_dir, dangerous,
-                   core_regimes=None, holdout_regimes=None, verbose=True):
-    """
-    Test whether regime champions and global rankings change when the
-    catastrophic threshold is varied.  Rankings are pooled over the core
-    regimes with capped cells excluded; champions are per regime (capped
-    cells excluded; flagged).
-    """
-    regimes = resolve_regimes(core_regimes, holdout_regimes, include_holdout=True)
-    gap_fractions = [float(g) for g in gap_fractions]
-    dangerous = set(dangerous)
-    n_arr = np.arange(obs_idx + 1, dtype=float)
-    wl    = min(window_len, obs_idx)
-    recs  = []
-
-    total = (len(catmult_values) * len(noise_list) * n_seeds * len(regimes))
-    done  = 0
-
-    print(f'  Sweep 3: {len(catmult_values)} CAT_MULT × '
-          f'{len(noise_list)} noise × {n_seeds} seeds × '
-          f'{len(regimes)} regimes × {len(gap_fractions)} strata  '
-          f'({len(ALL_METHODS)} methods, oracle excluded)')
-
-    for cat_mult in catmult_values:
-        for sigma in noise_list:
-            for seed in range(n_seeds):
-                rng = np.random.RandomState(seed * 137 + int(sigma*1e6) % 9973)
-
-                for regime in regimes:
-                    # Hidden per-(regime, seed) asymptote; methods never see L_true.
-                    gen, truth_fn, L_true = regime_functions(regime, seed)
-                    seq_full = gen(n_arr, rng, sigma)
-
-                    w_start  = max(0, obs_idx - wl + 1)
-                    seq_win  = list(seq_full[w_start : obs_idx + 1])
-                    idx_win  = list(range(w_start, obs_idx + 1))
-                    curr_val = float(seq_full[obs_idx])
-                    L_hat    = assumed_asymptote(L_true, seq_win)
-                    hold     = is_holdout(regime)
-
-                    for g in gap_fractions:
-                        hm       = horizon_meta(regime, obs_idx, g, seed)
-                        n_f      = hm['n_f']
-                        true_val = float(truth_fn(n_f))
-                        curr_err = abs(curr_val - true_val)
-                        cfg      = _cfg(n_f, L_hat, cat_mult=cat_mult)
-
-                        for method in ALL_METHODS:
-                            fn = METHODS[method]
-                            try:
-                                est = fn(seq_win, idx_win, float(n_f), cfg)
-                            except Exception:
-                                est = float('nan')
-
-                            valid = _valid(est, cfg)
-                            err   = abs(est - true_val) if valid else float('nan')
-                            cat   = (not valid) or (
-                                valid and curr_err > 1e-12
-                                and err > cat_mult * curr_err)
-                            beats = valid and curr_err > 1e-12 and err < curr_err
-
-                            rec = {
-                                'cat_mult':    cat_mult,
-                                'regime':      regime,
-                                'is_holdout':  hold,
-                                'noise':       sigma,
-                                'seed':        seed,
-                                'L_true':      L_true,
-                                'L_hat':       L_hat,
-                                'method':      method,
-                                'valid':       int(valid),
-                                'catastrophic':int(cat),
-                                'beats':       int(beats),
-                                'error':       err,
-                            }
-                            rec.update(hm)
-                            rec.update(method_flags(method))
-                            recs.append(rec)
-
-                    done += 1
-                    if verbose and done % max(1, total // 10) == 0:
-                        print(f'    [{done:>5}/{total}]  {100*done/total:5.1f}%'
-                              f'  CAT_MULT={cat_mult:.0f}  sigma={sigma:.3f}',
-                              flush=True)
-
-    df = pd.DataFrame(recs)
-
-    # ── Aggregate stability scores ─────────────────────────────────────────────
-    champ_rows, global_rows, concord_rows = [], [], []
-    cfg_ref = _cfg(0, 0.0)   # weights only
-
-    core_pool = exclude_capped(df[df['is_holdout'] == 0])
-    for cat_mult in catmult_values:
-        for g in gap_fractions:
-            sub = core_pool[(core_pool['cat_mult'] == cat_mult) & (core_pool['target_g'] == g)]
-            for method, mgrp in sub.groupby('method'):
-                vr = mgrp['valid'].mean()
-                cr = mgrp['catastrophic'].mean()
-                br = mgrp['beats'].mean()
-                sc = _stability(vr, cr, br, cfg_ref)
-                global_rows.append({
-                    'cat_mult':   cat_mult,
-                    'target_g':   g,
-                    'method':     method,
-                    'is_trivial': int(mgrp['is_trivial'].iloc[0]),
-                    'stability':  round(sc, 4),
-                    'valid_rate': round(float(vr), 4),
-                    'cat_rate':   round(float(cr), 4),
-                    'beats_rate': round(float(br), 4),
-                    'med_error':  float(mgrp['error'].median()),
-                    'n_cells':    int(len(mgrp)),
-                })
-
-            sub_all = df[(df['cat_mult'] == cat_mult) & (df['target_g'] == g)]
-            for regime in regimes:
-                rsub = exclude_capped(sub_all[sub_all['regime'] == regime])
-                capped_n = int(((sub_all['regime'] == regime) & (sub_all['capped'] == 1)).sum())
-                if rsub.empty:
-                    continue
-                per_m = (rsub.groupby('method')
-                             .agg(valid_rate=('valid','mean'),
-                                  cat_rate=('catastrophic','mean'),
-                                  beats_rate=('beats','mean'),
-                                  med_error=('error', 'median'))
-                             .reset_index())
-                per_m['stability'] = [
-                    _stability(r.valid_rate, r.cat_rate, r.beats_rate, cfg_ref)
-                    for r in per_m.itertuples()]
-                best = per_m.sort_values(['stability', 'med_error'],
-                                         ascending=[False, True]).iloc[0]
-                champ_rows.append({
-                    'cat_mult':     cat_mult,
-                    'regime':       regime,
-                    'is_holdout':   is_holdout(regime),
-                    'target_g':     g,
-                    'capped_cells_excluded': capped_n,
-                    'champion':     best['method'],
-                    'stability':    round(float(best['stability']), 4),
-                    'is_dangerous': int(best['method'] in dangerous),
-                })
-
-    df_champ  = pd.DataFrame(champ_rows)
-    # Global ranking per (cat_mult, g) by stability, descending; the validity
-    # floor applies (src.pipeline.assign_ranks): below-floor methods are shown
-    # unranked and collected in the unranked block.
-    df_global = assign_ranks(pd.DataFrame(global_rows), 'stability',
-                             group_cols=['cat_mult', 'target_g'], ascending=False)
-    df_global = (df_global.sort_values(['cat_mult', 'target_g', 'rank', 'method'],
-                                       na_position='last')
-                          .reset_index(drop=True))
-    df_unranked = unranked_block(df_global, ['cat_mult', 'target_g', 'method', 'is_trivial',
-                                             'valid_rate', 'cat_rate', 'stability',
-                                             'med_error', 'n_cells'])
-
-    # ── Concordance between CAT_MULT settings (ranked methods only) ────────────
-    for g in gap_fractions:
-        sub_g = df_global[(df_global['target_g'] == g) & (df_global['rank_eligible'] == 1)]
-        pairs = [(catmult_values[i], catmult_values[j])
-                 for i in range(len(catmult_values))
-                 for j in range(i+1, len(catmult_values))]
-        for cm_a, cm_b in pairs:
-            a_rank = (sub_g[sub_g['cat_mult'] == cm_a]
-                      .sort_values('rank')
-                      .reset_index()['method'])
-            b_rank = (sub_g[sub_g['cat_mult'] == cm_b]
-                      .sort_values('rank')
-                      .reset_index()['method'])
-            common = list(set(a_rank) & set(b_rank))
-            if len(common) < 5:
-                continue
-            a_pos = {m: i for i, m in enumerate(a_rank)}
-            b_pos = {m: i for i, m in enumerate(b_rank)}
-            tau, _ = kendalltau([a_pos[m] for m in common], [b_pos[m] for m in common])
-
-            ca = df_champ[(df_champ['cat_mult'] == cm_a) & (df_champ['target_g'] == g)
-                          & (df_champ['is_holdout'] == 0)]
-            cb = df_champ[(df_champ['cat_mult'] == cm_b) & (df_champ['target_g'] == g)
-                          & (df_champ['is_holdout'] == 0)]
-            merged = ca.merge(cb, on=['regime', 'target_g'], suffixes=('_a','_b'))
-            agree  = (float((merged['champion_a'] == merged['champion_b']).mean())
-                      if len(merged) else float('nan'))
-
-            concord_rows.append({
-                'cat_mult_a':   cm_a,
-                'cat_mult_b':   cm_b,
-                'target_g':     g,
-                'kendall_tau':  round(float(tau), 4),
-                'champion_agreement': round(agree, 4) if math.isfinite(agree) else float('nan'),
-                'n_methods':    len(common),
-                'n_regimes':    int(len(merged)),
-            })
-
-    df_concord = pd.DataFrame(concord_rows, columns=[
-        'cat_mult_a', 'cat_mult_b', 'target_g', 'kendall_tau', 'champion_agreement',
-        'n_methods', 'n_regimes'])
-
-    _save_csv(df_champ,  out_dir, 'phase5b_sweep3_champions.csv')
-    _save_csv(df_global, out_dir, 'phase5b_sweep3_global.csv')
-    _save_csv(df_unranked, out_dir, 'phase5b_sweep3_unranked.csv')
-    _save_csv(df_concord,out_dir, 'phase5b_sweep3_concordance.csv')
-    return df_champ, df_global, df_concord
-
-
-# =============================================================================
 # FIGURES
 # =============================================================================
 
@@ -831,76 +606,21 @@ def fig_p5b_02_window(df_global: pd.DataFrame, out_dir: str, default_g=None) -> 
                         categorical=False, vline=60, vline_label='Phase 2 default (60)')
 
 
-def fig_p5b_03_catmult(df_champ: pd.DataFrame,
-                       df_concord: pd.DataFrame,
-                       out_dir: str, default_g=None) -> str:
-    """Champion agreement and ranking concordance vs CAT_MULT."""
-    if df_champ.empty or df_concord.empty:
-        print('  Fig P5B-3 skipped: not enough CAT_MULT values or methods.')
-        return ''
-    fig, axes = plt.subplots(1, 2, figsize=(13, 6))
-    g      = _headline(df_champ, default_g)
-    cmults = sorted(df_champ['cat_mult'].unique())
-
-    ax = axes[0]
-    mat = np.zeros((len(cmults), len(cmults)))
-    for _, row in df_concord[df_concord['target_g'] == g].iterrows():
-        i = cmults.index(row['cat_mult_a'])
-        j = cmults.index(row['cat_mult_b'])
-        mat[i, j] = mat[j, i] = row['champion_agreement']
-    np.fill_diagonal(mat, 1.0)
-
-    im = ax.imshow(mat, cmap='RdYlGn', vmin=0, vmax=1, aspect='auto')
-    ax.set_xticks(range(len(cmults)))
-    ax.set_xticklabels([f'CAT={c:.0f}' for c in cmults])
-    ax.set_yticks(range(len(cmults)))
-    ax.set_yticklabels([f'CAT={c:.0f}' for c in cmults])
-    for i in range(len(cmults)):
-        for j in range(len(cmults)):
-            ax.text(j, i, f'{mat[i,j]:.2f}', ha='center', va='center',
-                    fontsize=11, fontweight='bold',
-                    color='white' if mat[i,j] < 0.5 else '#333')
-    plt.colorbar(im, ax=ax, label='Fraction of core regime champions agreeing', shrink=0.7)
-    ax.set_title('Regime Champion Agreement\n(1.0 = all core regimes agree)',
-                 fontsize=10, fontweight='bold')
-
-    ax2 = axes[1]
-    rows = df_concord[df_concord['target_g'] == g]
-    labels = [f'CAT={r["cat_mult_a"]:.0f} vs CAT={r["cat_mult_b"]:.0f}' for _, r in rows.iterrows()]
-    taus   = [r['kendall_tau'] for _, r in rows.iterrows()]
-    colours= ['#2e7d32' if t >= 0.9 else '#f57f17' if t >= 0.7 else '#c62828' for t in taus]
-    ax2.bar(range(len(labels)), taus, color=colours, edgecolor='white')
-    ax2.set_xticks(range(len(labels)))
-    ax2.set_xticklabels(labels, fontsize=9)
-    ax2.set_ylabel("Kendall's τ (method ranking concordance)", fontsize=9)
-    ax2.axhline(0.9, color='#2e7d32', lw=1.2, ls='--', alpha=0.7, label='τ = 0.90 (high concordance)')
-    ax2.set_ylim(0, 1.05)
-    ax2.set_title("Method Ranking Concordance\n(1.0 = identical ranking)", fontsize=10, fontweight='bold')
-    ax2.legend(fontsize=9)
-    for i, t in enumerate(taus):
-        ax2.text(i, t + 0.01, f'{t:.3f}', ha='center', va='bottom', fontsize=9)
-
-    fig.suptitle(f'Figure P5B-3 — CAT_MULT Sensitivity\n(g = {g:g}; core regimes, capped excluded)',
-                 fontsize=10, fontweight='bold')
-    fig.tight_layout()
-    path = os.path.join(out_dir, 'figure_p5b_03_catmult.png')
-    _save(fig, path)
-    return path
-
-
 # =============================================================================
 # MASTER RUN FUNCTION
 # =============================================================================
 
-def run_all(assumed_modes, window_lengths, catmult_values,
+def run_all(assumed_modes, window_lengths,
             obs_idx, window_len_default, noise_list, gap_fractions,
             n_seeds, out_dir, core_regimes=None, holdout_regimes=None,
             default_g=None, verbose=True):
     os.makedirs(out_dir, exist_ok=True)
 
-    # Ordering guard: the dangerous flag comes from the Phase-1 artifact.
+    # Ordering guard only (Phase 1 -> derivation -> Phases 2-5): the phase
+    # consumes nothing from the artifact.
     dangerous = load_dangerous()
-    print(f'  Dangerous set (Phase-1 artifact): {sorted(dangerous)}')
+    print(f'  Excluded set per the Phase-1 artifact (ordering guard; not consumed here): '
+          f'{sorted(dangerous)}')
 
     print('\n  === SWEEP 1: Assumed-Asymptote (L_hat) Sensitivity ===')
     print('  1a: cascade rows (features clamp L0 <= 0.5*min(window); near no-op by construction, kept and labelled)')
@@ -917,25 +637,16 @@ def run_all(assumed_modes, window_lengths, catmult_values,
                                gap_fractions, n_seeds, out_dir,
                                core_regimes, holdout_regimes, verbose)
 
-    print('\n  === SWEEP 3: CAT_MULT Sensitivity ===')
-    df3c, df3g, df3cd = sweep3_catmult(catmult_values, obs_idx,
-                                       window_len_default, noise_list,
-                                       gap_fractions, n_seeds, out_dir, dangerous,
-                                       core_regimes, holdout_regimes, verbose)
-
     print('\n  Generating figures ...')
     paths = [
         fig_p5b_01_linf(df1g, out_dir, default_g),
         fig_p5b_02_window(df2g, out_dir, default_g),
-        fig_p5b_03_catmult(df3c, df3cd, out_dir, default_g),
     ]
 
     return {
         'sweep1_global': df1g, 'sweep1_regime': df1r,
         'sweep1_consumers': df1c, 'sweep1_consumers_noise': df1cn,
         'sweep2_global': df2g, 'sweep2_regime': df2r,
-        'sweep3_champions': df3c, 'sweep3_global': df3g,
-        'sweep3_concordance': df3cd,
         'dangerous': dangerous,
         'figures': [p for p in paths if p],
     }

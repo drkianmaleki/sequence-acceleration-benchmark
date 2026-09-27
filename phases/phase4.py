@@ -1,7 +1,7 @@
 """
 phase4.py
 =========
-Phase 4 — Stability Diagnostic Stress Testing (redesign v2).
+Phase 4 — Perturbation-Diagnostic Stress Testing (redesign v2).
 
 Two diagnostics are tested as real-time trust signals:
 

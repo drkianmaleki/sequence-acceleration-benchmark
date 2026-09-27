@@ -74,8 +74,6 @@ CFG = {
     "win_shifts":     CFG_MOD.WIN_SHIFTS,
     "perturb_trials": CFG_MOD.PERTURB_TRIALS,
     "perturb_scale":  CFG_MOD.PERTURB_SCALE,
-    "W_CAT":          CFG_MOD.W_CAT,
-    "W_BEATS":        CFG_MOD.W_BEATS,
 }
 
 # Trivial comparators are not accelerators: excluded from the analytic harness

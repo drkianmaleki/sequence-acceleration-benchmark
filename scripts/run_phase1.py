@@ -19,7 +19,11 @@ Key output files
 ----------------
     phase1_records.csv          Per-seed records with (target_g, achieved_g,
                                 n_f, capped, L_true, L_hat, skill, is_*).
-    phase1_aggregated.csv       Per (method, regime, noise, g) stats.
+    phase1_aggregated.csv       Per (method, regime, noise, g): the descriptive
+                                panel of the seeds (validity and catastrophe
+                                rates; mean / sd / median / q25 / q75 / p90
+                                error conditional on validity; win rate vs
+                                the last value) plus the skill columns.
     phase1_global.csv           Pooled over the core regimes, capped cells
                                 excluded, sorted by med_error; rank column
                                 excludes the oracle comparator and methods
@@ -28,9 +32,12 @@ Key output files
     phase1_capped.csv           The capped block (achieved_g per cell).
     phase1_unranked.csv         The unranked block: methods below the rank
                                 validity floor (valid_rate < RANK_MIN_VALID).
-    phase1_regime_best.csv      best_by_skill (primary) per (regime, g).
+    phase1_regime_best.csv      best_by_skill (primary) and best_by_error
+                                (lowest median error at or above the validity
+                                floor) per (regime, g).
     phase1_horizons.csv         n_f(regime, g) table with achieved-g flags.
-    phase1_heatmap_g{g}.csv     Stability score matrix per stratum.
+    phase1_heatmap_g{g}.csv     Method x regime median-error matrix per stratum
+                                (phase1_heatmap_valid_g{g}.csv: the valid rates).
     figure_01 ... figure_06     Six figures (rankings exclude the oracle).
 """
 
@@ -154,14 +161,14 @@ def main():
           f'rank floor valid_rate >= {CFG_MOD.RANK_MIN_VALID})')
     print('  ' + '─' * 92)
     print(f"  {'Method':<24} {'Type':<12} {'MedErr':>9} {'Skill':>7} {'Valid':>6} "
-          f"{'Cat':>6} {'Stab':>7} {'Cells':>6} {'Rank':>5}")
-    print('  ' + '─' * 92)
+          f"{'Cat':>6} {'Cells':>6} {'Rank':>5}")
+    print('  ' + '─' * 84)
     for _, row in df_top.iterrows():
         rank = '-' if not row['rank_eligible'] else f"{int(row['rank'])}"
         print(f"  {row['method']:<24} {row['method_type']:<12} "
               f"{row['med_error']:>9.5f} {row['med_skill']:>7.3f} "
               f"{row['valid_rate']:>6.3f} {row['cat_rate']:>6.3f} "
-              f"{row['stability']:>7.3f} {int(row['n_cells']):>6} {rank:>5}")
+              f"{int(row['n_cells']):>6} {rank:>5}")
     print()
 
     # ── Unranked block: below the validity floor ───────────────────────────────
@@ -173,12 +180,12 @@ def main():
     print('  ' + '─' * 92)
     if len(unr):
         print(f"  {'Method':<24} {'Type':<12} {'Valid':>6} {'Cat':>6} {'MedErr':>9} "
-              f"{'Skill':>7} {'Stab':>7} {'Cells':>6}")
+              f"{'Skill':>7} {'Cells':>6}")
         for _, row in unr.iterrows():
             print(f"  {row['method']:<24} {row['method_type']:<12} "
                   f"{row['valid_rate']:>6.3f} {row['cat_rate']:>6.3f} "
                   f"{row['med_error']:>9.5f} {row['med_skill']:>7.3f} "
-                  f"{row['stability']:>7.3f} {int(row['n_cells']):>6}")
+                  f"{int(row['n_cells']):>6}")
     else:
         print('  (none)')
     print()
@@ -190,7 +197,7 @@ def main():
     for _, row in triv.iterrows():
         tag = '(oracle, unranked)' if row['is_oracle'] else ''
         print(f"  {row['method']:<24} med_err={row['med_error']:.5f}  "
-              f"skill={row['med_skill']:.3f}  stab={row['stability']:.3f} {tag}")
+              f"skill={row['med_skill']:.3f}  valid={row['valid_rate']:.3f} {tag}")
     print()
 
     # ── Capped block ───────────────────────────────────────────────────────────
@@ -207,14 +214,16 @@ def main():
     # ── Per-regime recommendations ─────────────────────────────────────────────
     df_best = results['regime_best']
     df_b    = df_best[df_best['target_g'] == headline_g]
-    print(f'  PER-REGIME BEST BY SKILL  (g = {headline_g}; oracle excluded)')
+    print(f'  PER-REGIME BEST BY SKILL  (g = {headline_g}; oracle excluded; '
+          f'best by median error among methods at or above the validity floor alongside)')
     print('  ' + '─' * 92)
     for _, row in df_b.iterrows():
         flag = ' [holdout]' if row['is_holdout'] else ''
         cap  = ' CAP' if row['capped'] else ''
+        be   = row['best_by_error'] if isinstance(row['best_by_error'], str) and row['best_by_error'] else '(none at floor)'
         print(f"  {row['regime']:<18}{flag:<10} n_f={int(row['n_f']):>6}{cap:<4} "
               f"{row['best_by_skill']:<20} skill={row['best_skill']:.3f}  "
-              f"(by stability: {row['best_by_stability']})")
+              f"(by median error: {be})")
     print()
 
     print(f'  All files saved to: {out_dir}/')

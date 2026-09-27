@@ -7,9 +7,10 @@ Phase 5B entry point — Sensitivity Analysis (redesign v2).
     python scripts/run_phase5b.py --full      config.PHASE5B["full"]
 
 Sweeps run at g in config.PHASE5B_GAP_FRACTIONS = [0.5, 0.1].
-Sweep 1 = assumed-asymptote mode {zero, half, oracle, double, winmin};
-sweeps 2 (window length) and 3 (CAT_MULT) keep their structure.
-Requires the dangerous-method artifact (scripts/derive_dangerous.py).
+Sweep 1 = assumed-asymptote mode (config.ASSUMED_L_MODES); sweep 2 = window
+length.  The former CAT_MULT sweep was removed with the retired composite
+score S (its outputs remain at commit 842ddb9).  Requires the excluded-method
+artifact (scripts/derive_dangerous.py) as the pipeline-ordering guard.
 
 Output directory: results/phase5b/
 """
@@ -24,7 +25,7 @@ if _ROOT not in sys.path:
 import src.config as CFG_MOD
 from src.dangerous import load_dangerous
 from src.pipeline import resolve_regimes
-from phases.phase5b import run_all, ALL_METHODS, SWEEP1_METHODS, LHAT_CONSUMERS
+from phases.phase5b import run_all, SWEEP1_METHODS, LHAT_CONSUMERS
 
 
 def n_evaluations(cfg: dict) -> dict:
@@ -33,8 +34,7 @@ def n_evaluations(cfg: dict) -> dict:
     n1 = len(cfg['assumed_modes']) * base * 2                          # 1a cascade (2 methods)
     n1b = len(cfg['assumed_modes']) * base * (len(SWEEP1_METHODS) + 3)  # 1b consumers + 3 trivial refs
     n2 = len(cfg['window_lengths']) * base * 2
-    n3 = len(cfg['catmult_values']) * base * len(ALL_METHODS)
-    return {'sweep1': n1, 'sweep1b': n1b, 'sweep2': n2, 'sweep3': n3, 'total': n1 + n1b + n2 + n3}
+    return {'sweep1': n1, 'sweep1b': n1b, 'sweep2': n2, 'total': n1 + n1b + n2}
 
 
 def parse_args():
@@ -65,23 +65,20 @@ def main():
     print('=' * 72)
     print(f'  Sweep 1 (L_hat mode): {cfg["assumed_modes"]}')
     print(f'  Sweep 2 (window):     {cfg["window_lengths"]}')
-    print(f'  Sweep 3 (CAT_MULT):   {cfg["catmult_values"]}  ({len(ALL_METHODS)} methods)')
     print(f'  gap strata: {cfg["gap_fractions"]}  (headline g = {CFG_MOD.HEADLINE_G})')
     print(f'  noise:      {cfg["noise_list"]}')
     print(f'  seeds:      {cfg["n_seeds"]}')
     print(f'  regimes:    {len(regimes)} (core + held-out)')
-    print(f'  dangerous:  {len(dangerous)} per artifact')
+    print(f'  excluded:   {len(dangerous)} per artifact (ordering guard; not consumed by this phase)')
     print(f'  Sweep 1 evals: {counts["sweep1"]:,} (1a cascade, clamped features) + '
           f'{counts["sweep1b"]:,} (1b: {len(SWEEP1_METHODS)} L_hat consumers + 3 references)')
     print(f'  Sweep 2 evals: {counts["sweep2"]:,}')
-    print(f'  Sweep 3 evals: {counts["sweep3"]:,}')
     print(f'  Output dir: {out_dir}')
     print('=' * 72 + '\n')
 
     results = run_all(
         assumed_modes      = cfg['assumed_modes'],
         window_lengths     = cfg['window_lengths'],
-        catmult_values     = cfg['catmult_values'],
         obs_idx            = cfg['obs_idx'],
         window_len_default = cfg['window_len_default'],
         noise_list         = cfg['noise_list'],
@@ -99,8 +96,6 @@ def main():
 
     df1g = results['sweep1_global']
     df2g = results['sweep2_global']
-    df3c = results['sweep3_concordance']
-    df3ch = results['sweep3_champions']
 
     gs = sorted(df1g['target_g'].unique()) if len(df1g) else []
     g_head = CFG_MOD.HEADLINE_G if CFG_MOD.HEADLINE_G in gs else (gs[-1] if gs else float('nan'))
@@ -148,47 +143,6 @@ def main():
         marker = ' <-- Phase 2 default' if row['window_len'] == 60 else ''
         print(f"  {int(row['window_len']):>8} {prec:>10.3f} "
               f"{row['recall']:>8.3f} {row['mean_gain']:>10.4f}  {robust}{marker}")
-
-    sub3 = df3c[df3c['target_g'] == g_head] if len(df3c) else df3c
-    print(f'\n  SWEEP 3 — CAT_MULT concordance (g={g_head:g}, core):')
-    print(f"  {'Comparison':<25} {'Kendall tau':>12} {'Champ agree':>13}")
-    print('  ' + '-' * 55)
-    for _, row in sub3.iterrows():
-        print(f"  CAT={row['cat_mult_a']:.0f} vs CAT={row['cat_mult_b']:.0f}"
-              f"{'':>10} {row['kendall_tau']:>12.4f} {row['champion_agreement']:>13.4f}")
-
-    df3g = results['sweep3_global']
-    if len(df3g):
-        cm0 = float(sorted(df3g['cat_mult'].unique())[0])
-        sub3g = df3g[(df3g['target_g'] == g_head) & (df3g['cat_mult'] == cm0)]
-        top = sub3g[sub3g['rank_eligible'] == 1].sort_values('rank').head(5)
-        print(f'\n  SWEEP 3 — top-5 global stability ranking (g={g_head:g}, CAT_MULT={cm0:g}, '
-              f'core, capped excluded, rank floor valid_rate >= {CFG_MOD.RANK_MIN_VALID}):')
-        for _, row in top.iterrows():
-            print(f"    {int(row['rank']):>3}  {row['method']:<22} S={row['stability']:.3f}  "
-                  f"valid={row['valid_rate']:.3f}")
-        unr = sub3g[(sub3g['rank_eligible'] == 0)
-                    & (sub3g['valid_rate'] < CFG_MOD.RANK_MIN_VALID)]
-        print(f'  SWEEP 3 — unranked, below the validity floor (g={g_head:g}, '
-              f'CAT_MULT={cm0:g}; {len(unr)} methods):')
-        if len(unr):
-            for _, row in unr.sort_values('valid_rate', ascending=False).iterrows():
-                print(f"       -  {row['method']:<22} S={row['stability']:.3f}  "
-                      f"valid={row['valid_rate']:.3f}")
-        else:
-            print('       (none)')
-
-    if len(df3ch):
-        sub3ch = df3ch[(df3ch['target_g'] == g_head) & (df3ch['is_holdout'] == 0)]
-        pivot  = sub3ch.pivot_table(index='regime', columns='cat_mult',
-                                    values='champion', aggfunc='first')
-        pivot.columns = [f'CAT={c:.0f}' for c in pivot.columns]
-        changed = pivot.apply(lambda r: len(set(r.dropna())) > 1, axis=1)
-        print(f'\n  Core regime champions: {int(changed.sum())}/{len(pivot)} regimes '
-              f'change champion across CAT_MULT values (g={g_head:g}).')
-        for regime in pivot[changed].index:
-            vals = '  |  '.join(f'{c}={pivot.loc[regime,c]}' for c in pivot.columns)
-            print(f'    {regime:<22}: {vals}')
 
     print(f'\n  All files saved to: {out_dir}/')
     print('=' * 72)
