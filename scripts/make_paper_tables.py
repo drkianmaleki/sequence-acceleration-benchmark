@@ -1295,7 +1295,7 @@ def named_facts():
              "results/phase5a/phase5a_raw.csv", f"method == rational_fit, target_g == {HEADLINE_G}, is_holdout == 0, capped == 0",
              "count(skill < 1), count(skill > 1)")
     else:
-        fact(sec, "richardson_3 valid rate by observation depth (Phase 5a)", "not recomputed (raw file absent); the 2026-09-21 full run (REPORT_3B.md) gives obs 30: 0.481, 60: 0.583, 90: 0.981, 120: 0.999",
+        fact(sec, "richardson_3 valid rate by observation depth (Phase 5a)", "not recomputed (raw file absent); the 2026-09-21 full run (reports/REPORT_3B.md) gives obs 30: 0.481, 60: 0.583, 90: 0.981, 120: 0.999",
              "results/phase5a/phase5a_raw.csv (git-ignored)", "method == richardson_3", "mean(valid) per obs_idx")
     fact(sec, "why the artifact does not flag richardson_3", f"the dangerous set is derived at obs_idx = {C.PHASE1['full']['obs_idx']} only, where richardson_3 is 98 % valid; "
          "its 7-parameter curve_fit (src/accelerators.py, _fit_richardson, n_terms = 3, maxfev = 3000) does not converge on 30-60-point windows and returns NaN",
@@ -1316,7 +1316,7 @@ def named_facts():
     fact(sec, "Weniger delta: root cause of the pre-5A degeneracy",
          "with the remainder estimate w_n = s_n the numerator sum_j (-1)^j C(k,j) beta_j s_j / w_j collapses to sum_j (-1)^j C(k,j) beta_j, "
          "the k-th difference of a degree-(k-1) polynomial, identically 0 for k = 1, 2: weniger_d1/d2 returned 0 for every input "
-         "(= constant_assumed under L_hat = 0)", "src/accelerators.py::_weniger_delta (docstring); REPORT_5A.md section 2", "-", "-")
+         "(= constant_assumed under L_hat = 0)", "src/accelerators.py::_weniger_delta (docstring); reports/REPORT_5A.md section 2", "-", "-")
     fact(sec, "Weniger delta: fix (Prompt 5A)", "forward-difference remainder w_n = s_{n+1} - s_n on the last order+2 window values, Pochhammer weight (n0+j+1)_(k-1) via scipy.special.poch; "
          "recovers the limit of 0.3 + 0.5 * 0.9^n to 1.2e-15 / 1.4e-15 (weniger_d1 / d2)",
          "src/accelerators.py::_weniger_delta; tests/test_accelerators.py::test_weniger_recovers_geometric_limit", "-", "-")
@@ -1351,7 +1351,7 @@ def named_facts():
     sec = "pipeline provenance"
     fact(sec, "results commit", RESULTS_HEAD, "git log -1 -- results", "-", "-")
     fact(sec, "full run", "2026-09-21 11:38 to 17:00, 19,302 s; Phase 1 1,729 s, Phase 2 876 s, Phase 4 2,079 s, Phase 5a 9,223 s (--jobs 7, 5 perturbation trials), Phase 5b 5,375 s",
-         "REPORT_5B_full_run.txt; REPORT_5B.md", "-", "-")
+         "reports/logs/REPORT_5B_full_run.txt; reports/REPORT_5B.md", "-", "-")
     from reproduce_all import plan
     rows = plan("full")
     fact(sec, "evaluation counts (central), derived from the config grids",
