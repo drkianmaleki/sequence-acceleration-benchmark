@@ -13,6 +13,7 @@ import sys
 
 import numpy as np
 import pandas as pd
+import pytest
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(_HERE))
@@ -73,7 +74,7 @@ def test_rows_are_seed_averaged_cells():
     assert "seed" not in table.columns
     one = df[(df.regime == REGIMES[0]) & (df.obs_idx == DEPTHS[0]) & (df.noise == NOISES[0])]
     row = table[(table.regime == REGIMES[0]) & (table.obs_idx == DEPTHS[0]) & (table.noise == NOISES[0])].iloc[0]
-    assert row[FEATURE_COLS[0]] == float(one[FEATURE_COLS[0]].mean())
+    assert row[FEATURE_COLS[0]] == pytest.approx(float(one[FEATURE_COLS[0]].mean()))
 
 
 def test_separable_table_is_classified_perfectly_and_csv_carries_the_protocols(tmp_path):

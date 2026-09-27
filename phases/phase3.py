@@ -373,83 +373,143 @@ def cross_validate(grid: pd.DataFrame, df_rec: pd.DataFrame, out_dir: str) -> pd
 # 5.  REGIME FINGERPRINTING CLASSIFIER
 # =============================================================================
 
-def regime_classifier(df_feat: pd.DataFrame, out_dir: str) -> pd.DataFrame:
-    """
-    Predict convergence regime from trajectory features using a decision tree.
-    Falls back to a k-nearest-neighbours implementation if scikit-learn is
-    unavailable.  Reports per-regime accuracy and the top confusable pairs.
-    """
+# One row of the classifier table is the seed-averaged feature vector of one
+# (regime, obs_idx, noise) cell, so seeds never straddle a fold boundary.  The
+# three protocols differ only in what a fold holds out; their accuracies are
+# reported side by side and never combined.
+CLASSIFIER_ROW = ('one row is the seed-averaged feature vector of one (regime, obs_idx, noise) cell '
+                  '(seeds never straddle a fold boundary)')
+CLASSIFIER_PROTOCOLS = {
+    'grouped_by_depth': dict(
+        group='obs_idx',
+        split_unit=(CLASSIFIER_ROW + '; GroupKFold with groups = obs_idx: every fold holds out all '
+                    'cells at one observation depth and trains on the cells at every other depth, so '
+                    'the same regime at adjacent depths remains in training and the protocol tests '
+                    'transfer across depth')),
+    'grouped_by_noise': dict(
+        group='noise',
+        split_unit=(CLASSIFIER_ROW + '; GroupKFold with groups = noise: every fold holds out all '
+                    'cells at one noise level and trains on the cells at every other noise level')),
+    'stratified_5fold_legacy': dict(
+        group=None,
+        split_unit=(CLASSIFIER_ROW + '; random stratified 5-fold over cells; cells of the same regime '
+                    'at adjacent depths may fall on both sides')),
+}
+PRIMARY_PROTOCOL = 'grouped_by_depth'
+CLASSIFIER_PARAMS = dict(max_depth=6, min_samples_leaf=3, random_state=42)
+
+
+def classifier_table(df_feat: pd.DataFrame) -> pd.DataFrame:
+    """The rows of the classifier: cell features averaged over seeds, cells
+    with any NaN feature dropped."""
     feat_avg = (df_feat.drop(columns=['seed'])
                         .groupby(['regime', 'obs_idx', 'noise'])
                         .mean()
                         .reset_index())
+    return feat_avg.dropna(subset=FEATURE_COLS).reset_index(drop=True)
 
-    valid = feat_avg.dropna(subset=FEATURE_COLS).copy()
-    if len(valid) < 20 or valid['regime'].nunique() < 2:
+
+def classifier_folds(table: pd.DataFrame, protocol: str) -> Tuple[List[Tuple[np.ndarray, np.ndarray]], str]:
+    """
+    The (train_idx, test_idx) folds of one protocol on a classifier table,
+    and a note.  Grouped protocols use GroupKFold with as many folds as there
+    are distinct group values (one group per fold); with fewer than three
+    distinct values the note says so, and with a single value the protocol
+    cannot be split (no folds).  The legacy protocol is the random stratified
+    split with min(5, smallest class count) folds, at least two.
+    """
+    try:
+        from sklearn.model_selection import GroupKFold, StratifiedKFold
+    except ImportError as exc:                     # scikit-learn is required
+        raise ImportError('phases.phase3.regime_classifier needs scikit-learn '
+                          '(pip install scikit-learn)') from exc
+    X = table[FEATURE_COLS].values
+    y = table['regime'].values
+    group = CLASSIFIER_PROTOCOLS[protocol]['group']
+    if group is None:
+        n_splits = max(2, min(5, int(pd.Series(y).value_counts().min())))
+        skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
+        return list(skf.split(X, y)), f'{n_splits} stratified folds'
+    groups = table[group].values
+    n_groups = int(pd.Series(groups).nunique())
+    if n_groups < 2:
+        return [], f'only {n_groups} distinct {group} value(s): the protocol cannot hold out a group'
+    folds = list(GroupKFold(n_splits=n_groups).split(X, y, groups))
+    note = (f'only {n_groups} distinct {group} values: {n_groups} folds'
+            if n_groups < 3 else f'{n_groups} folds, one per {group}')
+    return folds, note
+
+
+def regime_classifier(df_feat: pd.DataFrame, out_dir: str) -> pd.DataFrame:
+    """
+    Predict the convergence regime from the trajectory features with a
+    decision tree (CLASSIFIER_PARAMS) under the three CLASSIFIER_PROTOCOLS.
+    Writes phase3_regime_classifier.csv with a leading ``protocol`` column,
+    the per-regime rows (regime, n_samples, n_correct, accuracy,
+    top_confusion) and the ``__OVERALL__`` row of every protocol, the
+    ``split_unit`` sentence repeated on every row and a ``note`` column.
+    The overall accuracies are printed side by side.
+    """
+    from sklearn.tree import DecisionTreeClassifier
+
+    table = classifier_table(df_feat)
+    if len(table) < 20 or table['regime'].nunique() < 2:
         print('  Regime classifier: insufficient valid data, skipped.')
         return pd.DataFrame()
 
-    X = valid[FEATURE_COLS].values
-    y = valid['regime'].values
+    X = table[FEATURE_COLS].values
+    y = table['regime'].values
     regimes = sorted(set(y))
+    rows, overall = [], {}
 
-    clf_name = 'unknown'
-    try:
-        from sklearn.tree import DecisionTreeClassifier
-        from sklearn.model_selection import StratifiedKFold
-
-        clf = DecisionTreeClassifier(max_depth=6, min_samples_leaf=3,
-                                     random_state=42)
-        n_splits = min(5, int(pd.Series(y).value_counts().min()))
-        skf  = StratifiedKFold(n_splits=max(2, n_splits), shuffle=True, random_state=42)
-        preds = np.empty(len(y), dtype=object)
-        for train_idx, test_idx in skf.split(X, y):
-            clf.fit(X[train_idx], y[train_idx])
-            preds[test_idx] = clf.predict(X[test_idx])
-        clf_name = f'DecisionTree(depth=6, {max(2, n_splits)}-fold CV)'
-
-    except ImportError:
-        from scipy.spatial.distance import cdist
-        preds = np.empty(len(y), dtype=object)
-        n = len(X)
-        for i in range(n):
-            X_train = np.delete(X, i, axis=0)
-            y_train = np.delete(y, i, axis=0)
-            dists   = cdist(X[[i]], X_train, metric='euclidean')[0]
-            preds[i] = y_train[np.argmin(dists)]
-        clf_name = '1-NN (leave-one-out, scipy fallback)'
-
-    rows = []
-    for regime in regimes:
-        mask   = y == regime
-        n_tot  = int(mask.sum())
-        n_corr = int((preds[mask] == regime).sum())
-        acc    = n_corr / n_tot if n_tot > 0 else float('nan')
-        wrong  = preds[mask & (preds != y)]
-        top_wrong = (pd.Series(wrong).value_counts().index[0]
-                     if len(wrong) > 0 else 'none')
+    for protocol, spec in CLASSIFIER_PROTOCOLS.items():
+        folds, note = classifier_folds(table, protocol)
+        preds = np.full(len(y), None, dtype=object)
+        if folds:
+            for train_idx, test_idx in folds:
+                clf = DecisionTreeClassifier(**CLASSIFIER_PARAMS)
+                clf.fit(X[train_idx], y[train_idx])
+                preds[test_idx] = clf.predict(X[test_idx])
+        scored = preds != None   # noqa: E711  (rows that received a prediction)
+        for regime in regimes:
+            mask = (y == regime) & scored
+            n_tot = int(mask.sum())
+            n_corr = int((preds[mask] == regime).sum())
+            wrong = preds[mask & (preds != y)]
+            rows.append({
+                'protocol':      protocol,
+                'regime':        regime,
+                'n_samples':     n_tot,
+                'n_correct':     n_corr,
+                'accuracy':      round(n_corr / n_tot, 3) if n_tot else float('nan'),
+                'top_confusion': (pd.Series(wrong).value_counts().index[0] if len(wrong) else 'none'),
+                'split_unit':    spec['split_unit'],
+                'note':          note,
+            })
+        n_scored = int(scored.sum())
+        acc = float((preds[scored] == y[scored]).mean()) if n_scored else float('nan')
+        overall[protocol] = acc
         rows.append({
-            'regime':        regime,
-            'n_samples':     n_tot,
-            'n_correct':     n_corr,
-            'accuracy':      round(acc, 3),
-            'top_confusion': top_wrong,
+            'protocol':      protocol,
+            'regime':        '__OVERALL__',
+            'n_samples':     n_scored,
+            'n_correct':     int((preds[scored] == y[scored]).sum()) if n_scored else 0,
+            'accuracy':      round(acc, 3) if math.isfinite(acc) else float('nan'),
+            'top_confusion': '-',
+            'split_unit':    spec['split_unit'],
+            'note':          note,
         })
 
-    overall_acc = float((preds == y).mean())
-    rows.append({
-        'regime':    '__OVERALL__',
-        'n_samples': len(y),
-        'n_correct': int((preds == y).sum()),
-        'accuracy':  round(overall_acc, 3),
-        'top_confusion': '-',
-    })
-
-    df_clf = pd.DataFrame(rows).sort_values('accuracy', ascending=True)
+    df_clf = pd.DataFrame(rows, columns=['protocol', 'regime', 'n_samples', 'n_correct', 'accuracy',
+                                         'top_confusion', 'split_unit', 'note'])
     p = os.path.join(out_dir, 'phase3_regime_classifier.csv')
     df_clf.to_csv(p, index=False)
-    print(f'  Saved: {p}  (classifier: {clf_name})')
-    print(f'  Overall regime classification accuracy: {overall_acc:.3f}')
+    print(f'  Saved: {p}  (DecisionTree {CLASSIFIER_PARAMS}; {len(table)} cells)')
+    print('  Overall regime classification accuracy, side by side (never combined):')
+    for protocol in CLASSIFIER_PROTOCOLS:
+        tag = '  <-- primary' if protocol == PRIMARY_PROTOCOL else ''
+        note = df_clf[(df_clf['protocol'] == protocol)]['note'].iloc[0]
+        print(f'    {protocol:<24} {overall[protocol]:.3f}   ({note}){tag}')
     return df_clf
 
 
@@ -559,37 +619,44 @@ def fig_p3_02_improvement_map(df_regime: pd.DataFrame,
 
 def fig_p3_03_classifier_accuracy(df_clf: pd.DataFrame,
                                    out_dir: str) -> str:
-    """Horizontal bar chart of regime classification accuracy."""
+    """Per-regime accuracy under the primary protocol (grouped by depth), the
+    three overall accuracies side by side in the legend."""
     if df_clf.empty:
         return ''
 
-    sub = df_clf[df_clf['regime'] != '__OVERALL__'].sort_values('accuracy')
-    overall = df_clf[df_clf['regime'] == '__OVERALL__']['accuracy'].values
-    overall_acc = float(overall[0]) if len(overall) > 0 else float('nan')
+    prim = df_clf[df_clf['protocol'] == PRIMARY_PROTOCOL]
+    sub = prim[prim['regime'] != '__OVERALL__'].sort_values('accuracy')
+    overall = {p: float(df_clf[(df_clf['protocol'] == p) & (df_clf['regime'] == '__OVERALL__')]['accuracy'].iloc[0])
+               for p in CLASSIFIER_PROTOCOLS if ((df_clf['protocol'] == p) & (df_clf['regime'] == '__OVERALL__')).any()}
 
     colours = ['#2e7d32' if a >= 0.7 else
                '#f57f17' if a >= 0.4 else
                '#c62828' for a in sub['accuracy']]
 
     fig, ax = plt.subplots(figsize=(9, max(6, len(sub) * 0.35)))
-    ax.barh(range(len(sub)), sub['accuracy'], color=colours,
+    ax.barh(range(len(sub)), sub['accuracy'].fillna(0.0), color=colours,
             edgecolor='white', lw=0.4, height=0.7)
     ax.set_yticks(range(len(sub)))
     ax.set_yticklabels([r.replace('_', '\n') for r in sub['regime']],
                        fontsize=8)
 
     for i, (acc, wrong) in enumerate(zip(sub['accuracy'], sub['top_confusion'])):
-        ax.text(acc + 0.01, i, f'{acc:.2f}  ← {wrong}',
+        ax.text((acc if np.isfinite(acc) else 0.0) + 0.01, i, f'{acc:.2f}  ← {wrong}',
                 va='center', fontsize=7.5)
 
-    ax.axvline(overall_acc, color='black', lw=1.5, ls='--',
-               label=f'Overall accuracy = {overall_acc:.3f}')
-    ax.set_xlabel('Classification accuracy (stratified CV)', fontsize=9)
+    styles = {'grouped_by_depth': ('black', '--'), 'grouped_by_noise': ('#1565c0', '-.'),
+              'stratified_5fold_legacy': ('#9e9e9e', ':')}
+    for p, acc in overall.items():
+        col, ls = styles.get(p, ('black', '--'))
+        ax.axvline(acc, color=col, lw=1.5, ls=ls, label=f'{p}: overall = {acc:.3f}')
+    ax.set_xlabel(f'Per-regime classification accuracy under {PRIMARY_PROTOCOL} '
+                  '(a fold holds out one observation depth)', fontsize=9)
     ax.set_title(
         'Figure P3-3 — Regime Classification Accuracy from Trajectory Features\n'
-        'Arrow shows most common misclassification target',
+        'Bars: grouped-by-depth protocol (primary); lines: the three protocols\' overall accuracy, '
+        'side by side; arrow = most common confusion',
         fontsize=10, fontweight='bold')
-    ax.legend(fontsize=9)
+    ax.legend(fontsize=8, loc='lower right')
     ax.set_xlim(0, 1.15)
     fig.tight_layout()
     path = os.path.join(out_dir, 'figure_p3_03_classifier_accuracy.png')
