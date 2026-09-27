@@ -39,13 +39,19 @@ Redesign v2
   * The evaluation grid is chunked over (obs_idx x noise) blocks
     (evaluate_block) and can run in a process pool (run_phase5a(jobs=N),
     scripts/run_phase5a.py --jobs N).  Blocks are independent by
-    construction (RNG streams are seeded per (obs_idx, sigma, seed); the
+    construction (the noise stream is seeded per (obs_idx, sigma, seed); the
     generated sequence length is fixed by the grid's largest obs_idx), so the
     per-block shards concatenated in serial order give a phase5a_raw.csv
     that is byte-identical for any job count.
+  * The perturbations are paired (src.diagnostics.perturbation_factors): one
+    factor array per (regime, obs_idx, noise, seed) window, keyed on those
+    four values, shared by every method (PERTURB_METHODS) and every horizon
+    of the window.  A method's perturb_iqr does not depend on which other
+    methods are evaluated or on the order of the regimes, and two methods on
+    the same window are compared on identical perturbed windows.
 
 Author : Kian Maleki
-Date   : 2026-05-24 (v1), 2026-09-19 (redesign v2)
+Date   : 2026-05-24 (v1), 2026-09-19 (redesign v2), 2026-09-27 (paired perturbations)
 """
 
 import os, math, shutil, time, warnings
@@ -66,6 +72,7 @@ from src.accelerators import METHODS
 from src.generators   import regime_functions
 from src.asymptote    import assumed_asymptote
 from src.dangerous    import load_dangerous
+from src.diagnostics  import perturbation_factors, perturb_iqr_with_factors
 from src.pipeline     import (PHASE2_POOL, ACCEL_METHODS, capped_block, exclude_capped,
                               horizon_meta, is_holdout, method_flags,
                               resolve_regimes)
@@ -131,22 +138,6 @@ def _headline(df, default_g):
     return g if g in gs else float(max(gs))
 
 
-# ── perturb IQR ───────────────────────────────────────────────────────────────
-def _perturb_iqr(seq_win, idx_win, future_x, method, cfg,
-                  n_trials, scale, rng):
-    fn   = METHODS[method]
-    arr  = np.asarray(seq_win, dtype=float)
-    ests = []
-    for _ in range(n_trials):
-        v = fn(list(arr * (1.0 + scale * rng.randn(len(arr)))),
-               idx_win, future_x, cfg)
-        if _valid(v, cfg):
-            ests.append(v)
-    if len(ests) < 2:
-        return float('nan')
-    return float(np.subtract(*np.percentile(ests, [75, 25])))
-
-
 # ── Phase 2 cascade features ──────────────────────────────────────────────────
 def _cascade_features(seq_win, idx_win, L_hat):
     s  = np.asarray(seq_win, dtype=float)
@@ -193,19 +184,26 @@ def _phase2_cascade(slope, r2):
 # =============================================================================
 
 def evaluate_block(obs_idx, sigma, n_max, n_seeds, regimes, gap_fractions,
-                   window_len, perturb_trials, perturb_scale, dangerous):
+                   window_len, perturb_trials, perturb_scale, dangerous,
+                   methods=None, perturb_methods=None):
     """
     One (obs_idx, sigma) block of the grid: every seed x regime x stratum x
     method, in the serial loop order.  Self-contained so it can run in a
-    worker process: the two RNG streams are created per (obs_idx, sigma, seed)
+    worker process: the noise stream is created per (obs_idx, sigma, seed)
     exactly as the serial loop did, and n_max (the largest obs_idx of the
     whole grid) fixes the generated sequence length so the noise draws do
-    not depend on which blocks share the process.  Returns the block's
+    not depend on which blocks share the process.  The perturbation factors
+    of a window are drawn once (src.diagnostics.perturbation_factors, keyed
+    on regime, seed, obs_idx and sigma) and shared by every method and
+    horizon of that window.  ``methods`` / ``perturb_methods`` default to
+    EVAL_METHODS / PERTURB_METHODS (tests pass subsets).  Returns the block's
     records as a DataFrame.
     """
     regimes       = list(regimes)
     gap_fractions = [float(g) for g in gap_fractions]
     dangerous     = set(dangerous)
+    methods       = list(EVAL_METHODS if methods is None else methods)
+    perturb_set   = set(PERTURB_METHODS if perturb_methods is None else perturb_methods)
     n_arr   = np.arange(int(n_max) + 1, dtype=float)
     wl      = min(window_len, obs_idx)
     records = []
@@ -213,7 +211,6 @@ def evaluate_block(obs_idx, sigma, n_max, n_seeds, regimes, gap_fractions,
     for seed in range(n_seeds):
         rng   = np.random.RandomState(
             seed * 137 + int(sigma * 1e6) % 9973 + obs_idx * 7)
-        rng_p = np.random.RandomState(seed * 999 + obs_idx)
 
         for regime in regimes:
             # Hidden per-(regime, seed) asymptote; methods never see L_true.
@@ -227,6 +224,9 @@ def evaluate_block(obs_idx, sigma, n_max, n_seeds, regimes, gap_fractions,
             L_hat    = assumed_asymptote(L_true, seq_win)
             slope, r2 = _cascade_features(seq_win, idx_win, L_hat)
             hold     = is_holdout(regime)
+            # paired perturbations: one factor array per window
+            factors  = perturbation_factors(regime, seed, obs_idx, sigma,
+                                            len(seq_win), perturb_trials, perturb_scale)
 
             for g in gap_fractions:
                 hm       = horizon_meta(regime, obs_idx, g, seed)
@@ -236,7 +236,7 @@ def evaluate_block(obs_idx, sigma, n_max, n_seeds, regimes, gap_fractions,
                 cfg      = _cfg(n_f, L_hat, L_true)
 
                 ests, errs = {}, {}
-                for method in EVAL_METHODS:
+                for method in methods:
                     try:
                         est = float(METHODS[method](seq_win, idx_win, float(n_f), cfg))
                     except Exception:
@@ -245,14 +245,14 @@ def evaluate_block(obs_idx, sigma, n_max, n_seeds, regimes, gap_fractions,
                     errs[method] = abs(est - true_val) if _valid(est, cfg) else float('nan')
                 ref_err = best_reference_error(errs)
 
-                for method in EVAL_METHODS:
+                for method in methods:
                     est, err = ests[method], errs[method]
                     valid = math.isfinite(err)
                     cat   = (not valid) or (
                         curr_err > 1e-12 and err > CFG_MOD.CAT_MULT * curr_err)
-                    p_iqr = (_perturb_iqr(seq_win, idx_win, float(n_f), method, cfg,
-                                          perturb_trials, perturb_scale, rng_p)
-                             if method in PERTURB_METHODS else float('nan'))
+                    p_iqr = (perturb_iqr_with_factors(METHODS[method], seq_win, idx_win,
+                                                      float(n_f), cfg, factors)
+                             if method in perturb_set else float('nan'))
                     rec = {
                         'regime':       regime,
                         'is_holdout':   hold,

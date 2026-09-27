@@ -26,11 +26,18 @@ Redesign v2
     analyses (Q1-Q4, reliability) use the core regimes with capped cells
     excluded; held-out correlations are reported separately; capped cells
     go to phase4_capped.csv.
-  * The four trivial reference methods are evaluated for skill; diagnostics
-    are computed for the nine accelerators of the diagnostic pool only.
+  * The trivial reference methods outside the pool are evaluated for skill;
+    diagnostics are computed for the members of the pool
+    (src.pipeline.PHASE2_POOL) only.
+  * The perturbations are paired (src.diagnostics.perturbation_factors): one
+    factor array per (regime, obs_idx, noise, seed) window, keyed on those
+    four values, shared by every method and every horizon of the window.  A
+    method's perturb_iqr does not depend on which other methods are
+    evaluated or on the order of the regimes, and two methods on the same
+    window are compared on identical perturbed windows.
 
 Author : Kian Maleki
-Date   : 2026-05-24 (v1), 2026-09-19 (redesign v2)
+Date   : 2026-05-24 (v1), 2026-09-19 (redesign v2), 2026-09-27 (paired perturbations)
 """
 
 import os, math, warnings
@@ -50,6 +57,7 @@ import src.config as CFG_MOD
 from src.accelerators import METHODS
 from src.generators   import regime_functions
 from src.asymptote    import assumed_asymptote
+from src.diagnostics  import perturbation_factors, perturb_iqr_with_factors
 from src.pipeline     import (PHASE2_POOL, REFERENCE_METHODS, capped_block, exclude_capped,
                               horizon_meta, is_holdout, method_flags,
                               resolve_regimes)
@@ -57,7 +65,7 @@ from src.trivial      import (REFERENCE_TAGS, best_reference_error, skill_score,
                               skill_vs_from_arrays, skill_vs_table)
 
 # ── Method set ─────────────────────────────────────────────────────────────────
-PHASE4_METHODS = list(PHASE2_POOL)     # src.pipeline: the 9-method pool (levin_t2 since Prompt 5B)
+PHASE4_METHODS = list(PHASE2_POOL)     # src.pipeline: the Phase-2 pool (eight accelerators + last_value)
 # Evaluated for skill but without diagnostics (they are constants of the window)
 EXTRA_REFERENCES = [m for m in REFERENCE_METHODS if m not in PHASE4_METHODS]
 EVAL_METHODS = PHASE4_METHODS + EXTRA_REFERENCES
@@ -116,21 +124,6 @@ def _shift_iqr(seq_win, idx_win, future_x, method, cfg, shifts):
     return float(np.subtract(*np.percentile(ests, [75, 25])))
 
 
-def _perturb_iqr(seq_win, idx_win, future_x, method, cfg,
-                  n_trials, scale, rng):
-    fn  = METHODS[method]
-    arr = np.asarray(seq_win, dtype=float)
-    ests = []
-    for _ in range(n_trials):
-        v = fn(list(arr * (1.0 + scale * rng.randn(len(arr)))),
-               idx_win, future_x, cfg)
-        if _valid(v, cfg):
-            ests.append(v)
-    if len(ests) < 2:
-        return float('nan')
-    return float(np.subtract(*np.percentile(ests, [75, 25])))
-
-
 # =============================================================================
 # 2.  MAIN EVALUATION LOOP
 # =============================================================================
@@ -142,7 +135,9 @@ def run_phase4(obs_idx_list, noise_list, gap_fractions, n_seeds,
     For every (regime, obs_idx, noise, seed, method, gap stratum):
       central estimate, shift_IQR, perturb_IQR, error, catastrophic flag,
       skill, plus the horizon metadata.  true_val is stored so ensemble
-      error can be computed later.
+      error can be computed later.  The perturbation factors of a window are
+      drawn once (src.diagnostics.perturbation_factors) and shared by every
+      method and horizon of that window.
     """
     os.makedirs(out_dir, exist_ok=True)
     regimes = resolve_regimes(core_regimes, holdout_regimes, include_holdout=True)
@@ -159,7 +154,6 @@ def run_phase4(obs_idx_list, noise_list, gap_fractions, n_seeds,
             for seed in range(n_seeds):
                 rng   = np.random.RandomState(
                     seed * 137 + int(sigma * 1e6) % 9973 + obs_idx * 7)
-                rng_p = np.random.RandomState(seed * 999 + obs_idx)
 
                 for regime in regimes:
                     # Hidden per-(regime, seed) asymptote; methods never see L_true.
@@ -172,6 +166,9 @@ def run_phase4(obs_idx_list, noise_list, gap_fractions, n_seeds,
                     curr_val = float(seq_full[obs_idx])
                     L_hat    = assumed_asymptote(L_true, seq_win)
                     hold     = is_holdout(regime)
+                    # paired perturbations: one factor array per window
+                    factors  = perturbation_factors(regime, seed, obs_idx, sigma,
+                                                    len(seq_win), perturb_trials, perturb_scale)
 
                     for g in gap_fractions:
                         hm       = horizon_meta(regime, obs_idx, g, seed)
@@ -199,9 +196,8 @@ def run_phase4(obs_idx_list, noise_list, gap_fractions, n_seeds,
                             if method in PHASE4_METHODS:
                                 s_iqr = _shift_iqr(seq_win, idx_win, float(n_f),
                                                    method, cfg, shifts)
-                                p_iqr = _perturb_iqr(seq_win, idx_win, float(n_f),
-                                                     method, cfg, perturb_trials,
-                                                     perturb_scale, rng_p)
+                                p_iqr = perturb_iqr_with_factors(METHODS[method], seq_win, idx_win,
+                                                                 float(n_f), cfg, factors)
                             else:
                                 s_iqr = p_iqr = float('nan')
 
@@ -285,10 +281,16 @@ def diagnostic_correlations(df: pd.DataFrame, out_dir: str, suffix: str = '') ->
 
 def test_rejection_rules(df: pd.DataFrame, out_dir: str) -> pd.DataFrame:
     """
-    For each (diagnostic, method, threshold):
+    Rejection rules: reject a method's prediction when its diagnostic exceeds
+    a threshold.  For each (diagnostic, method, threshold):
       precision = P(catastrophic | diagnostic > threshold)
       recall    = P(diagnostic > threshold | catastrophic)
-      mean_err_saved = mean(curr_err - error) when rule fires
+      mean_err_saved = mean(curr_err - error) when the rule fires
+    where *catastrophic* is the pre-defined event of the record: an invalid
+    prediction, or an error above config.CAT_MULT times the last-value error
+    (the ``catastrophic`` flag).  These two numbers describe a detector of
+    that event and nothing else; they never involved the retired composite
+    stability score.
     """
     thresholds = [0.001, 0.002, 0.005, 0.010, 0.020,
                   0.050, 0.100, 0.200, 0.500, 1.000]
