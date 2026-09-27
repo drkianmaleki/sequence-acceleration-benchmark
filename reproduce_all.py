@@ -4,9 +4,11 @@ reproduce_all.py  (redesign v2)
 Single entry point that reproduces every result of the redesign-v2 pipeline
 in the required order:
 
-    Phase 0   analytic unit tests of the accelerator roster (49 since Prompt 5B)
-    Phase 1   main benchmark (24 regimes x 30 seeds x 3 noise x 3 gap strata x 54 methods)
-    derive    dangerous-method re-derivation  ->  results/phase1/dangerous_methods.json
+    Phase 0   analytic unit tests of the accelerator roster (src.pipeline.ACCEL_METHODS)
+    Phase 1   main benchmark (24 regimes x 30 seeds x 3 noise x 3 gap strata x every
+              registered method; the counts are printed by --plan)
+    derive    excluded-method re-derivation  ->  results/phase1/dangerous_methods.json
+              (pooled validity below config.RANK_MIN_VALID; 'dangerous' is the legacy name)
     Phase 2   Richardson failure characterisation (13 depths, core regimes)
     Phase 3   adaptive selection (analysis of Phase 2)
     Phase 4   perturbation / shift diagnostics (4 depths)
@@ -16,7 +18,7 @@ in the required order:
     Phase 5b  sensitivity sweeps (assumed asymptote, window length)
     real data re-evaluation of the recorded XGBoost curves on the (depth x target) grid
 
-The dangerous-method set is derived from Phase-1 output into
+The excluded-method set is derived from Phase-1 output into
 results/phase1/dangerous_methods.json; phases 2-5 refuse to run without
 that artifact, so the ordering is enforced by construction and executed
 explicitly here.  A failed Phase 1 or derivation stops the run; any other
@@ -24,9 +26,10 @@ failure is reported in the summary table and the remaining steps still run.
 
 Usage
 -----
-    python reproduce_all.py                # full run (4.4 h on 8 cores: Phase 1 31 min,
-                                           # Phase 2 16 min, Phase 4 30 min, Phase 5a 2.5 h,
-                                           # Phase 5b 38 min; measured 2026-09-21)
+    python reproduce_all.py                # full run (previous roster, measured 2026-09-21:
+                                           # 4.4 h on 8 cores; Phase 1 31 min, Phase 2 16 min,
+                                           # Phase 4 30 min, Phase 5a 2.5 h, Phase 5b 38 min
+                                           # including the since-removed CAT_MULT sweep)
     python reproduce_all.py --quick        # 2 seeds, 2 regimes per group, 2 noise
                                            # levels: every phase end to end (~2-3 min)
     python reproduce_all.py --plan         # print the evaluation counts per phase
