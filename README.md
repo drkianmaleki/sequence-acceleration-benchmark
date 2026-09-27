@@ -129,6 +129,7 @@ sequence-acceleration-benchmark/
 │   ├── make_real_boot_sources.py   OpenML 151 + 1486 -> results/real_data/real_boot_sources.csv (+ provenance, criteria)
 │   ├── make_paper_tables.py        results/ -> paper_fragments/*.tex + FACTS.md
 │   ├── make_paper_figures.py       optional summary figures (paper_figures/, git-ignored)
+│   ├── dev/compare_quick_runs.py   development tool: before/after regression check of two --quick results trees (shared methods must be identical)
 │   └── analyze_real_diagnostics_legacy.py   verifies the stored pre-redesign 18-cell real-data run
 ├── tests/                  test_generators, test_accelerators, test_redesign, test_pipeline_v2, test_panels, test_phase3_classifier, test_input_dependence
 ├── results/                committed output of the full run (see results/README.md for the layout)

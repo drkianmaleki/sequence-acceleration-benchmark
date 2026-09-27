@@ -1352,8 +1352,11 @@ def named_facts():
     fact(sec, "results commit", RESULTS_HEAD, "git log -1 -- results", "-", "-")
     fact(sec, "full run", "2026-09-21 11:38 to 17:00, 19,302 s; Phase 1 1,729 s, Phase 2 876 s, Phase 4 2,079 s, Phase 5a 9,223 s (--jobs 7, 5 perturbation trials), Phase 5b 5,375 s",
          "REPORT_5B_full_run.txt; REPORT_5B.md", "-", "-")
-    fact(sec, "evaluation counts (central)", "Phase 0 196; Phase 1 349,920; Phase 2 772,200 (+2 skill-reference calls per cell); Phase 4 224,640 (+1,555,200 diagnostic calls); Phase 5a 933,120 (+4,233,600 perturbation calls); Phase 5b 717,120 (sweep 1a 28,800 + 1b 201,600 + 2 28,800 + 3 457,920); real data 630; TOTAL 2,997,826",
-         "python reproduce_all.py --plan", "-", "-")
+    from reproduce_all import plan
+    rows = plan("full")
+    fact(sec, "evaluation counts (central), derived from the config grids",
+         "; ".join(f"{label} {n:,} ({note})" for label, n, note in rows) + f"; TOTAL {sum(n for _, n, _ in rows):,}",
+         "python reproduce_all.py --plan", "-", "reproduce_all.plan('full')")
     fact(sec, "design constants", f"L_true log-uniform on {C.L_TRUE_RANGE} per (regime, seed); L_hat mode {C.ASSUMED_L_MODE}; strata g = {STRATA} (headline {HEADLINE_G}); "
          f"n_obs = {C.OBS_IDX}, window {C.WINDOW_LEN}; horizon cap {C.HORIZON_N_CAP}; rank floor valid_rate >= {C.RANK_MIN_VALID} "
          f"(also the exclusion criterion of the dangerous artifact); CAT_MULT {C.CAT_MULT}; no composite score", "src/config.py", "-", "-")
@@ -1375,8 +1378,8 @@ def write_facts(answer_lines):
                 "fragments in `paper_fragments/`, never from hand-typing.  Facts drawn from the git-ignored raw per-record files are "
                 "marked as such.\n\n")
         f.write("## Named facts (the review asked for these explicitly)\n\n")
-        f.write("- **richardson_3 validity by depth**: see section *richardson_3 validity by depth* (0.48 / 0.58 / 0.98 / 1.00 at obs 30 / 60 / 90 / 120) "
-                "and the obs-90-only scope of the dangerous derivation under *dangerous set*.\n")
+        f.write("- **richardson_3 validity by depth**: see section *richardson_3 validity by depth* "
+                "and the Phase-1-depth-only scope of the exclusion derivation under *dangerous set*.\n")
         f.write("- **sigma = 0 cancellation NaNs**: section *sigma = 0 cancellation NaNs*.\n")
         f.write("- **The dangerous set is IDENTICAL to the legacy eight under the redesign**: section *dangerous set*.\n")
         f.write("- **Capped-cell inventory**: section *capped cells* and fragment `f11_capped_block.tex`.\n")
