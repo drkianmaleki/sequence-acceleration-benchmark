@@ -101,19 +101,28 @@ def main():
     g_head = CFG_MOD.HEADLINE_G if CFG_MOD.HEADLINE_G in gs else (gs[-1] if gs else float('nan'))
     sig0 = df1g['noise'].min() if len(df1g) else float('nan')
 
+    def _rule_table(sub, key, header):
+        print(f"  {header:>8} {'fire':>6} {'lower rec':>10} {'lower cell':>11} {'med Δrel':>9} "
+              f"{'r1 V':>6} {'alt V':>6} {'r1 med':>9} {'alt med':>9} {'windows':>8}")
+        print('  ' + '-' * 96)
+        for _, row in sub.iterrows():
+            rel = row['median_rel_change']
+            tag = ' (oracle)' if (key == 'assumed_mode' and row[key] == 'oracle') else \
+                  (' <-- Phase 2 default' if (key == 'window_len' and row[key] == 60) else '')
+            print(f"  {str(row[key]) if key == 'assumed_mode' else int(row[key]):>8} {row['fire_rate']:>6.3f} "
+                  f"{row['lower_error_frac_records']:>10.3f} {row['lower_error_frac_cells']:>11.3f} "
+                  f"{(f'{rel:+.3f}' if math.isfinite(rel) else 'n/a'):>9} "
+                  f"{row['r1_valid_rate']:>6.3f} {row['alt_valid_rate']:>6.3f} "
+                  f"{row['r1_med_error']:>9.5f} {row['alt_med_error']:>9.5f} "
+                  f"{int(row['n_cells_total']):>8}{tag}")
+
     sub1 = df1g[(df1g['target_g'] == g_head) & (df1g['noise'] == sig0)
                 & (df1g['regime_set'] == 'core')]
-    print(f'\n  SWEEP 1 — Cascade metrics vs assumed-asymptote mode '
-          f'(g={g_head:g}, sigma={sig0}, core, capped excluded):')
-    print(f"  {'mode':>8} {'Precision':>10} {'Recall':>8} {'Gain':>10}  Robust?")
-    print('  ' + '-' * 55)
+    print(f'\n  SWEEP 1 — the cascade by what happened when it fired, vs assumed-asymptote mode '
+          f'(g={g_head:g}, sigma={sig0}, core, capped excluded; one window = one cell; '
+          f'r1 = richardson_1, alt = routed rational_fit; errors conditional on validity):')
     order = {m: i for i, m in enumerate(CFG_MOD.ASSUMED_L_MODES)}
-    for _, row in sub1.assign(_o=sub1['assumed_mode'].map(order)).sort_values('_o').iterrows():
-        prec = row['precision']
-        robust = 'YES' if (math.isfinite(prec) and prec >= 0.70) else 'NO'
-        tag = ' (oracle)' if row['assumed_mode'] == 'oracle' else ''
-        print(f"  {row['assumed_mode']:>8} {prec:>10.3f} "
-              f"{row['recall']:>8.3f} {row['mean_gain']:>10.4f}  {robust}{tag}")
+    _rule_table(sub1.assign(_o=sub1['assumed_mode'].map(order)).sort_values('_o'), 'assumed_mode', 'mode')
 
     df1c = results['sweep1_consumers']
     subc = df1c[(df1c['target_g'] == g_head) & (df1c['regime_set'] == 'core')]
@@ -134,15 +143,9 @@ def main():
 
     sub2 = df2g[(df2g['target_g'] == g_head) & (df2g['noise'] == sig0)
                 & (df2g['regime_set'] == 'core')]
-    print(f'\n  SWEEP 2 — Cascade metrics vs window length (g={g_head:g}, sigma={sig0}):')
-    print(f"  {'Window':>8} {'Precision':>10} {'Recall':>8} {'Gain':>10}  Robust?")
-    print('  ' + '-' * 55)
-    for _, row in sub2.sort_values('window_len').iterrows():
-        prec = row['precision']
-        robust = 'YES' if (math.isfinite(prec) and prec >= 0.70) else 'NO'
-        marker = ' <-- Phase 2 default' if row['window_len'] == 60 else ''
-        print(f"  {int(row['window_len']):>8} {prec:>10.3f} "
-              f"{row['recall']:>8.3f} {row['mean_gain']:>10.4f}  {robust}{marker}")
+    print(f'\n  SWEEP 2 — the cascade by what happened when it fired, vs window length '
+          f'(g={g_head:g}, sigma={sig0}, core, capped excluded):')
+    _rule_table(sub2.sort_values('window_len'), 'window_len', 'window')
 
     print(f'\n  All files saved to: {out_dir}/')
     print('=' * 72)

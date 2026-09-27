@@ -1,57 +1,61 @@
 """
 phase2.py
 =========
-Phase 2 — Richardson Failure Condition Mapping (redesign v2).
+Phase 2 — Richardson failure characterisation (redesign v2, descriptive).
 
-Four components:
-  1. Sweep evaluation   — run the reduced method pool across (obs_idx, noise,
-                          gap stratum) grids to map where Richardson's rank falls.
-  2. Feature extraction — compute six trajectory features for every sequence,
-                          using a dynamic L0 baseline that prevents NaN on
-                          near-converged windows.
-  3. Correlation        — Spearman correlation between features and Richardson
-                          relative rank; minimum 15 observations required per
-                          per-regime correlation.
-  4. Rule testing       — evaluate simple and compound threshold rules.
+Phase 2 characterises richardson_1's own failure behaviour by its raw error
+and by its error normalised by the last-value error, over a grid of
+observation depths and noise levels on the core regimes.  The other members
+of the pool (src.pipeline.PHASE2_POOL: eight accelerators plus the last-value
+trivial as the floor option, with constant_assumed and constant_oracle
+reported alongside) are reported descriptively -- the same panel for every
+method, no winner, no rank, no composite score.  Candidate threshold rules
+are evaluated by what happened when they fired: the descriptive panels of
+richardson_1 and of the routed method over the records of the fired cells,
+the fraction of records and of cells where the routed method's error was
+lower, and the median relative change (src.panels.rule_panel).
+
+Components
+----------
+  1. Sweep evaluation   -- every pool method on every (regime, obs_idx, noise,
+                           seed, gap stratum) cell; per-record output
+                           (phase2_records.csv, git-ignored) and the per-cell
+                           descriptive panel (phase2_sweep_aggregated.csv).
+  2. Feature extraction -- six trajectory features per window (dynamic L0
+                           baseline so near-converged windows give no NaN).
+  3. Richardson targets -- per cell: R_R_med, the median over valid records
+                           of R_R = E_R / E_last (src.trivial.skill_score
+                           rule: if E_last <= SKILL_EPS the ratio is 1.0 when
+                           E_R <= SKILL_EPS and +inf otherwise; NaN when
+                           either error is invalid), and log_med_error_R, the
+                           natural log of Richardson's cell-median error
+                           (conditional on validity).  The records and cells
+                           where the E_last <= SKILL_EPS branch fired are
+                           counted per horizon (phase2_denominator_counts.csv).
+  4. Correlation        -- Spearman rank correlation between each cell-level
+                           window feature (features averaged over the cell's
+                           seeds) and (i) R_R_med, (ii) log_med_error_R; per
+                           regime (MIN_OBS finite cells required) and pooled
+                           over regimes; cells where a target is NaN are
+                           dropped and counted.  +inf ranks largest.
+  5. Rule evaluation    -- every candidate rule through src.panels.rule_panel.
 
 Redesign v2
 -----------
   * Targets are gap-stratified: for every (regime, obs_idx) and every g in
-    config.HORIZON_GAP_FRACTIONS the target index is
-    n_f = first n > obs_idx with gap(n) <= g * gap(obs_idx), capped at
-    50,000 with the achieved fraction recorded.  Records and aggregations
-    are keyed by target_g; capped cells are flagged and excluded from every
-    pooled cross-regime statistic (phase diagram mean, correlations, rules).
-  * The pool is the existing 9 methods + constant_assumed + constant_oracle.
-    The Richardson rank is computed over the original 9 methods (Report-2
-    review, decision 4); constant_assumed and constant_oracle are evaluated
-    and reported alongside every phase-diagram cell but never enter a rank,
-    a "best other" or the Phase-3 candidate set.
-  * Rank eligibility within a cell needs valid_rate >= config.RANK_MIN_VALID
-    (decision 3): a below-floor method takes no rank slot; when richardson_1
-    itself is below the floor the cell's richardson_rank is NaN and the cell
-    is flagged richardson_below_floor = 1 (listed by the runner).
-  * Core 18 regimes only (this phase feeds selector / cascade training).
+    config.HORIZON_GAP_FRACTIONS the target index is n_f = first n > obs_idx
+    with gap(n) <= g * gap(obs_idx), capped at config.HORIZON_N_CAP with the
+    achieved fraction recorded.  Records and aggregations are keyed by
+    target_g; capped cells are flagged and excluded from every pooled
+    cross-regime statistic (targets, correlations, rules).
+  * Core regimes only (this phase feeds selector / cascade training).
   * Methods receive L_hat (ASSUMED_L_MODE "zero"); L_true is hidden.
   * Every record carries L_true, L_hat, target_g, achieved_g, n_f, capped,
-    skill (hindsight best-of-four, strict), skill_vs_* / win_vs_* against each
-    deployable trivial, is_trivial, is_oracle.
-
-Reduced method set (src.pipeline.PHASE2_POOL: eight accelerators covering
-the Phase 1 champions plus the last-value trivial as the floor option):
-  last_value      the last observed value (trivial floor option)
-  richardson_1    Phase 1 reference (flexible power-law)
-  richardson_a10  Safer fixed-alpha variant (alpha=1)
-  single_exp_fit  Phase 1 overall winner
-  rational_fit    Short-horizon winner
-  pade_22         Rational-decay specialist
-  log_linear      Oscillatory-exponential specialist
-  levin_t2        Staircase specialist (Prompt 5B: replaces weniger_d2, to which the
-                  corrected weniger_d2 is numerically identical)
-  anderson_1      Stable limit-estimator fallback
+    E_last (the last-value error of that seed), skill (hindsight best-of-four,
+    strict) and skill_vs_* / win_vs_* against each deployable trivial.
 
 Author : Kian Maleki
-Date   : 2026-05-24 (v1), 2026-09-19 (redesign v2)
+Date   : 2026-05-24 (v1), 2026-09-19 (redesign v2), 2026-09-27 (descriptive reporting)
 """
 
 import os, math, warnings
@@ -59,7 +63,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import spearmanr
 from scipy.optimize import curve_fit
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -70,6 +74,8 @@ import src.config as CFG_MOD
 from src.accelerators import METHODS
 from src.generators   import regime_functions
 from src.asymptote    import assumed_asymptote
+from src.panels       import (PANEL_COLS, RULE_COLS, error_panel, rule_panel, threshold_rule,
+                              zero_denominator_flags)
 from src.pipeline     import (PHASE2_POOL, REFERENCE_METHODS, capped_block, exclude_capped,
                               horizon_meta, method_flags, resolve_regimes)
 from src.trivial      import (ORACLE_METHODS, aggregate_skill_vs, best_reference_error,
@@ -81,13 +87,14 @@ PHASE2_BASE_METHODS = [
 ]
 # Redesign v2: the trivial constant predictors are first-class comparators.
 PHASE2_METHODS = PHASE2_BASE_METHODS + ['constant_assumed', 'constant_oracle']
-# Ranks, "best other" and selector candidates are the original 9 methods;
-# constant_assumed gets the oracle's treatment: evaluated, reported alongside,
-# unranked (Report-2 review, decision 4).
+# Selector candidates (Phase 3) are the pool; constant_assumed gets the oracle's
+# treatment: evaluated, reported alongside, never a candidate (Report-2 review,
+# decision 4).
 RANK_POOL = list(PHASE2_BASE_METHODS)
 UNRANKED_COMPARATORS = [m for m in PHASE2_METHODS if m not in RANK_POOL]
 assert set(UNRANKED_COMPARATORS) == {'constant_assumed', 'constant_oracle'}
 assert not set(RANK_POOL) & ORACLE_METHODS
+RICHARDSON = 'richardson_1'
 
 METHOD_COLOURS = {
     'last_value':       '#888888',
@@ -105,6 +112,11 @@ METHOD_COLOURS = {
 
 FIG_DPI = 150
 CELL_KEYS = ['regime', 'obs_idx', 'noise', 'target_g']
+WINDOW_KEYS = ['regime', 'obs_idx', 'noise']          # a cell at a fixed stratum
+RECORD_COLS = ['method', 'regime', 'obs_idx', 'noise', 'seed', 'target_g',
+               'estimate', 'error', 'valid', 'catastrophic', 'E_last', 'capped',
+               'L_true', 'L_hat', 'n_f', 'achieved_g']
+MIN_OBS = 15                                          # finite cells per correlation
 
 
 # ── Config builder ─────────────────────────────────────────────────────────────
@@ -286,10 +298,11 @@ def run_sweep(obs_idx_list: List[int],
               window_len:   int,
               out_dir:      str,
               core_regimes: Optional[List[str]] = None,
-              verbose:      bool = True):
+              verbose:      bool = True) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     Evaluate PHASE2_METHODS across all (obs_idx, noise, gap stratum) grids on
-    the core regimes.  Returns (df_agg, df_feat) DataFrames.
+    the core regimes.  Returns (df_agg, df_feat, df_rec): the per-cell
+    descriptive panels, the per-window features and the per-record frame.
     """
     os.makedirs(out_dir, exist_ok=True)
     regimes = resolve_regimes(core_regimes, include_holdout=False)
@@ -362,8 +375,6 @@ def run_sweep(obs_idx_list: List[int],
                             valid = math.isfinite(err)
                             cat   = (not valid) or (
                                 curr_err > 1e-12 and err > CFG_MOD.CAT_MULT * curr_err)
-                            impv  = ((curr_err / err) if (valid and err > 1e-12)
-                                     else (1.0 if valid else float('nan')))
                             rec = {
                                 'method':       method,
                                 'regime':       regime,
@@ -372,10 +383,11 @@ def run_sweep(obs_idx_list: List[int],
                                 'seed':         seed,
                                 'L_true':       L_true,
                                 'L_hat':        L_hat,
+                                'estimate':     est if valid else float('nan'),
+                                'error':        err if valid else float('nan'),
                                 'valid':        int(valid),
                                 'catastrophic': int(cat),
-                                'error':        err if valid else float('nan'),
-                                'impv':         impv if math.isfinite(impv) else float('nan'),
+                                'E_last':       errs['last_value'],
                                 'ref_error':    ref_err,
                                 'skill':        skill_score(err, ref_err) if valid else float('nan'),
                             }
@@ -393,15 +405,14 @@ def run_sweep(obs_idx_list: List[int],
     if verbose:
         print(f'  [{n_total}/{n_total}] 100.0%  Done.\n')
 
-    df_raw  = pd.DataFrame(sweep_records)
+    df_rec  = pd.DataFrame(sweep_records)
     df_feat = pd.DataFrame(feature_records)
 
-    # ── Aggregate ──────────────────────────────────────────────────────────────
+    # ── Aggregate: the descriptive panel of the seeds per (method, cell) ───────
     agg = []
-    for keys, grp in df_raw.groupby(['method'] + CELL_KEYS, sort=False):
+    for keys, grp in df_rec.groupby(['method'] + CELL_KEYS, sort=False):
         method, regime, obs_idx, sigma, g = keys
-        vr = grp['valid'].mean()
-        cr = grp['catastrophic'].mean()
+        panel = error_panel(grp['error'], grp['valid'], grp['catastrophic'], grp['E_last'])
         agg.append({
             'method':     method,   'regime':     regime,
             'obs_idx':    obs_idx,  'noise':      sigma,
@@ -413,17 +424,29 @@ def run_sweep(obs_idx_list: List[int],
             'L_hat':      _med(grp['L_hat']),
             'is_trivial': int(grp['is_trivial'].iloc[0]),
             'is_oracle':  int(grp['is_oracle'].iloc[0]),
-            'valid_rate': round(vr, 4),
-            'cat_rate':   round(cr, 4),
-            'med_error':  _med(grp['error']),
+            'n_total':    panel['n_total'],
+            'n_valid':    panel['n_valid'],
+            'valid_rate': round(panel['valid_rate'], 4),
+            'cat_rate':   round(panel['cat_rate'], 4),
+            'mean_error': panel['mean_error'],
+            'sd_error':   panel['sd_error'],
+            'med_error':  panel['med_error'],
+            'q25_error':  panel['q25_error'],
+            'q75_error':  panel['q75_error'],
+            'p90_error':  panel['p90_error'],
             'med_skill':  _med(grp['skill']),
             'n_seeds':    int(len(grp)),
             **aggregate_skill_vs(grp),
+            'win_rate_vs_last': round(panel['win_rate_vs_last'], 4),
         })
 
     df_agg = pd.DataFrame(agg)
 
     # ── Save ───────────────────────────────────────────────────────────────────
+    p = os.path.join(out_dir, 'phase2_records.csv')
+    df_rec[RECORD_COLS].to_csv(p, index=False)
+    print(f'  Saved: {p}  ({len(df_rec)} rows; git-ignored)')
+
     p = os.path.join(out_dir, 'phase2_sweep_aggregated.csv')
     df_agg.to_csv(p, index=False)
     print(f'  Saved: {p}  ({len(df_agg)} rows)')
@@ -438,187 +461,139 @@ def run_sweep(obs_idx_list: List[int],
     df_cap.to_csv(p, index=False)
     print(f'  Saved: {p}  ({len(df_cap)} rows)')
 
-    return df_agg, df_feat
+    return df_agg, df_feat, df_rec
 
 
 # =============================================================================
-# 2.  PHASE DIAGRAMS
+# 2.  RICHARDSON TARGETS
 # =============================================================================
 
-def build_phase_diagrams(df_agg:  pd.DataFrame,
-                         g:       float,
-                         out_dir: str) -> pd.DataFrame:
+def richardson_targets(df_rec: pd.DataFrame, g: float, out_dir: str) -> pd.DataFrame:
     """
-    For each (regime, obs_idx, noise) at stratum g, determine Richardson's
-    rank among the RANK_POOL (the original 9 methods) and the best
-    alternative.  Only methods with valid_rate >= config.RANK_MIN_VALID take
-    a rank slot; a cell where richardson_1 itself is below the floor has
-    richardson_rank / richardson_err_rank = NaN and richardson_below_floor = 1.
-    constant_assumed and constant_oracle are reported alongside (stability,
-    med_error, valid_rate) and never ranked.  Cells carry n_f / achieved_g /
-    capped so pooled views can drop capped cells.
+    Per cell (regime, obs_idx, noise) at stratum g, richardson_1's two targets:
+
+        R_R_med          median over valid records of R_R = E_R / E_last
+                         (src.trivial.skill_score: if E_last <= SKILL_EPS the
+                         ratio is 1.0 when E_R <= SKILL_EPS and +inf otherwise;
+                         NaN when either error is invalid)
+        log_med_error_R  natural log of the cell-median error over valid records
+
+    plus med_error_R, n_valid_R, n_total, n_zero_denominator (records where
+    the E_last <= SKILL_EPS branch fired) and zero_denominator_cell (any such
+    record).  Every cell is written with its capped flag; the summaries that
+    follow apply the capped-exclusion rule.  File: phase2_richardson_targets_g{g}.csv.
+    """
+    sub = df_rec[(df_rec['target_g'] == g) & (df_rec['method'] == RICHARDSON)]
+    rows = []
+    for cell, grp in sub.groupby(WINDOW_KEYS, sort=False):
+        regime, obs_idx, sigma = cell
+        e = grp['error'].to_numpy(dtype=float)
+        el = grp['E_last'].to_numpy(dtype=float)
+        ok = grp['valid'].to_numpy().astype(bool)
+        ratios = np.array([skill_score(a, b) for a, b in zip(e[ok], el[ok])], dtype=float)
+        ratios = ratios[~np.isnan(ratios)]
+        med_err = float(np.median(e[ok])) if ok.any() else float('nan')
+        zero = zero_denominator_flags(e, el)
+        with np.errstate(divide='ignore'):
+            log_med = float(np.log(med_err)) if math.isfinite(med_err) else float('nan')
+        rows.append({
+            'regime':               regime,
+            'obs_idx':              obs_idx,
+            'noise':                sigma,
+            'target_g':             g,
+            'n_f':                  float(grp['n_f'].median()),
+            'achieved_g':           _med(grp['achieved_g']),
+            'capped':               int(grp['capped'].max()),
+            'R_R_med':              float(np.median(ratios)) if ratios.size else float('nan'),
+            'log_med_error_R':      log_med,
+            'med_error_R':          med_err,
+            'n_valid_R':            int(ok.sum()),
+            'n_total':              int(len(grp)),
+            'n_zero_denominator':   int(zero.sum()),
+            'zero_denominator_cell': int(zero.any()),
+        })
+    df_t = pd.DataFrame(rows)
+    p = os.path.join(out_dir, f'phase2_richardson_targets_g{g:g}.csv')
+    df_t.to_csv(p, index=False)
+    print(f'  Saved: {p}  ({len(df_t)} rows)')
+    return df_t
+
+
+def denominator_counts(targets_by_g: Dict[float, pd.DataFrame], out_dir: str) -> pd.DataFrame:
+    """
+    Per horizon, over the uncapped cells (the cells that enter the
+    correlations): the richardson_1 records and the cells where the
+    E_last <= SKILL_EPS branch of the normalised error fired, with the record
+    and cell totals.  File: phase2_denominator_counts.csv (zeros when none).
     """
     rows = []
-    floor = CFG_MOD.RANK_MIN_VALID
-    keys  = ['regime', 'obs_idx', 'noise']
-    sub   = df_agg[(df_agg['target_g'] == g) & (df_agg['method'].isin(RANK_POOL))]
-    side  = df_agg[(df_agg['target_g'] == g) & (df_agg['method'].isin(UNRANKED_COMPARATORS))]
-    side  = side.set_index(keys + ['method']).sort_index()
-
-    def _side(cell, method, col):
-        try:
-            return float(side.loc[cell + (method,), col])
-        except KeyError:
-            return float('nan')
-
-    for cell, grp in sub.groupby(keys):
-        regime, obs_idx, sigma = cell
-        elig = grp[grp['valid_rate'] >= floor]
-        ranked = (elig.sort_values(['stability', 'med_error', 'method'],
-                                   ascending=[False, True, True])
-                      .reset_index(drop=True))
-        ranked['rank'] = ranked.index + 1
-        by_err = (elig[elig['med_error'].notna()]
-                      .sort_values(['med_error', 'method'])
-                      .reset_index(drop=True))
-        by_err['err_rank'] = by_err.index + 1
-
-        r1_all = grp[grp['method'] == 'richardson_1']
-        r1  = ranked[ranked['method'] == 'richardson_1']
-        r1e = by_err[by_err['method'] == 'richardson_1']
-
-        r1_stab  = float(r1_all['stability'].values[0])  if not r1_all.empty else float('nan')
-        r1_vr    = float(r1_all['valid_rate'].values[0]) if not r1_all.empty else float('nan')
-        r1_below = int((not r1_all.empty) and r1_vr < floor)
-        r1_rank  = float(r1['rank'].values[0])      if not r1.empty  else float('nan')
-        r1_erank = float(r1e['err_rank'].values[0]) if not r1e.empty else float('nan')
-        if not ranked.empty:
-            best    = ranked.iloc[0]
-            best_sc = float(best['stability'])
-            best_m  = str(best['method'])
-        else:                                   # no method above the floor
-            best_sc, best_m = float('nan'), ''
-        margin = round(best_sc - r1_stab, 4)
-
+    for g in sorted(targets_by_g):
+        t = exclude_capped(targets_by_g[g])
         rows.append({
-            'regime':                 regime,
-            'obs_idx':                obs_idx,
-            'noise':                  sigma,
-            'target_g':               g,
-            'n_f':                    float(grp['n_f'].iloc[0]),
-            'achieved_g':             float(grp['achieved_g'].iloc[0]),
-            'capped':                 int(grp['capped'].max()),
-            'richardson_stability':   round(r1_stab, 4),
-            'richardson_valid_rate':  round(r1_vr, 4),
-            'richardson_below_floor': r1_below,
-            'richardson_rank':        r1_rank,
-            'richardson_err_rank':    r1_erank,
-            'n_rank_pool':            int(len(grp)),
-            'n_rank_eligible':        int(len(elig)),
-            'best_method':            best_m,
-            'best_stability':         round(best_sc, 4),
-            'stability_margin':       margin,
-            'richardson_wins':        int(r1_rank == 1),
-            # reported alongside, unranked (same treatment as the oracle)
-            'constant_assumed_stability':  _side(cell, 'constant_assumed', 'stability'),
-            'constant_assumed_med_error':  _side(cell, 'constant_assumed', 'med_error'),
-            'constant_assumed_valid_rate': _side(cell, 'constant_assumed', 'valid_rate'),
-            'constant_oracle_stability':   _side(cell, 'constant_oracle', 'stability'),
-            'constant_oracle_med_error':   _side(cell, 'constant_oracle', 'med_error'),
+            'target_g':                   g,
+            'n_records_zero_denominator': int(t['n_zero_denominator'].sum()),
+            'n_cells_affected':           int(t['zero_denominator_cell'].sum()),
+            'n_records_total':            int(t['n_total'].sum()),
+            'n_cells_total':              int(len(t)),
         })
-
-    df_pd = pd.DataFrame(rows)
-    p = os.path.join(out_dir, f'phase2_phase_diagram_g{g:g}.csv')
-    df_pd.to_csv(p, index=False)
-    print(f'  Saved: {p}  ({len(df_pd)} rows)')
-    return df_pd
+    df = pd.DataFrame(rows, columns=['target_g', 'n_records_zero_denominator', 'n_cells_affected',
+                                     'n_records_total', 'n_cells_total'])
+    p = os.path.join(out_dir, 'phase2_denominator_counts.csv')
+    df.to_csv(p, index=False)
+    print(f'  Saved: {p}  ({len(df)} rows)')
+    return df
 
 
 # =============================================================================
 # 3.  CORRELATION ANALYSIS
 # =============================================================================
 
-def run_correlation_analysis(df_feat: pd.DataFrame,
-                             df_agg:  pd.DataFrame,
-                             g:       float,
-                             out_dir: str,
-                             suffix:  str = ''):
+def _feature_means(df_feat: pd.DataFrame) -> pd.DataFrame:
+    """Cell-level features: the window features averaged over the cell's seeds."""
+    return (df_feat.drop(columns=['seed'])
+                   .groupby(WINDOW_KEYS)
+                   .mean()
+                   .reset_index())
+
+
+def run_correlation_analysis(df_feat:    pd.DataFrame,
+                             df_targets: pd.DataFrame,
+                             g:          float,
+                             out_dir:    str,
+                             suffix:     str = '') -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
-    Spearman correlations between trajectory features and Richardson's
-    losing margin at stratum g.
-
-    Global (ALL regimes) and per-regime.  Capped cells are excluded (the
-    losing margin at a capped cell is measured against a non-target horizon).
-    Per-regime requires >= 15 finite observations.
+    Spearman rank correlation between each cell-level window feature and
+    (i) R_R_med, (ii) log_med_error_R at stratum g; per regime and pooled
+    over regimes ('ALL').  Capped cells are excluded.  A row needs MIN_OBS
+    cells where the feature and both targets are not NaN (+inf is a value and
+    ranks largest); the cells dropped for a NaN feature or target are counted
+    in n_dropped_nan.  Returns (df_corr, base) where base is the merged
+    cell table.
     """
-    MIN_OBS = 15
-    keys = ['regime', 'obs_idx', 'noise']
-
-    sub = df_agg[(df_agg['target_g'] == g) & (df_agg['method'].isin(RANK_POOL))]
-    sub = exclude_capped(sub)
-
-    r1 = (sub[sub['method'] == 'richardson_1'][keys + ['stability']]
-          .rename(columns={'stability': 'r1_stability'}))
-    best_other = (sub[sub['method'] != 'richardson_1']
-                  .groupby(keys)['stability'].max()
-                  .reset_index()
-                  .rename(columns={'stability': 'best_other_stability'}))
-
-    merged = r1.merge(best_other, on=keys)
-    merged['r1_losing_margin'] = merged['best_other_stability'] - merged['r1_stability']
-    merged['r1_is_losing']     = (merged['r1_losing_margin'] > 0.05).astype(int)
-
-    feat_avg = (df_feat.drop(columns=['seed'])
-                       .groupby(keys)
-                       .mean()
-                       .reset_index())
-
-    base = merged.merge(feat_avg, on=keys, how='left')
+    tgt = exclude_capped(df_targets)
+    base = tgt.merge(_feature_means(df_feat), on=WINDOW_KEYS, how='left')
     base['target_g'] = g
 
-    corr_rows = []
-
-    # ── Global correlations ────────────────────────────────────────────────────
-    for feat in FEATURE_COLS:
-        mask = base[feat].notna() & base['r1_losing_margin'].notna()
-        n    = int(mask.sum())
-        if n < 10:
-            continue
-        r_m, p_m = spearmanr(base.loc[mask, feat], base.loc[mask, 'r1_losing_margin'])
-        r_l, p_l = spearmanr(base.loc[mask, feat], base.loc[mask, 'r1_is_losing'])
-        corr_rows.append({
-            'regime':              'ALL',
-            'target_g':            g,
-            'feature':             feat,
-            'spearman_vs_margin':  round(float(r_m), 4),
-            'p_vs_margin':         round(float(p_m), 4),
-            'spearman_vs_losing':  round(float(r_l), 4),
-            'p_vs_losing':         round(float(p_l), 4),
-            'n_obs':               n,
-        })
-
-    # ── Per-regime correlations ────────────────────────────────────────────────
-    for regime in sorted(df_agg['regime'].unique()):
-        rsub = base[base['regime'] == regime]
+    def _rows(label: str, sub: pd.DataFrame) -> List[dict]:
+        out = []
         for feat in FEATURE_COLS:
-            mask = rsub[feat].notna() & rsub['r1_losing_margin'].notna()
-            n    = int(mask.sum())
-            if n < MIN_OBS:
-                corr_rows.append({
-                    'regime': regime, 'target_g': g, 'feature': feat,
-                    'spearman_vs_margin': float('nan'), 'p_vs_margin': float('nan'),
-                    'spearman_vs_losing': float('nan'), 'p_vs_losing': float('nan'),
-                    'n_obs': n,
-                })
-                continue
-            r_m, p_m = spearmanr(rsub.loc[mask, feat], rsub.loc[mask, 'r1_losing_margin'])
-            corr_rows.append({
-                'regime': regime, 'target_g': g, 'feature': feat,
-                'spearman_vs_margin': round(float(r_m), 4),
-                'p_vs_margin': round(float(p_m), 4),
-                'spearman_vs_losing': float('nan'), 'p_vs_losing': float('nan'),
-                'n_obs': n,
-            })
+            mask = sub[feat].notna() & sub['R_R_med'].notna() & sub['log_med_error_R'].notna()
+            n = int(mask.sum())
+            row = {'regime': label, 'target_g': g, 'feature': feat,
+                   'spearman_vs_RR': float('nan'), 'p_vs_RR': float('nan'),
+                   'spearman_vs_log_err': float('nan'), 'p_vs_log_err': float('nan'),
+                   'n_cells': n, 'n_dropped_nan': int(len(sub) - n)}
+            if n >= MIN_OBS:
+                r1, p1 = spearmanr(sub.loc[mask, feat], sub.loc[mask, 'R_R_med'])
+                r2, p2 = spearmanr(sub.loc[mask, feat], sub.loc[mask, 'log_med_error_R'])
+                row.update({'spearman_vs_RR': round(float(r1), 4), 'p_vs_RR': round(float(p1), 4),
+                            'spearman_vs_log_err': round(float(r2), 4), 'p_vs_log_err': round(float(p2), 4)})
+            out.append(row)
+        return out
+
+    corr_rows = _rows('ALL', base)
+    for regime in sorted(base['regime'].unique()):
+        corr_rows += _rows(regime, base[base['regime'] == regime])
 
     df_corr = pd.DataFrame(corr_rows)
     p = os.path.join(out_dir, f'phase2_correlations{suffix}.csv')
@@ -628,84 +603,42 @@ def run_correlation_analysis(df_feat: pd.DataFrame,
 
 
 # =============================================================================
-# 4.  SIMPLE RULE TESTING
+# 4.  RULE EVALUATION
 # =============================================================================
 
-def test_simple_rules(merged_full: pd.DataFrame,
-                      df_feat:     pd.DataFrame,
-                      df_agg:      pd.DataFrame,
-                      g:           float,
-                      out_dir:     str,
-                      suffix:      str = '') -> pd.DataFrame:
+def evaluate_rules(df_rec:  pd.DataFrame,
+                   df_feat: pd.DataFrame,
+                   df_agg:  pd.DataFrame,
+                   g:       float,
+                   out_dir: str,
+                   suffix:  str = '') -> pd.DataFrame:
     """
-    For each candidate rule (feature, operator, threshold, alternative),
-    compute precision, recall, and mean stability gain at stratum g.
-    Capped cells are excluded.
-
-    Precision = P(Richardson is losing | rule fires)
-    Recall    = P(rule fires | Richardson is losing)
-    Mean gain = mean(stability(alt) - stability(richardson_1)) when rule fires
+    Every candidate rule (feature, operator, threshold, alternative) through
+    src.panels.rule_panel at stratum g: the eligible cells are the uncapped
+    (regime, obs_idx, noise) cells whose cell-level feature is finite; the
+    records are richardson_1's and the routed method's records of those
+    cells.  One row per rule, the rule_panel columns after the rule's
+    definition; rules are listed in CANDIDATE_RULES order (no ranking).
     """
-    keys = ['regime', 'obs_idx', 'noise']
-    feat_avg = (df_feat.drop(columns=['seed'])
-                        .groupby(keys)
-                        .mean()
-                        .reset_index())
-
-    sub = exclude_capped(df_agg[(df_agg['target_g'] == g)
-                                & (df_agg['method'].isin(RANK_POOL))])
-    pivot = (sub.pivot_table(index=keys, columns='method', values='stability')
-                .reset_index())
-    pivot.columns.name = None
-
-    ev = pivot.merge(feat_avg, on=keys, how='left')
+    cells = (exclude_capped(df_agg[(df_agg['target_g'] == g) & (df_agg['method'] == RICHARDSON)])
+             [WINDOW_KEYS].drop_duplicates()
+             .merge(_feature_means(df_feat), on=WINDOW_KEYS, how='left'))
+    rec_g = df_rec[df_rec['target_g'] == g]
+    rec_r1 = rec_g[rec_g['method'] == RICHARDSON]
 
     rule_rows = []
     for feat, op, thresh, alt in CANDIDATE_RULES:
-        if feat not in ev.columns:
+        if feat not in cells.columns:
             continue
-        if alt not in ev.columns or 'richardson_1' not in ev.columns:
-            continue
+        elig, fired = threshold_rule(cells, feat, op, thresh)
+        rec_alt = rec_g[rec_g['method'] == alt]
+        row = {'target_g': g, 'feature': feat, 'operator': op, 'threshold': thresh,
+               'alternative': alt}
+        row.update(rule_panel(elig, fired, rec_r1, rec_alt, WINDOW_KEYS))
+        rule_rows.append(row)
 
-        valid = (ev[feat].notna() & ev['richardson_1'].notna() & ev[alt].notna())
-        sub_ev = ev[valid].copy()
-        if len(sub_ev) < 5:
-            continue
-
-        fires        = sub_ev[feat] < thresh if op == '<' else sub_ev[feat] > thresh
-        r1_is_losing = sub_ev[alt] > sub_ev['richardson_1']
-
-        n_fire   = int(fires.sum())
-        n_total  = len(sub_ev)
-        n_losing = int(r1_is_losing.sum())
-
-        precision = (float((fires & r1_is_losing).sum() / n_fire)
-                     if n_fire > 0 else float('nan'))
-        recall    = (float((fires & r1_is_losing).sum() / n_losing)
-                     if n_losing > 0 else float('nan'))
-        gain      = (float((sub_ev.loc[fires, alt]
-                            - sub_ev.loc[fires, 'richardson_1']).mean())
-                     if n_fire > 0 else float('nan'))
-
-        rule_rows.append({
-            'target_g':    g,
-            'feature':     feat,
-            'operator':    op,
-            'threshold':   thresh,
-            'alternative': alt,
-            'n_fire':      n_fire,
-            'n_total':     n_total,
-            'fire_rate':   round(n_fire / n_total, 3),
-            'precision':   round(precision, 3) if math.isfinite(precision) else float('nan'),
-            'recall':      round(recall,    3) if math.isfinite(recall)    else float('nan'),
-            'mean_gain':   round(gain,      4) if math.isfinite(gain)      else float('nan'),
-        })
-
-    cols = ['target_g', 'feature', 'operator', 'threshold', 'alternative', 'n_fire',
-            'n_total', 'fire_rate', 'precision', 'recall', 'mean_gain']
-    df_rules = (pd.DataFrame(rule_rows, columns=cols)
-                  .sort_values('precision', ascending=False)
-                  .reset_index(drop=True))
+    cols = ['target_g', 'feature', 'operator', 'threshold', 'alternative', *RULE_COLS]
+    df_rules = pd.DataFrame(rule_rows, columns=cols)
     p = os.path.join(out_dir, f'phase2_rules{suffix}.csv')
     df_rules.to_csv(p, index=False)
     print(f'  Saved: {p}  ({len(df_rules)} rows)')
@@ -727,19 +660,19 @@ def _nearest_idx(lst: list, val: float) -> int:
     return min(range(len(lst)), key=lambda i: abs(lst[i] - val))
 
 
-# ── Figure 1 — Phase diagram ───────────────────────────────────────────────────
+# ── Figure 1 — Richardson's normalised error over depth × noise ───────────────
 
-def fig_p2_01_phase_diagram(df_pd:   pd.DataFrame,
-                             out_dir: str) -> str:
-    """2-D (obs_idx x noise) heat-map of Richardson's rank, per key regime."""
+def fig_p2_01_phase_diagram(df_targets: pd.DataFrame,
+                            out_dir:    str) -> str:
+    """2-D (obs_idx x noise) map of richardson_1's R_R_med (log10), per key
+    regime and pooled over regimes (median over regimes, capped excluded)."""
     key_regimes = [
         'rational_decay', 'osc_exp', 'staircase',
         'broken_power_law', 'single_exp', 'power_law',
     ]
-    obs_vals   = sorted(df_pd['obs_idx'].unique())
-    noise_vals = sorted(df_pd['noise'].unique())
-    n_methods  = len(RANK_POOL)
-    g          = float(df_pd['target_g'].iloc[0]) if len(df_pd) else float('nan')
+    obs_vals   = sorted(df_targets['obs_idx'].unique())
+    noise_vals = sorted(df_targets['noise'].unique())
+    g          = float(df_targets['target_g'].iloc[0]) if len(df_targets) else float('nan')
 
     fig, axes = plt.subplots(2, 4, figsize=(18, 9))
     axes_flat  = axes.flatten()
@@ -749,9 +682,13 @@ def fig_p2_01_phase_diagram(df_pd:   pd.DataFrame,
         for _, row in df_sub.iterrows():
             ni = _nearest_idx(noise_vals, row['noise'])
             oi = _nearest_idx(obs_vals,   row['obs_idx'])
-            mat[ni, oi] = row['richardson_rank']
-        im = ax.imshow(mat, cmap='RdYlGn_r', aspect='auto',
-                       vmin=1, vmax=n_methods, interpolation='nearest')
+            mat[ni, oi] = row['R_R_med']
+        with np.errstate(divide='ignore', invalid='ignore'):
+            lmat = np.log10(mat)
+        finite = lmat[np.isfinite(lmat)]
+        lim = max(1.0, float(np.abs(finite).max())) if finite.size else 1.0
+        im = ax.imshow(np.clip(lmat, -lim, lim), cmap='RdBu_r', aspect='auto',
+                       vmin=-lim, vmax=lim, interpolation='nearest')
         ax.set_xticks(range(len(obs_vals)))
         ax.set_xticklabels(obs_vals, fontsize=7, rotation=45)
         ax.set_yticks(range(len(noise_vals)))
@@ -763,32 +700,31 @@ def fig_p2_01_phase_diagram(df_pd:   pd.DataFrame,
             for oi in range(len(obs_vals)):
                 v = mat[ni, oi]
                 if np.isfinite(v):
-                    ax.text(oi, ni, f'{int(v)}', ha='center', va='center',
-                            fontsize=7,
-                            color='white' if v > 4 else 'black')
+                    ax.text(oi, ni, f'{v:.2g}', ha='center', va='center', fontsize=6)
+                elif np.isinf(v):
+                    ax.text(oi, ni, 'inf', ha='center', va='center', fontsize=6)
         return im
 
-    # Aggregated across all regimes: capped cells excluded (pooled statistic)
-    agg_df = (exclude_capped(df_pd).groupby(['obs_idx', 'noise'])
-                   ['richardson_rank'].mean()
-                   .reset_index())
-    im = _draw(axes_flat[0], agg_df, 'ALL REGIMES (mean rank, capped excluded)')
-    plt.colorbar(im, ax=axes_flat[0], label='Richardson rank', shrink=0.8)
+    pooled = (exclude_capped(df_targets).groupby(['obs_idx', 'noise'])['R_R_med']
+              .median().reset_index())
+    im = _draw(axes_flat[0], pooled, 'ALL REGIMES (median over regimes, capped excluded)')
+    plt.colorbar(im, ax=axes_flat[0], label='log10 R_R_med', shrink=0.8)
 
     for k, regime in enumerate(key_regimes):
         ax  = axes_flat[k + 1]
-        sub = df_pd[df_pd['regime'] == regime]
+        sub = df_targets[df_targets['regime'] == regime]
         cap = ' [CAP]' if (len(sub) and sub['capped'].max() == 1) else ''
         im  = _draw(ax, sub, regime.replace('_', '\n') + cap)
-        plt.colorbar(im, ax=ax, label='Rank', shrink=0.8)
+        plt.colorbar(im, ax=ax, label='log10 R_R_med', shrink=0.8)
 
     axes_flat[7].axis('off')
     axes_flat[7].text(0.5, 0.5,
-        f'Richardson Rank\n(1 = best of {n_methods}, {n_methods} = worst;\n'
-        'constant_assumed and the oracle\ncomparator reported alongside, unranked)\n\n'
-        'Green = Richardson wins\n'
-        'Red   = Richardson fails\n'
-        f'Blank = below the validity floor\n(valid_rate < {CFG_MOD.RANK_MIN_VALID}, unranked)\n\n'
+        'R_R_med = median over valid seeds of\n'
+        'richardson_1 error / last-value error\n\n'
+        'Blue  (< 1) = Richardson below the last value\n'
+        'Red   (> 1) = Richardson above the last value\n'
+        'inf = last-value error at zero (documented branch)\n'
+        'Blank = no valid richardson_1 record\n\n'
         'Rows    = noise level\n'
         'Columns = obs_idx\n'
         '[CAP] = some cells hit the horizon cap',
@@ -796,9 +732,8 @@ def fig_p2_01_phase_diagram(df_pd:   pd.DataFrame,
         transform=axes_flat[7].transAxes)
 
     fig.suptitle(
-        f'Figure P2-1 — Richardson Rank Phase Diagram  '
-        f'(obs_idx × noise)\n'
-        f'Gap stratum g = {g:g}',
+        f"Figure P2-1 — richardson_1's last-value-normalised error over depth × noise\n"
+        f'Gap stratum g = {g:g}; conditional on validity',
         fontsize=11, fontweight='bold')
     fig.tight_layout()
     path = os.path.join(out_dir, 'figure_p2_01_phase_diagram.png')
@@ -806,48 +741,42 @@ def fig_p2_01_phase_diagram(df_pd:   pd.DataFrame,
     return path
 
 
-# ── Figure 2 — Crossover by obs_idx ───────────────────────────────────────────
+# ── Figure 2 — R_R_med by obs_idx ─────────────────────────────────────────────
 
-def fig_p2_02_crossover(df_pd:   pd.DataFrame,
-                         out_dir: str) -> str:
-    """Richardson rank vs obs_idx for each regime (sigma ≈ 0)."""
-    sub = df_pd[df_pd['noise'] < 1e-9].copy()
+def fig_p2_02_crossover(df_targets: pd.DataFrame,
+                        out_dir:    str) -> str:
+    """richardson_1's R_R_med vs obs_idx for each regime (lowest noise level)."""
+    sub = df_targets[df_targets['noise'] < 1e-9].copy()
     if sub.empty:
-        min_noise = df_pd['noise'].min()
-        sub = df_pd[df_pd['noise'] == min_noise].copy()
-
-    obs_vals  = sorted(sub['obs_idx'].unique())
-    ever_wins = {r: bool((grp['richardson_rank'] == 1).any())
-                 for r, grp in sub.groupby('regime')}
+        min_noise = df_targets['noise'].min()
+        sub = df_targets[df_targets['noise'] == min_noise].copy()
+    obs_vals = sorted(sub['obs_idx'].unique())
 
     fig, ax = plt.subplots(figsize=(13, 7))
     for regime in sorted(sub['regime'].unique()):
         rsub = sub[sub['regime'] == regime].sort_values('obs_idx')
         if rsub.empty:
             continue
-        wins   = ever_wins.get(regime, False)
-        colour = '#2e7d32' if wins else '#c62828'
-        lw     = 2.0       if wins else 1.0
-        ax.plot(rsub['obs_idx'], rsub['richardson_rank'],
-                lw=lw, color=colour, alpha=0.75)
+        below = bool((rsub['R_R_med'] < 1).any())
+        colour = '#2e7d32' if below else '#c62828'
+        lw     = 2.0       if below else 1.0
+        y = rsub['R_R_med'].replace([np.inf], np.nan)
+        ax.plot(rsub['obs_idx'], y, lw=lw, color=colour, alpha=0.75)
         last = rsub.iloc[-1]
-        ax.text(last['obs_idx'] + 1, last['richardson_rank'],
-                regime[:8], fontsize=6, va='center', color=colour)
+        if np.isfinite(last['R_R_med']):
+            ax.text(last['obs_idx'] + 1, last['R_R_med'], regime[:8], fontsize=6,
+                    va='center', color=colour)
 
-    ax.axhline(1, color='#555', lw=0.8, ls='--', alpha=0.5,
-               label='Rank 1 (wins)')
-    ax.axhline(3, color='#888', lw=0.8, ls=':', alpha=0.5,
-               label='Rank 3 (top-tier)')
-    ax.invert_yaxis()
+    ax.axhline(1, color='#555', lw=0.8, ls='--', alpha=0.5, label='parity with the last value')
+    ax.set_yscale('log')
     ax.set_xlabel('obs_idx  (observation depth)', fontsize=10)
-    ax.set_ylabel(f'Richardson rank  (1 = best of {len(RANK_POOL)})', fontsize=10)
+    ax.set_ylabel('R_R_med  (richardson_1 error / last-value error, median over valid seeds)', fontsize=9)
     ax.set_title(
-        'Figure P2-2 — Richardson Rank vs Observation Depth\n'
-        'Green = eventually wins; Red = never wins  (lowest noise level)',
+        "Figure P2-2 — richardson_1's normalised error vs observation depth\n"
+        'Green = below the last value at some depth; Red = never  (lowest noise level; +inf not drawn)',
         fontsize=10, fontweight='bold')
     ax.set_xticks(obs_vals)
     ax.set_xticklabels(obs_vals, fontsize=8)
-    ax.set_ylim(len(RANK_POOL) + 0.5, 0.5)
     ax.legend(fontsize=9)
     fig.tight_layout()
     path = os.path.join(out_dir, 'figure_p2_02_crossover.png')
@@ -859,15 +788,15 @@ def fig_p2_02_crossover(df_pd:   pd.DataFrame,
 
 def fig_p2_03_correlations(df_corr: pd.DataFrame,
                             out_dir: str) -> str:
-    """Spearman r per (feature x regime), excluding ALL and NaN-only regimes."""
+    """Spearman r vs R_R_med per (feature x regime), excluding ALL and NaN-only regimes."""
     sub = df_corr[df_corr['regime'] != 'ALL'].copy()
-    sub = sub[sub['spearman_vs_margin'].notna()]
+    sub = sub[sub['spearman_vs_RR'].notna()]
     if sub.empty:
         print('  Fig P2-3 skipped: no per-regime correlations with enough data.')
         return ''
 
     pivot   = sub.pivot_table(index='feature', columns='regime',
-                               values='spearman_vs_margin')
+                               values='spearman_vs_RR')
     pivot   = pivot.reindex(index=FEATURE_COLS)
     mat     = pivot.values.astype(float)
     regimes = list(pivot.columns)
@@ -889,11 +818,11 @@ def fig_p2_03_correlations(df_corr: pd.DataFrame,
                         fontsize=7,
                         color='white' if abs(v) > 0.5 * vmax else '#333')
     plt.colorbar(im, ax=ax, shrink=0.7,
-                 label='Spearman r  (vs Richardson losing-margin)')
+                 label='Spearman r  (feature vs R_R_med)')
     ax.set_title(
-        'Figure P2-3 — Feature × Regime Correlation Heatmap\n'
-        'Blue = feature↑ → Richardson loses more;  '
-        'Red = feature↑ → Richardson wins more',
+        'Figure P2-3 — Feature × Regime Correlation with richardson_1\'s normalised error\n'
+        'Red = feature↑ → larger R_R_med (Richardson worse vs the last value);  '
+        'Blue = feature↑ → smaller R_R_med',
         fontsize=10, fontweight='bold')
     fig.tight_layout()
     path = os.path.join(out_dir, 'figure_p2_03_correlations.png')
@@ -905,88 +834,81 @@ def fig_p2_03_correlations(df_corr: pd.DataFrame,
 
 def fig_p2_04_global_correlations(df_corr: pd.DataFrame,
                                    out_dir: str) -> str:
-    """Horizontal bar chart of global Spearman r values with significance flags."""
-    sub = df_corr[df_corr['regime'] == 'ALL'].copy().dropna(
-        subset=['spearman_vs_margin'])
-    if sub.empty:
+    """Horizontal bars of the pooled Spearman r for both targets, with significance flags."""
+    sub = df_corr[df_corr['regime'] == 'ALL'].copy()
+    if sub['spearman_vs_RR'].isna().all() and sub['spearman_vs_log_err'].isna().all():
         print('  Fig P2-4 skipped.')
         return ''
 
-    sub = sub.sort_values('spearman_vs_margin', key=abs, ascending=True)
-    colours = ['#c62828' if r > 0 else '#1565c0'
-               for r in sub['spearman_vs_margin']]
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5), sharey=True)
+    for ax, (rcol, pcol, label) in zip(axes, [
+            ('spearman_vs_RR', 'p_vs_RR', 'R_R_med (error / last-value error)'),
+            ('spearman_vs_log_err', 'p_vs_log_err', 'log median error')]):
+        s = sub.dropna(subset=[rcol]).sort_values(rcol, key=abs, ascending=True)
+        colours = ['#c62828' if r > 0 else '#1565c0' for r in s[rcol]]
+        ax.barh(range(len(s)), s[rcol], color=colours, edgecolor='white', lw=0.5, height=0.6)
+        ax.set_yticks(range(len(s)))
+        ax.set_yticklabels(s['feature'], fontsize=10)
+        ax.axvline(0, color='black', lw=0.7)
+        ax.axvline( 0.30, color='#43a047', lw=1.2, ls='--', alpha=0.8, label='|r| = 0.30')
+        ax.axvline(-0.30, color='#43a047', lw=1.2, ls='--', alpha=0.8)
+        for i, (_, row) in enumerate(s.iterrows()):
+            r, p = row[rcol], row[pcol]
+            sig = '***' if p < 0.001 else ('**' if p < 0.01 else ('*' if p < 0.05 else ''))
+            ax.text(r + (0.01 if r >= 0 else -0.01), i, f'{r:+.3f} {sig}  (n={int(row["n_cells"])})',
+                    va='center', ha='left' if r >= 0 else 'right', fontsize=8.5,
+                    fontweight='bold' if abs(r) >= 0.3 else 'normal')
+        ax.set_xlabel(f'Spearman r vs {label}', fontsize=10)
+        ax.set_title(f'vs {label}', fontsize=10, fontweight='bold')
+        ax.legend(fontsize=9)
 
-    fig, ax = plt.subplots(figsize=(9, 5))
-    ax.barh(range(len(sub)), sub['spearman_vs_margin'],
-            color=colours, edgecolor='white', lw=0.5, height=0.6)
-    ax.set_yticks(range(len(sub)))
-    ax.set_yticklabels(sub['feature'], fontsize=10)
-    ax.axvline(0, color='black', lw=0.7)
-    ax.axvline( 0.30, color='#43a047', lw=1.2, ls='--', alpha=0.8,
-                label='|r| = 0.30  (candidate threshold)')
-    ax.axvline(-0.30, color='#43a047', lw=1.2, ls='--', alpha=0.8)
-
-    for i, (_, row) in enumerate(sub.iterrows()):
-        r = row['spearman_vs_margin']
-        p = row['p_vs_margin']
-        sig = '***' if p < 0.001 else ('**' if p < 0.01 else
-              ('*' if p < 0.05 else ''))
-        offset = 0.01 if r >= 0 else -0.01
-        ha     = 'left' if r >= 0 else 'right'
-        ax.text(r + offset, i,
-                f'{r:+.3f} {sig}', va='center', ha=ha,
-                fontsize=8.5, fontweight='bold' if abs(r) >= 0.3 else 'normal')
-
-    ax.set_xlabel('Spearman r  (vs Richardson losing-margin)', fontsize=10)
-    ax.set_title(
-        'Figure P2-4 — Global Feature Correlations with Richardson Failure\n'
-        'Red = feature↑ → Richardson loses  |  '
-        'Blue = feature↑ → Richardson wins',
+    fig.suptitle(
+        "Figure P2-4 — Pooled feature correlations with richardson_1's error (all regimes, capped excluded)\n"
+        'Red = feature↑ → larger error;  Blue = feature↑ → smaller error',
         fontsize=10, fontweight='bold')
-    ax.legend(fontsize=9)
     fig.tight_layout()
     path = os.path.join(out_dir, 'figure_p2_04_global_correlations.png')
     _save(fig, path)
     return path
 
 
-# ── Figure 5 — Rule precision vs recall ───────────────────────────────────────
+# ── Figure 5 — Rules: what happened when they fired ──────────────────────────
 
 def fig_p2_05_rules(df_rules: pd.DataFrame,
                     out_dir:  str) -> str:
-    """Scatter of all threshold rules: precision (y) vs recall (x)."""
-    valid = df_rules.dropna(subset=['precision', 'recall', 'mean_gain']).copy()
+    """Scatter of every rule: fire rate (x) vs the fraction of fired-cell records
+    where the routed method's error was lower (y); annotation = median relative change."""
+    valid = df_rules.dropna(subset=['fire_rate', 'lower_error_frac_records']).copy()
     if valid.empty:
         print('  Fig P2-5 skipped.')
         return ''
 
     colours = [METHOD_COLOURS.get(m, '#999') for m in valid['alternative']]
-    sizes   = np.clip(valid['n_fire'] * 2, 20, 400)
+    sizes   = np.clip(valid['n_cells_fired'] * 2, 20, 400)
 
     fig, ax = plt.subplots(figsize=(10, 7))
-    ax.scatter(valid['recall'], valid['precision'],
-               c=colours, s=sizes, alpha=0.8,
-               edgecolors='black', linewidths=0.4)
+    ax.scatter(valid['fire_rate'], valid['lower_error_frac_records'],
+               c=colours, s=sizes, alpha=0.8, edgecolors='black', linewidths=0.4)
 
     for _, row in valid.iterrows():
-        gain_str = f'{row["mean_gain"]:+.2f}'
+        rel = row['median_rel_change']
+        rel_str = f'{rel:+.2f}' if np.isfinite(rel) else 'n/a'
         ax.annotate(
             f"{row['feature'][:9]}{row['operator']}{row['threshold']}\n"
-            f"→ {row['alternative'][:10]}  ({gain_str})",
-            (row['recall'], row['precision']),
-            textcoords='offset points', xytext=(5, 3),
-            fontsize=5.5, alpha=0.85)
+            f"→ {row['alternative'][:10]}  (Δmed {rel_str}; alt V={row['alt_valid_rate']:.2f})",
+            (row['fire_rate'], row['lower_error_frac_records']),
+            textcoords='offset points', xytext=(5, 3), fontsize=5.5, alpha=0.85)
 
-    ax.axvline(0.5, color='grey', lw=0.7, ls='--', alpha=0.4)
-    ax.axhline(0.4, color='grey', lw=0.7, ls='--', alpha=0.4)
-    ax.set_xlabel('Recall   (fraction of Richardson failures caught)', fontsize=10)
-    ax.set_ylabel('Precision  (when rule fires, Richardson really is losing)',
-                  fontsize=10)
+    ax.axhline(0.5, color='grey', lw=0.7, ls='--', alpha=0.4)
+    ax.set_xlabel('Fire rate  (fraction of eligible cells where the rule fired)', fontsize=10)
+    ax.set_ylabel('Fraction of fired-cell records where the routed method\'s error was lower\n'
+                  '(both valid; an invalid record never counts as lower)', fontsize=9)
     ax.set_xlim(-0.05, 1.05)
     ax.set_ylim(-0.05, 1.05)
     ax.set_title(
-        'Figure P2-5 — Threshold Rule Precision vs Recall\n'
-        'Bubble size ∝ n_fire; gain annotation = mean stability gain when rule fires',
+        'Figure P2-5 — Threshold rules: what happened when they fired\n'
+        'Bubble size ∝ fired cells; Δmed = median over fired cells of (alt − r1) / r1 cell-median error; '
+        'V = routed method\'s valid rate on the fired records',
         fontsize=10, fontweight='bold')
 
     seen, handles = set(), []
@@ -1006,15 +928,15 @@ def fig_p2_05_rules(df_rules: pd.DataFrame,
 # MASTER CALL
 # =============================================================================
 
-def make_all_figures(df_pd:    pd.DataFrame,
-                     df_corr:  pd.DataFrame,
-                     df_rules: pd.DataFrame,
-                     g:        float,
-                     out_dir:  str) -> list:
+def make_all_figures(df_targets: pd.DataFrame,
+                     df_corr:    pd.DataFrame,
+                     df_rules:   pd.DataFrame,
+                     g:          float,
+                     out_dir:    str) -> list:
     print('\n  Generating figures ...')
     paths = [
-        fig_p2_01_phase_diagram(df_pd, out_dir),
-        fig_p2_02_crossover(df_pd, out_dir),
+        fig_p2_01_phase_diagram(df_targets, out_dir),
+        fig_p2_02_crossover(df_targets, out_dir),
         fig_p2_03_correlations(df_corr, out_dir),
         fig_p2_04_global_correlations(df_corr, out_dir),
         fig_p2_05_rules(df_rules, out_dir),

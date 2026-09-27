@@ -258,47 +258,99 @@ def test_capped_block_and_exclude_capped_helpers():
     assert empty.empty and list(empty.columns) == ["regime", "n_f", "achieved_g", "med_error", "n"]
 
 
-# ── Phase 2: gap-stratified sweep schema ──────────────────────────────────────
+# ── Phase 2 / Phase 3: descriptive schema, targets, rules, selectors ─────────
 
-def test_phase2_sweep_schema_and_rank_pool(tmp_path):
-    from phases.phase2 import (PHASE2_BASE_METHODS, PHASE2_METHODS, RANK_POOL,
-                               UNRANKED_COMPARATORS, build_phase_diagrams, run_sweep)
-    from phases.phase3 import CANDIDATES
-    assert len(PHASE2_METHODS) == 11 and "constant_oracle" in PHASE2_METHODS
-    # decision 4: the Richardson rank is over the original 9; constant_assumed
-    # is reported alongside, unranked, like the oracle (and is no Phase-3 candidate)
-    assert RANK_POOL == PHASE2_BASE_METHODS and len(RANK_POOL) == 9
+def test_phase2_sweep_schema_targets_rules_and_phase3_selectors(tmp_path):
+    from src.panels import PANEL_COLS, RULE_COLS
+    from src.pipeline import PHASE2_POOL
+    from src.trivial import skill_score
+    from phases.phase2 import (PHASE2_BASE_METHODS, PHASE2_METHODS, RANK_POOL, RECORD_COLS,
+                               UNRANKED_COMPARATORS, denominator_counts, evaluate_rules,
+                               richardson_targets, run_correlation_analysis, run_sweep)
+    from phases.phase3 import (CANDIDATES, SELECTORS, build_grid, cross_validate,
+                               evaluate_selectors)
+    assert PHASE2_METHODS == list(PHASE2_POOL) + ["constant_assumed", "constant_oracle"]
+    # decision 4: constant_assumed is reported alongside like the oracle and is
+    # no selector candidate; the pool (with last_value) is the candidate set
+    assert RANK_POOL == PHASE2_BASE_METHODS == list(PHASE2_POOL) and "last_value" in RANK_POOL
     assert set(UNRANKED_COMPARATORS) == {"constant_assumed", "constant_oracle"}
     assert not set(UNRANKED_COMPARATORS) & set(RANK_POOL)
     assert CANDIDATES == RANK_POOL
 
-    df_agg, df_feat = run_sweep(obs_idx_list=[90], noise_list=[0.0],
-                                gap_fractions=[0.5, 0.1], n_seeds=1, window_len=60,
-                                out_dir=str(tmp_path), core_regimes=["single_exp", "log_slow"],
-                                verbose=False)
+    df_agg, df_feat, df_rec = run_sweep(obs_idx_list=[60, 90], noise_list=[0.0],
+                                        gap_fractions=[0.5, 0.1], n_seeds=2, window_len=60,
+                                        out_dir=str(tmp_path), core_regimes=["single_exp", "log_slow"],
+                                        verbose=False)
+    # the aggregate: keys, horizon metadata, the descriptive panel, the skill columns
     for col in ("target_g", "achieved_g", "n_f", "capped", "med_skill", "L_true", "L_hat",
-                "is_trivial", "is_oracle"):
+                "is_trivial", "is_oracle", *PANEL_COLS):
         assert col in df_agg.columns
     assert set(df_agg.method) == set(PHASE2_METHODS)
     assert (df_agg.L_hat == 0.0).all()                                 # mode zero
+    assert (df_agg.n_total == 2).all() and (df_agg.n_valid <= df_agg.n_total).all()
+    ok = df_agg[df_agg.n_valid > 0]
+    assert (ok.q25_error <= ok.med_error + 1e-15).all() and (ok.med_error <= ok.q75_error + 1e-15).all()
     ls = df_agg[(df_agg.regime == "log_slow") & (df_agg.target_g == 0.1)]
     assert (ls.capped == 1).all() and (ls.achieved_g > 0.1).all()
     assert {"L_true", "L_hat"} <= set(df_feat.columns)
+    # the per-record file: exactly the specified columns; E_last is last_value's error
+    rec_file = pd.read_csv(tmp_path / "phase2_records.csv")
+    assert list(rec_file.columns) == RECORD_COLS
+    keys = ["regime", "obs_idx", "noise", "seed", "target_g"]
+    last = rec_file[rec_file.method == "last_value"].set_index(keys)["error"]
+    other = rec_file[rec_file.method == "richardson_1"].set_index(keys)["E_last"]
+    assert np.allclose(last.reindex(other.index).to_numpy(), other.to_numpy(), equal_nan=True)
+    assert len(rec_file) == 2 * 2 * 2 * 2 * len(PHASE2_METHODS)
 
-    df_pd = build_phase_diagrams(df_agg, 0.1, str(tmp_path))
-    assert {"capped", "n_f", "achieved_g", "richardson_rank", "richardson_err_rank",
-            "richardson_valid_rate", "richardson_below_floor", "n_rank_pool",
-            "n_rank_eligible", "constant_assumed_stability", "constant_assumed_med_error",
-            "constant_assumed_valid_rate", "constant_oracle_stability",
-            "constant_oracle_med_error"} <= set(df_pd.columns)
-    assert df_pd.richardson_rank.max() <= len(RANK_POOL)
-    assert (df_pd.n_rank_pool == 9).all() and (df_pd.n_rank_eligible <= 9).all()
-    assert not df_pd.best_method.isin(UNRANKED_COMPARATORS).any()
-    assert df_pd.constant_assumed_stability.notna().all()      # reported alongside
-    ranked = df_pd[df_pd.richardson_below_floor == 0]
-    assert ranked.richardson_rank.notna().all()
-    assert df_pd.loc[df_pd.richardson_below_floor == 1, "richardson_rank"].isna().all()
+    # Richardson targets and the zero-denominator counts
+    df_t = richardson_targets(df_rec, 0.1, str(tmp_path))
+    assert {"R_R_med", "log_med_error_R", "med_error_R", "n_valid_R", "n_total",
+            "n_zero_denominator", "zero_denominator_cell", "capped"} <= set(df_t.columns)
+    assert (df_t.n_valid_R <= df_t.n_total).all() and (df_t.n_total == 2).all()
+    r1 = df_rec[(df_rec.method == "richardson_1") & (df_rec.target_g == 0.1)
+                & (df_rec.regime == "single_exp") & (df_rec.obs_idx == 90)]
+    ratios = [skill_score(e, el) for e, el, v in zip(r1.error, r1.E_last, r1.valid) if v]
+    cell = df_t[(df_t.regime == "single_exp") & (df_t.obs_idx == 90)].iloc[0]
+    assert cell.R_R_med == pytest.approx(float(np.median(ratios)))
+    assert cell.log_med_error_R == pytest.approx(math.log(float(r1[r1.valid == 1].error.median())))
+    den = denominator_counts({0.1: df_t}, str(tmp_path))
+    assert list(den.columns) == ["target_g", "n_records_zero_denominator", "n_cells_affected",
+                                 "n_records_total", "n_cells_total"]
+    assert int(den.n_cells_total.iloc[0]) == int((df_t.capped == 0).sum())
+    assert (tmp_path / "phase2_denominator_counts.csv").exists()
+
+    # correlations: two targets, cells counted and dropped; nothing else
+    df_corr, base = run_correlation_analysis(df_feat, df_t, 0.1, str(tmp_path), "_g0.1")
+    assert list(df_corr.columns) == ["regime", "target_g", "feature", "spearman_vs_RR", "p_vs_RR",
+                                     "spearman_vs_log_err", "p_vs_log_err", "n_cells", "n_dropped_nan"]
+    assert "ALL" in set(df_corr.regime) and (df_corr.n_cells + df_corr.n_dropped_nan > 0).all()
+    assert (base.capped == 0).all()
+
+    # rules: the rule_panel columns after the rule definition
+    df_rules = evaluate_rules(df_rec, df_feat, df_agg, 0.1, str(tmp_path), "_g0.1")
+    assert list(df_rules.columns) == ["target_g", "feature", "operator", "threshold", "alternative", *RULE_COLS]
+    assert (df_rules.n_cells_total <= int((df_t.capped == 0).sum())).all()
+    assert (df_rules.n_cells_fired <= df_rules.n_cells_total).all()
     assert (tmp_path / "phase2_capped.csv").exists()
+
+    # Phase 3: per-record selector panels, no fallback, one record set per selector
+    grid = build_grid(df_agg, df_feat)
+    assert len(grid) == 2 * 2 * 2 and set(grid.oracle_method) <= set(CANDIDATES)
+    df_comp, df_regime, warned = evaluate_selectors(grid, df_rec, str(tmp_path))
+    assert set(df_comp.selector) == set(SELECTORS)
+    assert set(PANEL_COLS) | {"selector", "target_g", "n_cells", "n_capped_excluded"} == set(df_comp.columns)
+    for g, grp in df_comp.groupby("target_g"):
+        assert grp.n_total.nunique() == 1                                # the same records for all
+        assert (grp.n_cells + grp.n_capped_excluded == len(grid[grid.target_g == g])).all()
+    fl = df_comp[df_comp.selector == "fixed_last"]
+    assert (fl.valid_rate == 1.0).all() and (fl.win_rate_vs_last == 0.0).all()   # the floor never beats itself
+    assert isinstance(warned, bool)
+    df_cv = cross_validate(grid, df_rec, str(tmp_path))
+    assert set(df_cv.selector) == {"phase2_cascade", "enhanced_cascade"}
+    assert {"held_out_regime", "target_g", "med_error", "valid_rate", "n_cells"} <= set(df_cv.columns)
+    for f in ("phase3_selector_comparison.csv", "phase3_regime_results.csv",
+              "phase3_capped_cells.csv", "phase3_cv_results.csv"):
+        assert (tmp_path / f).exists()
     with pytest.raises(ValueError):
         run_sweep([90], [0.0], [0.5], 1, 60, str(tmp_path), core_regimes=["stretched_exp"])
 

@@ -76,7 +76,7 @@ WIN_RATE_VS_COLS  = tuple(f"win_rate_vs_{t}"  for _, t in REFERENCE_TAGS)
 SKILL_VS_RECORD_COLS = SKILL_VS_COLS + WIN_VS_COLS
 SKILL_VS_AGG_COLS    = MED_SKILL_VS_COLS + WIN_RATE_VS_COLS
 
-_SKILL_EPS = 1e-12
+SKILL_EPS = 1e-12      # the exact-reference threshold of skill_score's denominator rule
 
 
 def trivial_constant_assumed(seq, indices, future_x: float, cfg: dict) -> float:
@@ -205,6 +205,6 @@ def skill_score(err_method: Optional[float], err_reference: Optional[float]) -> 
         return float("nan")
     if not (math.isfinite(err_method) and math.isfinite(err_reference)):
         return float("nan")
-    if err_reference <= _SKILL_EPS:
-        return 1.0 if err_method <= _SKILL_EPS else float("inf")
+    if err_reference <= SKILL_EPS:
+        return 1.0 if err_method <= SKILL_EPS else float("inf")
     return float(err_method / err_reference)

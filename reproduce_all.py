@@ -7,7 +7,7 @@ in the required order:
     Phase 0   analytic unit tests of the accelerator roster (49 since Prompt 5B)
     Phase 1   main benchmark (24 regimes x 30 seeds x 3 noise x 3 gap strata x 54 methods)
     derive    dangerous-method re-derivation  ->  results/phase1/dangerous_methods.json
-    Phase 2   failure detection (13 depths, core regimes)
+    Phase 2   Richardson failure characterisation (13 depths, core regimes)
     Phase 3   adaptive selection (analysis of Phase 2)
     Phase 4   perturbation / shift diagnostics (4 depths)
     Phase 5a  full-pool ensemble ablation (4 depths; (obs_idx x noise) blocks
@@ -132,9 +132,13 @@ def plan(mode: str) -> list:
     rows.append(("Phase 5b", s1 + s1b + s2, f"sweep1a {s1:,} + sweep1b {s1b:,} + sweep2 {s2:,} "
                                            f"({len(r)} regimes, {len(c['gap_fractions'])} strata)"))
 
+    from src.datasets import DATASET_IDS
+    from src.trajectories import REAL_DATA_METHODS
     rd = C.REAL_DATA
     pairs = [(d, t) for d in rd["depths"] for t in rd["targets"] if d < t]
-    rows.append(("Real data", 6 * len(pairs) * 7, f"6 datasets x {len(pairs)} (depth, target) pairs x 7 methods"))
+    n_ds, n_m = len(DATASET_IDS), len(REAL_DATA_METHODS)
+    rows.append(("Real data", n_ds * len(pairs) * n_m,
+                 f"{n_ds} datasets x {len(pairs)} (depth, target) pairs x {n_m} methods"))
     return rows
 
 

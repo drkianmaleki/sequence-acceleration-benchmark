@@ -21,7 +21,14 @@ Two parts (Prompt 5A):
   1a  cascade rows (sweep1_linf, phase5b_sweep1_global/_regime.csv): the
       Phase-2 trajectory features (log_log_slope, richardson_r2) are
       recomputed with that L_hat and the two-rule cascade is applied with
-      the fixed thresholds.  NOTE: the feature extractor clamps
+      the fixed thresholds.  The cascade is evaluated by what happened when
+      it fired (src.panels.rule_panel, the same quantities as the Phase-2
+      rules): the cell here is one (regime, noise, seed) window, so a cell
+      holds one record per method; fire_rate, the descriptive panels of
+      richardson_1 (r1_*) and of the routed rational_fit (alt_*) over the
+      fired windows, the fraction of fired windows where the routed method's
+      error was lower, the median relative change, and the same panels over
+      the not-fired windows (nf_*).  NOTE: the feature extractor clamps
       L0 = max(0, min(L_hat, 0.5 * min(window))), so the four non-zero modes
       coincide whenever L_hat >= 0.5 * min(window) and this part is a near
       no-op by construction; the rows are kept, labelled (column ``note``),
@@ -49,12 +56,12 @@ Redesign v2
 
 Output files
 ------------
-phase5b_sweep1_global.csv      Cascade metrics vs assumed-asymptote mode (pooled; clamped features, see note)
-phase5b_sweep1_regime.csv      Cascade metrics vs assumed-asymptote mode (per regime)
+phase5b_sweep1_global.csv      Cascade rule panel vs assumed-asymptote mode (pooled; clamped features, see note)
+phase5b_sweep1_regime.csv      Cascade rule panel vs assumed-asymptote mode (per regime)
 phase5b_sweep1_consumers.csv   L_hat-consuming accelerators + constant_assumed vs mode, per (method, mode, g, regime set)
 phase5b_sweep1_consumers_noise.csv   the same per noise level
-phase5b_sweep2_global.csv      Cascade metrics vs window_len (pooled)
-phase5b_sweep2_regime.csv      Cascade metrics vs window_len (per regime)
+phase5b_sweep2_global.csv      Cascade rule panel vs window_len (pooled)
+phase5b_sweep2_regime.csv      Cascade rule panel vs window_len (per regime)
 figure_p5b_01_linf.png / figure_p5b_02_window.png
 
 Author : Kian Maleki
@@ -78,6 +85,7 @@ from src.accelerators import METHODS
 from src.generators   import regime_functions
 from src.asymptote    import assumed_asymptote
 from src.dangerous    import load_dangerous
+from src.panels       import RULE_COLS, rule_panel
 from src.trivial      import (SKILL_REFERENCE_METHODS, aggregate_skill_vs,
                               best_reference_error, skill_score, skill_vs_table)
 from src.pipeline     import (PHASE2_POOL, exclude_capped, horizon_meta, is_holdout,
@@ -186,51 +194,59 @@ def _eval_methods(seq_win, idx_win, fid, cfg, methods):
     return out
 
 
-def _cascade_metrics(sub: pd.DataFrame) -> Dict[str, float]:
-    fire    = sub['cascade_fired'] == 1
-    correct = fire & (sub['rat_better'] == 1)
-    precision = (float(correct.sum() / fire.sum()) if fire.sum() > 0 else float('nan'))
-    recall    = (float(correct.sum() / sub['rat_better'].sum())
-                 if sub['rat_better'].sum() > 0 else float('nan'))
-    mask = sub['rich_err'].notna() & sub['chosen_err'].notna()
-    gain = (float((sub.loc[mask, 'rich_err'] - sub.loc[mask, 'chosen_err']).mean())
-            if mask.sum() > 0 else float('nan'))
-    return {
-        'fire_rate': round(float(fire.mean()), 4),
-        'precision': round(precision, 4) if math.isfinite(precision) else float('nan'),
-        'recall':    round(recall, 4) if math.isfinite(recall) else float('nan'),
-        'mean_gain': round(gain, 6) if math.isfinite(gain) else float('nan'),
-        'n':         int(len(sub)),
-    }
+CASCADE_ROUTED = 'rational_fit'       # the method the two-rule cascade routes to
+CASCADE_KEYS = ['regime', 'noise', 'seed']   # one window = one cell of the cascade evaluation
+
+
+def _method_record(est, true_val, E_last):
+    """error / valid / catastrophic of one estimate (NaN estimate = invalid)."""
+    valid = math.isfinite(est)
+    err = abs(est - true_val) if valid else float('nan')
+    cat = (not valid) or (E_last > 1e-12 and err > CFG_MOD.CAT_MULT * E_last)
+    return err, int(valid), int(cat)
 
 
 def _cascade_cell_record(regime, sigma, seed, hm, L_true, L_hat, slope, r2,
-                         chosen, cascade_fired, ests, true_val, curr_err):
-    rich_err = (abs(ests['richardson_1'] - true_val)
-                if math.isfinite(ests['richardson_1']) else float('nan'))
-    rat_err  = (abs(ests['rational_fit'] - true_val)
-                if math.isfinite(ests['rational_fit']) else float('nan'))
-    chosen_est = ests.get(chosen, float('nan'))
-    chosen_err = (abs(chosen_est - true_val) if math.isfinite(chosen_est) else float('nan'))
-    rat_better = (math.isfinite(rat_err) and math.isfinite(rich_err) and rat_err < rich_err)
+                         chosen, cascade_fired, ests, true_val, E_last):
+    """One window of a cascade sweep: the cascade's decision and the records
+    of richardson_1 and of the routed method on that window."""
+    r1_err, r1_valid, r1_cat = _method_record(ests['richardson_1'], true_val, E_last)
+    alt_err, alt_valid, alt_cat = _method_record(ests[CASCADE_ROUTED], true_val, E_last)
     rec = {
-        'regime':        regime,
-        'is_holdout':    is_holdout(regime),
-        'noise':         sigma,
-        'seed':          seed,
-        'L_true':        L_true,
-        'L_hat':         L_hat,
-        'cascade_fired': int(cascade_fired),
-        'rat_better':    int(rat_better),
-        'rich_err':      rich_err,
-        'rat_err':       rat_err,
-        'chosen_err':    chosen_err,
-        'curr_err':      curr_err,
-        'slope':         slope,
-        'r2':            r2,
+        'regime':           regime,
+        'is_holdout':       is_holdout(regime),
+        'noise':            sigma,
+        'seed':             seed,
+        'L_true':           L_true,
+        'L_hat':            L_hat,
+        'cascade_fired':    int(cascade_fired),
+        'chosen':           chosen,
+        'E_last':           E_last,
+        'r1_error':         r1_err,
+        'r1_valid':         r1_valid,
+        'r1_catastrophic':  r1_cat,
+        'alt_error':        alt_err,
+        'alt_valid':        alt_valid,
+        'alt_catastrophic': alt_cat,
+        'slope':            slope,
+        'r2':               r2,
     }
     rec.update(hm)
     return rec
+
+
+def _cascade_rule_panel(sub: pd.DataFrame) -> Dict[str, float]:
+    """src.panels.rule_panel of the cascade on the windows of ``sub``: every
+    window is a cell with one richardson_1 record and one rational_fit record."""
+    cells = sub[CASCADE_KEYS].reset_index(drop=True)
+    fired = sub['cascade_fired'].to_numpy() == 1
+
+    def _records(prefix):
+        return (sub[CASCADE_KEYS + [f'{prefix}_error', f'{prefix}_valid', f'{prefix}_catastrophic', 'E_last']]
+                .rename(columns={f'{prefix}_error': 'error', f'{prefix}_valid': 'valid',
+                                 f'{prefix}_catastrophic': 'catastrophic'}))
+
+    return rule_panel(cells, fired, _records('r1'), _records('alt'), CASCADE_KEYS)
 
 
 def _aggregate_cascade(df: pd.DataFrame, sweep_key: str, sweep_values,
@@ -250,7 +266,7 @@ def _aggregate_cascade(df: pd.DataFrame, sweep_key: str, sweep_values,
                         continue
                     row = {sweep_key: v, 'target_g': g, 'noise': sigma, 'regime_set': label,
                            'n_capped_excluded': int((sub_all['is_holdout'] == flag).sum()) - len(sub)}
-                    row.update(_cascade_metrics(sub))
+                    row.update(_cascade_rule_panel(sub))
                     global_rows.append(row)
                 for regime in regimes:
                     rsub = sub_all[sub_all['regime'] == regime]
@@ -262,9 +278,7 @@ def _aggregate_cascade(df: pd.DataFrame, sweep_key: str, sweep_values,
                            'n_f': float(rsub['n_f'].median()),
                            'achieved_g': float(rsub['achieved_g'].median()),
                            'capped': int(rsub['capped'].max())}
-                    m = _cascade_metrics(rsub)
-                    row.update({'precision': m['precision'], 'mean_gain': m['mean_gain'],
-                                'n': m['n']})
+                    row.update(_cascade_rule_panel(rsub))
                     regime_rows.append(row)
     return pd.DataFrame(global_rows), pd.DataFrame(regime_rows)
 
@@ -322,7 +336,7 @@ def sweep1_linf(assumed_modes, obs_idx, window_len, noise_list,
                         curr_err = abs(curr_val - true_val)
                         cfg      = _cfg(n_f, L_hat)
                         ests = _eval_methods(seq_win, idx_win, n_f, cfg,
-                                             ['richardson_1', 'rational_fit'])
+                                             ['richardson_1', CASCADE_ROUTED])
                         rec = _cascade_cell_record(regime, sigma, seed, hm, L_true, L_hat,
                                                    slope, r2, chosen, cascade_fired,
                                                    ests, true_val, curr_err)
@@ -513,7 +527,7 @@ def sweep2_window(window_lengths, obs_idx, noise_list, gap_fractions,
                         curr_err = abs(curr_val - true_val)
                         cfg      = _cfg(n_f, L_hat)
                         ests = _eval_methods(seq_win, idx_win, n_f, cfg,
-                                             ['richardson_1', 'rational_fit'])
+                                             ['richardson_1', CASCADE_ROUTED])
                         rec = _cascade_cell_record(regime, sigma, seed, hm, L_true, L_hat,
                                                    slope, r2, chosen, cascade_fired,
                                                    ests, true_val, curr_err)
@@ -559,18 +573,19 @@ def _cascade_fig(df_global, key, xlabel, title, fname, out_dir, default_g=None,
 
     for ax, metric, ylabel, ttl in zip(
             axes,
-            ['precision', 'recall', 'mean_gain'],
-            ['Precision', 'Recall', 'Mean gain (rich_err - chosen_err)'],
-            ['Cascade precision', 'Cascade recall', 'Cascade mean gain']):
+            ['fire_rate', 'lower_error_frac_records', 'median_rel_change'],
+            ['Fire rate', 'Fraction of fired windows with lower routed error',
+             'Median relative change of the routed error vs richardson_1'],
+            ['Cascade fire rate', 'Routed method lower (fired windows)', 'Median relative change (fired)']):
         for sigma in noise:
             sv = sub[sub['noise'] == sigma].set_index(key).reindex(xs)
             ax.plot([xpos[v] for v in xs], sv[metric].values, 'o-',
                     color=cols.get(sigma, '#999'), label=f'σ={sigma}', lw=2, markersize=6)
         if vline is not None and vline in xpos:
             ax.axvline(xpos[vline], color='black', lw=1, ls='--', alpha=0.5, label=vline_label)
-        if metric == 'precision':
-            ax.axhline(0.80, color='red', lw=0.8, ls=':', alpha=0.6, label='0.80 target')
-        if metric == 'mean_gain':
+        if metric == 'lower_error_frac_records':
+            ax.axhline(0.5, color='grey', lw=0.8, ls=':', alpha=0.6)
+        if metric == 'median_rel_change':
             ax.axhline(0, color='black', lw=0.7, alpha=0.4)
         if categorical:
             ax.set_xticks(range(len(xs)))
@@ -589,7 +604,7 @@ def _cascade_fig(df_global, key, xlabel, title, fname, out_dir, default_g=None,
 
 
 def fig_p5b_01_linf(df_global: pd.DataFrame, out_dir: str, default_g=None) -> str:
-    """Cascade precision / recall / gain vs the assumed-asymptote mode."""
+    """Cascade fire rate / lower-error fraction / median relative change vs the assumed-asymptote mode."""
     return _cascade_fig(df_global, 'assumed_mode', 'Assumed asymptote mode (L_hat)',
                         'Figure P5B-1 — Cascade Robustness to the Assumed Asymptote '
                         '(L_true hidden per regime x seed; oracle labelled)',
@@ -598,7 +613,7 @@ def fig_p5b_01_linf(df_global: pd.DataFrame, out_dir: str, default_g=None) -> st
 
 
 def fig_p5b_02_window(df_global: pd.DataFrame, out_dir: str, default_g=None) -> str:
-    """Cascade precision, recall, gain vs window_len."""
+    """Cascade fire rate / lower-error fraction / median relative change vs window_len."""
     return _cascade_fig(df_global, 'window_len', 'Window length',
                         'Figure P5B-2 — Cascade Robustness to Window Length Variation '
                         '(obs_idx fixed at 90)',

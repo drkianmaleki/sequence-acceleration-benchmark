@@ -1,29 +1,40 @@
 """
 run_phase2.py
 =============
-Phase 2 entry point — Richardson Failure Condition Mapping (redesign v2).
+Phase 2 entry point — Richardson failure characterisation (redesign v2, descriptive).
 
     python scripts/run_phase2.py --quick     config.PHASE2["quick"]
     python scripts/run_phase2.py --full      config.PHASE2["full"]
 
-Grid: 13 observation depths x noise levels x seeds x core regimes x three
-gap strata (g in config.HORIZON_GAP_FRACTIONS) x 11 methods (the 9-method
-pool + constant_assumed + constant_oracle).  Targets are per-depth
-gap-stratified horizons; capped cells are flagged and excluded from pooled
-statistics.
+Grid: the observation depths x noise levels x seeds x core regimes x gap
+strata (g in config.HORIZON_GAP_FRACTIONS) of the config, for every member of
+phases.phase2.PHASE2_METHODS (the Phase-2 pool plus constant_assumed and
+constant_oracle).  Targets are per-depth gap-stratified horizons; capped
+cells are flagged and excluded from pooled statistics.
 
 Output directory: results/phase2/
 
 Key output files
 ----------------
-    phase2_sweep_aggregated.csv    Per (method, regime, obs_idx, noise, target_g)
-                                   with n_f, achieved_g, capped, skill, L_true, L_hat.
-    phase2_features.csv            Six trajectory features per sequence (+ L_true, L_hat).
+    phase2_records.csv             One row per record (git-ignored): estimate, error,
+                                   valid, catastrophic, E_last, capped, L_true, L_hat,
+                                   n_f, achieved_g.
+    phase2_sweep_aggregated.csv    Per (method, regime, obs_idx, noise, target_g): the
+                                   descriptive panel of the seeds (validity and
+                                   catastrophe rates; mean / sd / median / q25 / q75 /
+                                   p90 error conditional on validity; win rate vs the
+                                   last value) plus the skill columns.
+    phase2_features.csv            Six trajectory features per window (+ L_true, L_hat).
     phase2_capped.csv              The capped block.
-    phase2_phase_diagram_g{g}.csv  2-D Richardson rank grid per stratum.
-    phase2_correlations[_g{g}].csv Spearman feature–failure correlations
+    phase2_richardson_targets_g{g}.csv   Per cell: R_R_med (richardson_1 error / last-value
+                                   error, median over valid seeds), log_med_error_R,
+                                   n_valid_R, n_total and the zero-denominator flags.
+    phase2_denominator_counts.csv  Per horizon: records and cells where the
+                                   E_last <= SKILL_EPS branch of the ratio fired.
+    phase2_correlations[_g{g}].csv Spearman feature correlations with both targets
                                    (headline stratum under the legacy name).
-    phase2_rules[_g{g}].csv        Threshold rule performance per stratum.
+    phase2_rules[_g{g}].csv        Every candidate rule: what happened when it fired
+                                   (src.panels.rule_panel).
     figure_p2_01 ... figure_p2_05  Five figures at the headline stratum.
 """
 
@@ -34,12 +45,14 @@ _ROOT = os.path.dirname(_HERE)
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
+import numpy as np
+
 import src.config as CFG_MOD
-from src.pipeline import resolve_regimes
+from src.pipeline import exclude_capped, resolve_regimes
 from phases.phase2 import (
-    run_sweep, build_phase_diagrams,
-    run_correlation_analysis, test_simple_rules,
-    make_all_figures, PHASE2_METHODS, RANK_POOL,
+    run_sweep, richardson_targets, denominator_counts,
+    run_correlation_analysis, evaluate_rules,
+    make_all_figures, PHASE2_METHODS, RANK_POOL, RICHARDSON,
 )
 
 
@@ -51,7 +64,7 @@ def n_evaluations(cfg: dict) -> int:
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description='Phase 2 — Richardson failure mapping (v2)')
+    p = argparse.ArgumentParser(description='Phase 2 — Richardson failure characterisation (v2)')
     mode = p.add_mutually_exclusive_group(required=True)
     mode.add_argument('--quick', action='store_true')
     mode.add_argument('--full',  action='store_true')
@@ -69,7 +82,7 @@ def main():
     regimes = resolve_regimes(cfg['core_regimes'], include_holdout=False)
 
     print('=' * 72)
-    print(f'  PHASE 2 — Richardson Failure Condition Mapping  [{mode.upper()}, redesign v2]')
+    print(f'  PHASE 2 — Richardson Failure Characterisation  [{mode.upper()}, redesign v2]')
     print('=' * 72)
     print(f'  obs_idx sweep : {cfg["obs_idx_list"]}')
     print(f'  noise levels  : {cfg["noise_list"]}')
@@ -77,16 +90,17 @@ def main():
     print(f'  seeds         : {cfg["n_seeds"]}')
     print(f'  regimes       : {len(regimes)} core (selector training data; no holdout)')
     print(f'  methods       : {len(PHASE2_METHODS)}  {PHASE2_METHODS}')
-    print(f'  rank pool     : {len(RANK_POOL)} (the original 9; constant_assumed and '
-          f'constant_oracle reported alongside, unranked)')
-    print(f'  rank floor    : valid_rate >= {CFG_MOD.RANK_MIN_VALID} per cell')
+    print(f'  pool          : {len(RANK_POOL)} (constant_assumed and constant_oracle '
+          f'reported alongside; never selector candidates)')
+    print(f'  reporting     : descriptive panels (conditional on validity, validity rate alongside); '
+          f'richardson_1 error normalised by the last-value error; no composite score')
     print(f'  L_hat mode    : {CFG_MOD.ASSUMED_L_MODE}')
     print(f'  total evals   : {n_evaluations(cfg):,}')
     print(f'  output dir    : {out_dir}')
     print('=' * 72 + '\n')
 
     # ── 1. Sweep ───────────────────────────────────────────────────────────────
-    df_agg, df_feat = run_sweep(
+    df_agg, df_feat, df_rec = run_sweep(
         obs_idx_list  = cfg['obs_idx_list'],
         noise_list    = cfg['noise_list'],
         gap_fractions = gs,
@@ -96,76 +110,73 @@ def main():
         core_regimes  = cfg['core_regimes'],
     )
 
-    # ── 2-4. Phase diagrams, correlations and rules for every stratum ──────────
-    df_pd_head = df_corr_head = df_rules_head = None
+    # ── 2-4. Targets, correlations and rules for every stratum ─────────────────
+    targets, head = {}, {}
     for g in gs:
         suffix = f'_g{g:g}'
-        print(f'\n  Stratum g = {g:g}: phase diagram, correlations, rules ...')
-        df_pd = build_phase_diagrams(df_agg, g, out_dir)
-        df_corr, df_merged = run_correlation_analysis(df_feat, df_agg, g, out_dir, suffix)
-        df_rules = test_simple_rules(df_merged, df_feat, df_agg, g, out_dir, suffix)
+        print(f'\n  Stratum g = {g:g}: Richardson targets, correlations, rules ...')
+        df_t = richardson_targets(df_rec, g, out_dir)
+        targets[g] = df_t
+        df_corr, _ = run_correlation_analysis(df_feat, df_t, g, out_dir, suffix)
+        df_rules = evaluate_rules(df_rec, df_feat, df_agg, g, out_dir, suffix)
         if g == g_head:
-            df_pd_head, df_corr_head, df_rules_head = df_pd, df_corr, df_rules
+            head = dict(targets=df_t, corr=df_corr, rules=df_rules)
             # headline stratum also under the legacy file names
             df_corr.to_csv(os.path.join(out_dir, 'phase2_correlations.csv'), index=False)
             df_rules.to_csv(os.path.join(out_dir, 'phase2_rules.csv'), index=False)
+    df_den = denominator_counts(targets, out_dir)
 
     # ── 5. Figures (headline stratum) ──────────────────────────────────────────
-    make_all_figures(df_pd_head, df_corr_head, df_rules_head, g_head, out_dir)
+    make_all_figures(head['targets'], head['corr'], head['rules'], g_head, out_dir)
 
     # ── Console summary ────────────────────────────────────────────────────────
     print('\n' + '=' * 72)
     print('  PHASE 2 SUMMARY  (headline stratum g = %g)' % g_head)
     print('=' * 72)
 
-    print(f'\n  Richardson rank by regime (rank pool = {len(RANK_POOL)}; mean across '
-          f'obs_idx and noise over ranked cells; capped and below-floor cells flagged):')
-    print(f"  {'Regime':<22} {'Mean rank':>10} {'Min rank':>10} {'Wins':>8} {'Capped':>8} "
-          f"{'Below floor':>12}")
+    t = exclude_capped(head['targets'])
+    print(f'\n  richardson_1 by regime (uncapped cells; R_R_med = error / last-value error, '
+          f'median over valid seeds; cells with R_R_med < 1 = Richardson below the last value):')
+    print(f"  {'Regime':<22} {'cells':>6} {'med R_R_med':>12} {'cells < 1':>10} {'cells inf':>10} "
+          f"{'med valid':>10} {'capped':>7}")
+    print('  ' + '─' * 84)
+    for regime in sorted(head['targets']['regime'].unique()):
+        sub = t[t['regime'] == regime]
+        allc = head['targets'][head['targets']['regime'] == regime]
+        rr = sub['R_R_med']
+        med = float(np.nanmedian(rr.replace([np.inf], np.nan))) if rr.notna().any() else float('nan')
+        print(f"  {regime:<22} {len(sub):>6} {med:>12.3f} {int((rr < 1).sum()):>10} "
+              f"{int(np.isinf(rr).sum()):>10} "
+              f"{float((sub['n_valid_R'] / sub['n_total']).median()) if len(sub) else float('nan'):>10.3f} "
+              f"{int(allc['capped'].sum()):>7}")
+
+    print('\n  Zero-denominator branch of the normalised error (E_last <= SKILL_EPS), per horizon '
+          '(uncapped cells):')
+    for _, r in df_den.iterrows():
+        print(f"    g = {r['target_g']:g}: {int(r['n_records_zero_denominator'])} of "
+              f"{int(r['n_records_total'])} records, {int(r['n_cells_affected'])} of "
+              f"{int(r['n_cells_total'])} cells")
+
+    print('\n  Pooled feature correlations (all regimes, capped excluded):')
+    print(f"  {'feature':<18} {'r vs R_R_med':>13} {'p':>7} {'r vs log err':>13} {'p':>7} {'cells':>6} {'dropped':>8}")
     print('  ' + '─' * 78)
-    for regime in sorted(df_pd_head['regime'].unique()):
-        sub = df_pd_head[df_pd_head['regime'] == regime]
-        mr = sub['richardson_rank'].mean()
-        mn = sub['richardson_rank'].min()
-        wins = int((sub['richardson_rank'] == 1).sum())
-        capn = int(sub['capped'].sum())
-        below = int(sub['richardson_below_floor'].sum())
-        mn_s = f'{int(mn):d}' if math.isfinite(mn) else '-'
-        print(f"  {regime:<22} {mr:>10.2f} {mn_s:>10} {wins:>8d} {capn:>8d} {below:>12d}")
-
-    below = df_pd_head[df_pd_head['richardson_below_floor'] == 1]
-    print(f'\n  UNRANKED CELLS — richardson_1 below the validity floor '
-          f'(valid_rate < {CFG_MOD.RANK_MIN_VALID}; g = {g_head:g}; {len(below)} cells)')
-    print('  ' + '─' * 65)
-    if len(below):
-        print(f"  {'Regime':<22} {'obs':>5} {'sigma':>7} {'valid':>7} {'best (ranked)':<18}")
-        for _, r in below.head(20).iterrows():
-            print(f"  {r['regime']:<22} {int(r['obs_idx']):>5} {r['noise']:>7.3f} "
-                  f"{r['richardson_valid_rate']:>7.3f} {r['best_method']:<18}")
-        if len(below) > 20:
-            print(f'  ... {len(below) - 20} more (see phase2_phase_diagram_g{g_head:g}.csv)')
-    else:
-        print('  (none)')
-
-    print(f'\n  Reported alongside, unranked (g = {g_head:g}, mean over cells): '
-          f"constant_assumed S = {df_pd_head['constant_assumed_stability'].mean():.3f}, "
-          f"constant_oracle S = {df_pd_head['constant_oracle_stability'].mean():.3f}")
-
-    print('\n  Top feature correlations (all regimes, vs Richardson losing margin):')
-    all_c = df_corr_head[df_corr_head['regime'] == 'ALL'].sort_values(
-        'spearman_vs_margin', key=abs, ascending=False)
+    all_c = head['corr'][head['corr']['regime'] == 'ALL']
     for _, row in all_c.iterrows():
-        flag = '  *** candidate' if abs(row['spearman_vs_margin']) >= 0.3 else ''
-        print(f"  {row['feature']:<22}  r = {row['spearman_vs_margin']:>7.4f}"
-              f"  (p = {row['p_vs_margin']:.3f}){flag}")
+        print(f"  {row['feature']:<18} {row['spearman_vs_RR']:>13.4f} {row['p_vs_RR']:>7.3f} "
+              f"{row['spearman_vs_log_err']:>13.4f} {row['p_vs_log_err']:>7.3f} "
+              f"{int(row['n_cells']):>6} {int(row['n_dropped_nan']):>8}")
 
-    print('\n  Top 5 threshold rules (by precision):')
-    print(f"  {'Rule':<40} {'Prec':>6} {'Recall':>7} {'Gain':>7}")
-    print('  ' + '─' * 65)
-    for _, row in df_rules_head.head(5).iterrows():
+    print('\n  Threshold rules: what happened when they fired (fired cells; records of both methods):')
+    print(f"  {'Rule':<40} {'fire':>6} {'lower rec':>10} {'lower cell':>11} {'med Δrel':>9} "
+          f"{'r1 V':>6} {'alt V':>6}")
+    print('  ' + '─' * 94)
+    for _, row in head['rules'].iterrows():
         rule = f"{row['feature']} {row['operator']} {row['threshold']} → {row['alternative']}"
-        print(f"  {rule:<40} {row['precision']:>6.3f} {row['recall']:>7.3f} "
-              f"{row['mean_gain']:>7.4f}")
+        rel = row['median_rel_change']
+        print(f"  {rule:<40} {row['fire_rate']:>6.3f} {row['lower_error_frac_records']:>10.3f} "
+              f"{row['lower_error_frac_cells']:>11.3f} "
+              f"{(f'{rel:+.3f}' if math.isfinite(rel) else 'n/a'):>9} "
+              f"{row['r1_valid_rate']:>6.3f} {row['alt_valid_rate']:>6.3f}")
 
     print(f'\n  All files saved to: {out_dir}/')
     print('=' * 72)

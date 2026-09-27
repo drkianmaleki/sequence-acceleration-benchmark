@@ -17,6 +17,7 @@ from scipy.optimize import curve_fit
 
 import src.config as C
 from src.asymptote import assumed_asymptote, resolve_mode
+from src.trivial import SKILL_REFERENCE_METHODS
 
 # ── Feature extraction (mirrors phase2._extract_features exactly) ──────────────
 
@@ -129,7 +130,7 @@ def apply_cascade(features: dict) -> str:
     """
     Apply the Phase 2 two-rule cascade to select a method.
 
-    Rules (from phase2_rules.csv, best precision):
+    Rules (the two Phase-2 threshold rules adopted for the cascade):
       1. if log_log_slope > -0.10  → use rational_fit
       2. if richardson_r2  < 0.50  → use rational_fit
       3. otherwise                 → use richardson_1
@@ -337,6 +338,11 @@ def process_curves(
 # ── Redesign v2: re-evaluation of RECORDED curves (no retraining) ─────────────
 
 REAL_EVAL_METHODS = ['richardson_1', 'rational_fit']
+# Every method a real-data cell reports, in the order the rows are written:
+# the two accelerators, the deployable trivial references and the cascade's
+# choice; the per-cell row count of real_data_results_v2.csv is
+# len(REAL_DATA_METHODS).
+REAL_DATA_METHODS = [*REAL_EVAL_METHODS, *SKILL_REFERENCE_METHODS, 'cascade']
 
 
 def perturb_seed(dataset: str, depth: int) -> int:
@@ -492,8 +498,7 @@ def evaluate_recorded_curves(
     """
     from src.accelerators import METHODS
     from src.pipeline import git_head
-    from src.trivial import (SKILL_REFERENCE_METHODS, best_reference_error,
-                             skill_score, skill_vs_table)
+    from src.trivial import best_reference_error, skill_score, skill_vs_table
 
     assumed_mode = resolve_mode(assumed_mode)
     regime_centroids = None
@@ -548,6 +553,7 @@ def evaluate_recorded_curves(
                     except Exception:
                         preds[m] = float('nan')
                 preds['cascade'] = preds[selected]
+                assert list(preds) == REAL_DATA_METHODS
 
                 errs = {m: (abs(p - true_val) if np.isfinite(p) else float('nan'))
                         for m, p in preds.items()}

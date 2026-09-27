@@ -67,8 +67,8 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 import src.config as CFG_MOD
-from src.trajectories import (FEATURE_COLS, curve_minimum_table, evaluate_recorded_curves,
-                              process_curves, real_data_strata)
+from src.trajectories import (FEATURE_COLS, REAL_DATA_METHODS, curve_minimum_table,
+                              evaluate_recorded_curves, process_curves, real_data_strata)
 
 OUT_DIR      = os.path.join('results', 'real_data')
 PHASE2_FEATS = os.path.join('results', 'phase2', 'phase2_features.csv')
@@ -80,13 +80,16 @@ def n_evaluations(curves_csv: str = None) -> dict:
     """Planned cells and method evaluations for the re-evaluation grid."""
     cfg = CFG_MOD.REAL_DATA
     csv = curves_csv or os.path.join(_ROOT, cfg['curves_csv'])
-    n_datasets = 6
     if os.path.exists(csv):
         n_datasets = len([c for c in pd.read_csv(csv, nrows=1).columns if c != 'round'])
+    else:
+        from src.datasets import DATASET_IDS
+        n_datasets = len(DATASET_IDS)
     pairs = [(d, t) for d in cfg['depths'] for t in cfg['targets'] if d < t]
     cells = n_datasets * len(pairs)
+    n_methods = len(REAL_DATA_METHODS)
     return {'datasets': n_datasets, 'pairs': len(pairs), 'cells': cells,
-            'methods': 7, 'evaluations': cells * 7}
+            'methods': n_methods, 'evaluations': cells * n_methods}
 
 
 def load_recorded_curves(path: str) -> dict:
@@ -227,7 +230,7 @@ def main_reevaluate(args):
     print(f'  Targets    : {cfg["targets"]}  (cells need depth < target)')
     print(f'  Window len : {cfg["window_len"]}')
     print(f'  L_hat mode : {ASSUMED_MODE}  (no oracle on real curves)')
-    print(f'  Methods    : richardson_1, rational_fit, cascade + 4 trivial references')
+    print(f'  Methods    : {len(REAL_DATA_METHODS)}  {REAL_DATA_METHODS}')
     print(f'  Cells      : {counts["cells"]}  ->  {counts["evaluations"]} evaluations')
     print(f'  Output dir : {args.out_dir}')
     print(f'  Legacy 18-cell results are preserved (real_data_results.csv untouched).')
