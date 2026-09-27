@@ -25,13 +25,13 @@ Fragments (paper_fragments/, one tabular per file, booktabs, no \\begin{table})
   f02_ranking_g{0.5,0.1,0.02}.tex   main ranking (accelerators above the validity floor) + unranked block
   f03_skill_summary.tex             fraction of cells with median skill < 1 per family, per stratum, core | held-out
   f04_classical_noop.tex            the 21 classical variants vs the +/-10 % band, in MI and in win-rate-vs-last terms, plus strict skill
-  f05_sweep1_modes.tex              assumed-asymptote mode sweep, cascade rows (Phase 5b sweep 1a; clamped features)
+  f05_sweep1_modes.tex              assumed-asymptote mode sweep, cascade rows (Phase 5b sweep 1a; clamped features): what happened when the cascade fired
   f05b_sweep1_consumers_{core,holdout}.tex   sweep 1b: per L_hat consumer, median error under each mode and win rate vs last_value (g = 0.5, 0.1); constant_assumed = the value of knowing the floor
   f06_generalisation.tex            held-out vs core rank shift per method
   f07_real_data_v2.tex              real-data re-evaluation over the (depth x target) grid, with skill
   f07b_real_data_legacy18.tex       the preserved 18-cell legacy real-data run
   f08_real_perturb_diagnostic.tex   perturb_iqr of the routed method vs cell failure: all cells, pre-/post-minimum targets, by routed method (AUC)
-  f09a_selectors_phase3.tex         Phase 3 selectors, mean stability per stratum + leave-one-regime-out
+  f09a_selectors_phase3.tex         Phase 3 selectors: validity rate, n_valid/n_total, median / q25-q75 / p90 error of the chosen records per stratum (conditional on validity)
   f09b_ensemble_phase5a_core.tex    Phase 5a selectors / ensembles, core, error and skill per stratum
   f09c_ensemble_phase5a_holdout.tex Phase 5a, held-out regimes
   f09d_ablation_phase5a.tex         Phase 5a ablation comparisons per stratum
@@ -42,7 +42,7 @@ Fragments (paper_fragments/, one tabular per file, booktabs, no \\begin{table})
   f11_capped_block.tex              every capped (regime x stratum) cell with achieved_g; depth-grid counts
   f12_validity_by_depth.tex         validity by observation depth: every method below the 0.9 floor at some depth
 
-Macros used (defined in the paper preamble): \\meth{}, \\diag{}, \\Stab,
+Macros used (defined in the paper preamble): \\meth{}, \\diag{},
 \\rhoC, \\rhoV, \\TE, \\LE, \\nobs, \\nf.
 """
 
@@ -505,9 +505,9 @@ def f05():
     S = read("phase5b", "phase5b_sweep1_global.csv")
     gs = [g for g in STRATA if g in set(S.target_g)]
     head = [r"Regime set & $\hat{L}$ mode & $\sigma$ & " +
-            " & ".join(rf"\multicolumn{{4}}{{c}}{{$g = {gname(g)}$}}" for g in gs) + r" \\",
-            "".join(rf"\cmidrule(lr){{{4 + 4 * i}-{7 + 4 * i}}}" for i in range(len(gs))),
-            r" & & & " + " & ".join(r"fire & prec. & recall & gain" for _ in gs) + r" \\", r"\midrule"]
+            " & ".join(rf"\multicolumn{{5}}{{c}}{{$g = {gname(g)}$}}" for g in gs) + r" \\",
+            "".join(rf"\cmidrule(lr){{{4 + 5 * i}-{8 + 5 * i}}}" for i in range(len(gs))),
+            r" & & & " + " & ".join(r"fire & lower rec. & lower cell & $\Delta$med & V$_{\mathrm{alt}}$" for _ in gs) + r" \\", r"\midrule"]
     rows = list(head)
     modes = [m for m in C.ASSUMED_L_MODES if m in set(S.assumed_mode)]
     for rs in ("core", "holdout"):
@@ -518,9 +518,10 @@ def f05():
                     r = S[(S.regime_set == rs) & (S.assumed_mode == mode) & (S.noise == nz) & (S.target_g == g)]
                     if len(r):
                         r = r.iloc[0]
-                        cells += [f3(r.fire_rate), f3(r.precision), f3(r.recall), signed(float(r.mean_gain))]
+                        cells += [f3(r.fire_rate), f3(float(r.lower_error_frac_records)), f3(float(r.lower_error_frac_cells)),
+                                  signed(float(r.median_rel_change), 3), f3(float(r.alt_valid_rate))]
                     else:
-                        cells += ["--"] * 4
+                        cells += ["--"] * 5
                 lab_rs = ("core" if rs == "core" else "held-out") if (i == 0 and j == 0) else ""
                 lab_mode = (esc(mode) + (r" \textit{(oracle)}" if mode == "oracle" else "")) if j == 0 else ""
                 rows.append(f"{lab_rs} & {lab_mode} & {nz:g} & " + " & ".join(cells) + r" \\")
@@ -529,19 +530,23 @@ def f05():
         if rs == "core":
             rows.append(r"\midrule")
     core_h = S[(S.regime_set == "core") & (S.target_g == HEADLINE_G)]
-    piv = core_h.pivot_table(index="noise", columns="assumed_mode", values="mean_gain")
-    spread = float((piv.max(axis=1) - piv.min(axis=1)).max())
     nonzero = [m for m in modes if m != "zero"]
-    piv_nz = piv[nonzero]
-    spread_nz = float((piv_nz.max(axis=1) - piv_nz.min(axis=1)).max())
-    fact("sweep 1 (assumed asymptote)", f"g={gname(HEADLINE_G)} core: max spread of cascade mean gain across the five L_hat modes",
-         f"{spread:.6f} (across the four non-zero modes {spread_nz:.6f})", "results/phase5b/phase5b_sweep1_global.csv",
-         f"regime_set == core, target_g == {HEADLINE_G}", "max over noise of (max - min over assumed_mode of mean_gain)")
-    frag("f05_sweep1_modes.tex", "lll" + "rrrr" * len(gs), rows,
-         ["results/phase5b/phase5b_sweep1_global.csv (Phase 5b sweep 1, pooled over regimes, capped excluded)"],
-         "all rows; fire = cascade fire rate, prec./recall = precision/recall of the rational_fit rule against "
-         "'rational_fit beats richardson_1', gain = mean error saved when the cascade fires",
-         "Assumed-asymptote mode sweep: Phase-2 cascade metrics under each L_hat mode, core and held-out, per stratum",
+    for col, label in (("fire_rate", "cascade fire rate"), ("lower_error_frac_records", "fraction of fired windows with lower routed error")):
+        piv = core_h.pivot_table(index="noise", columns="assumed_mode", values=col)
+        spread = float((piv.max(axis=1) - piv.min(axis=1)).max())
+        piv_nz = piv[[m for m in nonzero if m in piv.columns]]
+        spread_nz = float((piv_nz.max(axis=1) - piv_nz.min(axis=1)).max()) if len(piv_nz.columns) else float("nan")
+        fact("sweep 1 (assumed asymptote)", f"g={gname(HEADLINE_G)} core: max spread of the {label} across the L_hat modes",
+             f"{spread:.4f} (across the non-zero modes {spread_nz:.4f})", "results/phase5b/phase5b_sweep1_global.csv",
+             f"regime_set == core, target_g == {HEADLINE_G}", f"max over noise of (max - min over assumed_mode of {col})")
+    frag("f05_sweep1_modes.tex", "lll" + "rrrrr" * len(gs), rows,
+         ["results/phase5b/phase5b_sweep1_global.csv (Phase 5b sweep 1a, pooled over regimes, capped excluded; src.panels.rule_panel)"],
+         "all rows; one window (regime, noise, seed) is one cell of the cascade evaluation; fire = fraction of windows where the "
+         "cascade routed to rational_fit; lower rec. / lower cell = fraction of fired windows where rational_fit's error was below "
+         "richardson_1's (both valid; an invalid record never counts as lower; on one-record cells the two coincide); Delta med = "
+         "median over fired windows of (rational_fit error - richardson_1 error) / richardson_1 error; V_alt = validity rate of "
+         "rational_fit on the fired windows (errors conditional on validity)",
+         "Assumed-asymptote mode sweep: what happened when the Phase-2 cascade fired, under each L_hat mode, core and held-out, per stratum",
          notes=["the cascade features clamp L0 = max(0, min(L_hat, 0.5 * min(window))), so the four non-zero modes coincide "
                 "whenever L_hat >= 0.5 * min(window); see FACTS.md"])
 
@@ -884,31 +889,52 @@ def f09():
     # a) Phase 3
     SC = read("phase3", "phase3_selector_comparison.csv")
     CV = read("phase3", "phase3_cv_results.csv")
-    cv_mean = CV.groupby("selector").mean_stability.mean()
-    NAME3 = {"oracle": "oracle (regime known)", "phase2_cascade": "Phase-2 cascade", "enhanced_cascade": "enhanced cascade",
+    NAME3 = {"oracle": r"oracle \textit{(hindsight: lowest cell-median error)}", "phase2_cascade": "Phase-2 cascade",
+             "enhanced_cascade": "enhanced cascade",
              "fixed_rational": r"fixed \meth{rational\_fit}", "fixed_richardson": r"fixed \meth{richardson\_1}",
              "fixed_single_exp": r"fixed \meth{single\_exp\_fit}", "fixed_last": r"fixed \meth{last\_value} (the trivial floor)"}
     order3 = ["oracle", "phase2_cascade", "enhanced_cascade", "fixed_rational", "fixed_richardson", "fixed_single_exp", "fixed_last"]
-    rows = [r"Selector & " + " & ".join(rf"$\Stab$ ($g = {gname(g)}$)" for g in STRATA) + r" & $n$ & capped excl. & LORO $\Stab$ \\",
+    order3 = [s for s in order3 if s in set(SC.selector)]
+    rows = [r"Selector & valid rate & $n_{\mathrm{valid}}/n_{\mathrm{total}}$ & med.\ err & q25--q75 & p90 & win vs last & LORO med.\ err \\",
             r"\midrule"]
+    for g in STRATA:
+        sg = SC[SC.target_g == g]
+        if sg.empty:
+            continue
+        n_excl = int(sg.n_capped_excluded.max())
+        rows.append(mid(rf"\textit{{$g = {gname(g)}$}}" + (r" (headline)" if g == HEADLINE_G else "")
+                        + rf"; {int(sg.n_cells.max())} cells, {n_excl} capped cells excluded", 8))
+        for s in order3:
+            r = sg[sg.selector == s]
+            if r.empty:
+                continue
+            r = r.iloc[0]
+            cv = CV[(CV.selector == s) & (CV.target_g == g)].med_error.dropna()
+            loro = f4(float(cv.median())) if len(cv) else "--"
+            rows.append(f"{NAME3[s]} & {f3(float(r.valid_rate))} & {int(r.n_valid)}/{int(r.n_total)} & {f4(float(r.med_error))} & "
+                        f"{f4(float(r.q25_error))}--{f4(float(r.q75_error))} & {f4(float(r.p90_error))} & {f3(float(r.win_rate_vs_last))} & {loro} \\\\")
+        if g != STRATA[-1]:
+            rows.append(r"\addlinespace[2pt]")
     for s in order3:
-        vals = []
-        for g in STRATA:
-            r = SC[(SC.selector == s) & (SC.target_g == g)]
-            vals.append(f4(float(r.mean_stability.iloc[0])) if len(r) else "--")
-        rh = SC[(SC.selector == s) & (SC.target_g == HEADLINE_G)].iloc[0]
-        cv = cv_mean.get(s, float("nan"))
-        rows.append(f"{NAME3[s]} & " + " & ".join(vals) + f" & {int(rh.n)} & {int(rh.n_capped_excluded)} & {f4(float(cv)) if math.isfinite(cv) else '--'} \\\\")
-    for s in ("oracle", "phase2_cascade", "fixed_rational", "fixed_richardson"):
-        r = SC[(SC.selector == s) & (SC.target_g == HEADLINE_G)].iloc[0]
-        fact("selectors (Phase 3)", f"{s}: mean achieved stability at g={gname(HEADLINE_G)}", f"{r.mean_stability:.4f} (n = {int(r.n)})",
-             "results/phase3/phase3_selector_comparison.csv", f"selector == {s}, target_g == {HEADLINE_G}", "mean_stability column")
-    frag("f09a_selectors_phase3.tex", "l" + "r" * (len(STRATA) + 3), rows,
-         ["results/phase3/phase3_selector_comparison.csv (core regimes, capped cells excluded)",
-          "results/phase3/phase3_cv_results.csv (leave-one-regime-out; mean over held-out regimes)"],
-         "all selectors; n and capped-excluded count at the headline stratum; LORO = mean over the 18 leave-one-regime-out folds "
-         "(selectors without a fold entry show --)",
-         "Phase 3 selectors: mean achieved stability per stratum and under leave-one-regime-out cross-validation")
+        r = SC[(SC.selector == s) & (SC.target_g == HEADLINE_G)]
+        if len(r):
+            r = r.iloc[0]
+            fact("selectors (Phase 3)", f"{s} at g={gname(HEADLINE_G)}: validity rate; n_valid/n_total; median error (conditional on validity); win rate vs last",
+                 f"{r.valid_rate:.4f}; {int(r.n_valid)}/{int(r.n_total)}; {r.med_error:.5f} (q25 {r.q25_error:.5f}, q75 {r.q75_error:.5f}, p90 {r.p90_error:.5f}); {r.win_rate_vs_last:.3f}",
+                 "results/phase3/phase3_selector_comparison.csv", f"selector == {s}, target_g == {HEADLINE_G}",
+                 "src.panels.error_panel over the chosen records of every uncapped cell x seed; no fallback for an invalid choice")
+    spread = SC.groupby("target_g").valid_rate.agg(lambda v: float(v.max() - v.min()))
+    fact("selectors (Phase 3)", "validity-rate spread across selectors per stratum (the Phase-3 warning fires above 0.001)",
+         ", ".join(f"g={gname(g)}: {v:.4f}" for g, v in spread.items()),
+         "results/phase3/phase3_selector_comparison.csv", "per target_g", "max - min of valid_rate over selectors")
+    frag("f09a_selectors_phase3.tex", "lrrrrrrr", rows,
+         ["results/phase3/phase3_selector_comparison.csv (core regimes, capped cells excluded; src.panels.error_panel over the chosen records)",
+          "results/phase3/phase3_cv_results.csv (leave-one-regime-out: the cascades' panel per held-out regime; median over regimes shown)"],
+         "all selectors, per stratum; a selector picks one method per cell and is scored on every record of that cell (the chosen method's "
+         "record; an invalid choice stays invalid, no fallback); valid rate and n_valid/n_total over all records; med. err, q25--q75 and p90 "
+         "over the valid records only; win vs last = fraction of all records where the chosen record is valid and below the last-value error; "
+         "LORO = median over held-out regimes of the per-regime median error (cascades only)",
+         "Phase 3 selectors: conditional on validity; validity rate alongside")
 
     # b/c) Phase 5a ensembles
     ORDER5 = [(f"oracle_{N_ACC}", f"oracle over the {N_ACC}-method pool"), ("constant_oracle", r"\meth{constant\_oracle} \textit{(reference)}"),
@@ -1375,7 +1401,7 @@ def write_index():
         f.write("# paper_fragments/\n\nLaTeX table fragments generated from `results/` by `scripts/make_paper_tables.py` "
                 f"({PROV}).  Each file is one `tabular` (booktabs) with a comment header naming its sources and filters; "
                 "wrap it in `table`/`caption` in the paper.  The header's code hash is HEAD when the generator ran (`-dirty` = uncommitted "
-                "changes present; the generator's own changes land in the following commit); the results hash is the last commit that touched `results/`.  Macros used: `\\meth`, `\\diag`, `\\Stab`, `\\rhoC`, `\\rhoV`, "
+                "changes present; the generator's own changes land in the following commit); the results hash is the last commit that touched `results/`.  Macros used: `\\meth`, `\\diag`, `\\rhoC`, `\\rhoV`, "
                 "`\\TE`, `\\LE`, `\\nobs`, `\\nf`.\n\n| fragment | content | sources |\n|---|---|---|\n")
         for name, desc, src in FRAGMENTS:
             f.write(f"| `{name}` | {desc} | {'; '.join(s.split(' (')[0] for s in src)} |\n")
