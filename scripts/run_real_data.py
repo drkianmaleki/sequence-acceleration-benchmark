@@ -25,7 +25,12 @@ New files
     real_data_summary_v2.csv    one row per (dataset, obs_depth, target_round) with
                                 perturb_iqr and the provenance of the regime
                                 centroids (phase2_features_path,
-                                phase2_features_rows, git_head)
+                                phase2_features_rows, git_head).  The columns
+                                current_val / current_err are schema names for
+                                the last observed value of the window (the
+                                value at the observation depth) and its error
+                                at the target round, i.e. the error of the
+                                last_value trivial comparator.
     figure_rd_v2_01_skill.png   cascade skill heatmaps (dataset x depth, per target)
     real_data_curve_minima_v2.csv   per dataset: argmin round of the recorded curve,
                                 its minimum, the value at round 500 and the relative

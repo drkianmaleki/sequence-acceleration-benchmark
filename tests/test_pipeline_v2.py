@@ -69,10 +69,42 @@ def test_resolve_regimes_and_pools():
         resolve_regimes(["stretched_exp"])                    # not a core regime
     with pytest.raises(ValueError):
         resolve_regimes(None, ["single_exp"])                 # not a held-out regime
-    assert len(ACCEL_METHODS) == len(METHOD_NAMES) - len(TRIVIAL_METHOD_NAMES) == 49
+    assert len(ACCEL_METHODS) == len(METHOD_NAMES) - len(TRIVIAL_METHOD_NAMES)
     assert not set(ACCEL_METHODS) & set(TRIVIAL_METHOD_NAMES)
     assert set(TRIVIAL_NON_ORACLE) == {"constant_assumed", "window_mean", "window_min", "last_value"}
     assert len(METHOD_NAMES) == len(ACCEL_METHODS) + len(TRIVIAL_METHOD_NAMES)
+
+
+# The accelerator roster, spelled out: every name that src.pipeline.ACCEL_METHODS
+# must contain and nothing else.  A roster change (a method added or retired)
+# is a deliberate act and must update this list in the same commit.
+EXPECTED_ACCELERATORS = sorted([
+    "linear", "log_linear", "geom_avg_diff",
+    "richardson_1", "richardson_2", "richardson_3",
+    "richardson_a05", "richardson_a10", "richardson_a20",
+    "single_exp_fit", "double_exp_fit", "rational_fit", "log_fit",
+    "shanks_1", "shanks_2", "shanks_3", "shanks_4",
+    "wynn_eps_1", "wynn_eps_2", "wynn_eps_3",
+    "wynn_rho_1", "wynn_rho_2", "wynn_rho_3",
+    "pade_11", "pade_12", "pade_13", "pade_21", "pade_22", "pade_23",
+    "pade_31", "pade_32", "pade_33", "pade_34", "pade_44", "pade_45",
+    "levin_t1", "levin_t2", "levin_u1", "levin_u2", "levin_v1", "levin_v2",
+    "brezinski_theta1", "brezinski_theta2",
+    "neville_2", "neville_3", "neville_4",
+    "anderson_1", "anderson_2", "anderson_3",
+    "median_ensemble", "stability_weighted", "best_shanks_wynn",
+])
+
+
+def test_accelerator_roster_is_exactly_the_expected_list():
+    assert sorted(ACCEL_METHODS) == EXPECTED_ACCELERATORS
+    assert len(EXPECTED_ACCELERATORS) == len(set(EXPECTED_ACCELERATORS))
+    assert "last_value" not in ACCEL_METHODS and "last_value" in METHOD_NAMES
+    from src.evaluation import FAMILY, USES_FUTURE_X
+    pade = {m for m in ACCEL_METHODS if FAMILY[m] == "pade"}
+    assert {"pade_33", "pade_34", "pade_44", "pade_45"} <= pade
+    assert all(USES_FUTURE_X[m] for m in pade)
+    assert set(METHOD_NAMES) <= set(FAMILY)
 
 
 # ── dangerous derivation and artifact ─────────────────────────────────────────

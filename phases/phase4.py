@@ -63,7 +63,7 @@ EXTRA_REFERENCES = [m for m in REFERENCE_METHODS if m not in PHASE4_METHODS]
 EVAL_METHODS = PHASE4_METHODS + EXTRA_REFERENCES
 
 METHOD_COLOURS = {
-    'current_value':  '#888888', 'richardson_1':   '#f4a261',
+    'last_value':     '#888888', 'richardson_1':   '#f4a261',
     'richardson_a10': '#e76f51', 'single_exp_fit': '#2196f3',
     'rational_fit':   '#1565c0', 'pade_22':        '#e91e63',
     'log_linear':     '#00897b', 'levin_t2':       '#9c27b0',
@@ -359,7 +359,7 @@ def cascade_with_filter(df: pd.DataFrame,
     """
     Compare Phase 2 cascade with and without a perturb_IQR rejection filter
     at the headline stratum.  Filter: if the chosen method's perturb_IQR
-    exceeds the threshold, fall back to current_value.
+    exceeds the threshold, fall back to last_value (the last observed value).
     """
     try:
         df_feat = pd.read_csv(df_feat_path)
@@ -394,11 +394,11 @@ def cascade_with_filter(df: pd.DataFrame,
 
             if (threshold < float('inf') and math.isfinite(iqr)
                     and iqr > threshold):
-                chosen = 'current_value'
+                chosen = 'last_value'
 
             chosen_row = grp[grp['method'] == chosen]
             if chosen_row.empty or not math.isfinite(chosen_row['error'].values[0]):
-                chosen_row = grp[grp['method'] == 'current_value']
+                chosen_row = grp[grp['method'] == 'last_value']
 
             err = (float(chosen_row['error'].values[0])
                    if not chosen_row.empty else float('nan'))

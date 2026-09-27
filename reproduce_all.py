@@ -84,6 +84,7 @@ def plan(mode: str) -> list:
     from src.pipeline import resolve_regimes, ACCEL_METHODS, TRIVIAL_NON_ORACLE
     from phases.phase2 import PHASE2_METHODS
     from phases.phase4 import PHASE4_METHODS, EVAL_METHODS as P4_EVAL
+    from phases.phase5a import PERTURB_METHODS as P5A_PERTURB
 
     rows = []
     # Phase 0: the accelerator roster x 4 analytic cases
@@ -117,7 +118,7 @@ def plan(mode: str) -> list:
     r = resolve_regimes(c["core_regimes"], c["holdout_regimes"], True)
     cells5 = len(c["obs_idx_list"]) * len(c["noise_list"]) * c["n_seeds"] * len(r) * len(c["gap_fractions"])
     central5 = cells5 * len(METHOD_NAMES)
-    pert5 = cells5 * len(ACCEL_METHODS) * c["perturb_trials"]
+    pert5 = cells5 * len(P5A_PERTURB) * c["perturb_trials"]
     rows.append(("Phase 5a", central5, f"central evaluations ({len(r)} regimes, {len(METHOD_NAMES)} methods); "
                                        f"+ {pert5:,} perturbation calls"))
 

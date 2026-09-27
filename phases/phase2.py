@@ -37,8 +37,9 @@ Redesign v2
     skill (hindsight best-of-four, strict), skill_vs_* / win_vs_* against each
     deployable trivial, is_trivial, is_oracle.
 
-Reduced method set (9 methods covering all Phase 1 champions):
-  current_value   baseline floor
+Reduced method set (src.pipeline.PHASE2_POOL: eight accelerators covering
+the Phase 1 champions plus the last-value trivial as the floor option):
+  last_value      the last observed value (trivial floor option)
   richardson_1    Phase 1 reference (flexible power-law)
   richardson_a10  Safer fixed-alpha variant (alpha=1)
   single_exp_fit  Phase 1 overall winner
@@ -89,7 +90,7 @@ assert set(UNRANKED_COMPARATORS) == {'constant_assumed', 'constant_oracle'}
 assert not set(RANK_POOL) & ORACLE_METHODS
 
 METHOD_COLOURS = {
-    'current_value':    '#888888',
+    'last_value':       '#888888',
     'richardson_1':     '#f4a261',
     'richardson_a10':   '#e76f51',
     'single_exp_fit':   '#2196f3',

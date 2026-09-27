@@ -17,8 +17,9 @@ are applied in exactly one way:
     skill_table          hindsight best-of-four (strict) reference and per-method skill
     method_flags         is_trivial / is_oracle for output schemas
     git_head             short commit hash for provenance fields
-    ACCEL_METHODS        the accelerators (49 after Prompt 5B; ensemble / pool candidates)
-    PHASE2_POOL          the 9-method Phase 2/3/4 pool (one definition for every phase)
+    ACCEL_METHODS        the accelerators (every registered method that is not
+                         a trivial comparator; ensemble / pool candidates)
+    PHASE2_POOL          the Phase 2/3/4 pool (one definition for every phase)
 """
 
 import math
@@ -37,25 +38,29 @@ from src.trivial import (ORACLE_METHODS, SKILL_REFERENCE_METHODS,
                          TRIVIAL_METHOD_NAMES, best_reference_error,
                          skill_score)
 
-# The accelerators: everything that is not a trivial comparator (49 since the
-# Weniger pair was retired in Prompt 5B; never hard-code the count).  Ensemble
-# pools, selector candidates and the dangerous derivation draw from these
-# plus the non-oracle trivial comparators where a phase says so; the oracle
-# never enters a pool.
+# The accelerators: everything registered that is not a trivial comparator
+# (the count is len(ACCEL_METHODS); never hard-code it).  Ensemble pools,
+# selector candidates and the exclusion derivation draw from these plus the
+# non-oracle trivial comparators where a phase says so; the oracle never
+# enters a pool.
 ACCEL_METHODS: List[str] = [m for m in METHOD_NAMES if m not in TRIVIAL_METHOD_NAMES]
 N_ACCEL: int = len(ACCEL_METHODS)
 
-# The 9-method pool of Phases 2, 3 and 4 (failure detection, selectors,
-# diagnostics) and of the Phase-5a "9-method" oracle / ensembles.  Prompt 5B:
-# weniger_d2 replaced by levin_t2, to which the corrected weniger_d2 is
-# numerically identical.
+# The non-oracle trivial comparators: deployable predictors a phase may put
+# next to the accelerators (never the oracle).
+TRIVIAL_NON_ORACLE: List[str] = [m for m in TRIVIAL_METHOD_NAMES if m not in ORACLE_METHODS]
+
+# The pool of Phases 2, 3 and 4 (failure detection, selectors, diagnostics)
+# and of the Phase-5a small-pool oracle / ensembles: eight accelerators plus
+# the last-value trivial as the floor option.  Its size is len(PHASE2_POOL).
+# Prompt 5B: weniger_d2 replaced by levin_t2, to which the corrected
+# weniger_d2 is numerically identical.
 PHASE2_POOL: List[str] = [
-    'current_value', 'richardson_1', 'richardson_a10',
+    'last_value', 'richardson_1', 'richardson_a10',
     'single_exp_fit', 'rational_fit', 'pade_22',
     'log_linear', 'levin_t2', 'anderson_1',
 ]
-assert all(m in ACCEL_METHODS for m in PHASE2_POOL)
-TRIVIAL_NON_ORACLE: List[str] = [m for m in TRIVIAL_METHOD_NAMES if m not in ORACLE_METHODS]
+assert all(m in ACCEL_METHODS or m in TRIVIAL_NON_ORACLE for m in PHASE2_POOL)
 REFERENCE_METHODS: List[str] = list(SKILL_REFERENCE_METHODS)
 
 HORIZON_COLS = ["target_g", "achieved_g", "n_f", "capped"]

@@ -38,7 +38,7 @@ Redesign v2
 
 Selectors evaluated
 -------------------
-fixed_current     always use current_value  (floor)
+fixed_last        always use last_value     (the trivial floor)
 fixed_richardson  always use richardson_1   (Phase 2 reference)
 fixed_rational    always use rational_fit   (short-horizon Phase 1 winner)
 fixed_single_exp  always use single_exp_fit (long-horizon Phase 1 winner)
@@ -85,7 +85,7 @@ CANDIDATES = list(RANK_POOL)          # oracle comparator never a candidate
 GRID_KEYS  = ['regime', 'obs_idx', 'noise', 'target_g']
 
 METHOD_COLOURS = {
-    'current_value':    '#888888',
+    'last_value':       '#888888',
     'richardson_1':     '#f4a261',
     'richardson_a10':   '#e76f51',
     'single_exp_fit':   '#2196f3',
@@ -98,7 +98,7 @@ METHOD_COLOURS = {
 }
 
 SELECTOR_COLOURS = {
-    'fixed_current':    '#bbbbbb',
+    'fixed_last':       '#bbbbbb',
     'fixed_richardson': '#f4a261',
     'fixed_rational':   '#1565c0',
     'fixed_single_exp': '#2196f3',
@@ -222,7 +222,7 @@ def _apply_enhanced_cascade(row: pd.Series) -> str:
 
 
 SELECTORS = {
-    'fixed_current':    lambda row: 'current_value',
+    'fixed_last':       lambda row: 'last_value',
     'fixed_richardson': lambda row: 'richardson_1',
     'fixed_rational':   lambda row: 'rational_fit',
     'fixed_single_exp': lambda row: 'single_exp_fit',

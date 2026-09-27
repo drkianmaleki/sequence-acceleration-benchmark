@@ -16,8 +16,6 @@ the constant_assumed comparator.  Two properties every accelerator must have:
                    deployable trivial predictors -- last value, window mean,
                    window min, L_hat -- on at most EQ_MAX of the windows.
 
-Exempt: current_value (it IS the last value by design).
-
 Windows: 8 regimes x 6 seeds x sigma in {0, 0.005} = 96 windows, n_obs = 90,
 window length 60, L_hat = 0, generated exactly as Phase 1 generates them.
 
@@ -59,7 +57,6 @@ PERTURB_SCALE = 0.01
 REACT_MIN = 0.90
 EQ_MAX = 0.10
 EQ_TOL = 1e-12
-EXEMPT = {"current_value"}
 
 # L_hat consumers.  The Report-4 review expected the nine direct consumers
 # (the curve fits and Richardson fits use L_hat as a starting value or offset;
@@ -133,8 +130,8 @@ def analysis():
 
 
 def _flag(df):
-    react_fail = df[(~df.method.isin(EXEMPT)) & (df.reaction_rate < REACT_MIN)]
-    eq_fail = df[(~df.method.isin(EXEMPT)) & (df.equality_rate > EQ_MAX)]
+    react_fail = df[df.reaction_rate < REACT_MIN]
+    eq_fail = df[df.equality_rate > EQ_MAX]
     return react_fail, eq_fail
 
 
@@ -145,13 +142,10 @@ def report(df):
              f"  {'method':<20} {'finite':>6} {'reaction':>9} {'equality':>9}  flag"]
     for _, r in df.sort_values(["reaction_rate", "equality_rate"], ascending=[True, False]).iterrows():
         flags = []
-        if r.method in EXEMPT:
-            flags.append("exempt")
-        else:
-            if r.reaction_rate < REACT_MIN:
-                flags.append(f"REACTION < {REACT_MIN:.0%}")
-            if r.equality_rate > EQ_MAX:
-                flags.append(f"EQUALS TRIVIAL > {EQ_MAX:.0%}")
+        if r.reaction_rate < REACT_MIN:
+            flags.append(f"REACTION < {REACT_MIN:.0%}")
+        if r.equality_rate > EQ_MAX:
+            flags.append(f"EQUALS TRIVIAL > {EQ_MAX:.0%}")
         if flags or r.reaction_rate < 0.999 or r.equality_rate > 0:
             lines.append(f"  {r.method:<20} {int(r.n_finite):>6} {r.reaction_rate:>9.3f} {r.equality_rate:>9.3f}  {', '.join(flags)}")
     lines.append(f"  ... {int((df.reaction_rate >= 0.999).sum())} of {len(df)} accelerators react on >= 99.9 % of finite windows; "

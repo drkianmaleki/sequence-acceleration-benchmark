@@ -312,11 +312,15 @@ def test_every_test_case_is_solved_by_someone():
 
 
 def test_baseline_is_not_reported_as_an_improvement():
-    """current_value is the baseline; it cannot improve on itself."""
+    """The last observed value is the trivial floor, not an accelerator: it
+    is not in the roster and the analytic harness never scores it (nor any
+    other trivial comparator) as an improvement."""
+    from src.pipeline import ACCEL_METHODS
+    assert "last_value" not in ACCEL_METHODS
+    assert "last_value" in TRIVIAL_METHOD_NAMES
     df = run_all_tests()
-    baseline = df[df["method"] == "current_value"]
-    assert not baseline.empty
-    assert baseline["passed"].sum() == 0
+    assert set(df["method"]) == set(ACCEL_METHODS)
+    assert not set(df["method"]) & set(TRIVIAL_METHOD_NAMES)
 
 
 @pytest.mark.parametrize("method", ["weniger_d1", "weniger_d2"])

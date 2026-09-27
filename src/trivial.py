@@ -17,8 +17,8 @@ All five share the accelerator signature  fn(seq, indices, future_x, cfg).
                        exclude it while every table can still show it.
     window_mean        mean of the observation window
     window_min         min of the observation window
-    last_value         alias of current_value (registered in accelerators.py
-                       as the very same function object)
+    last_value         the last observed value of the window: the
+                       deployable floor every accelerator must beat
 
 Skill scores
 ------------
@@ -107,8 +107,7 @@ def trivial_window_min(seq, indices, future_x: float, cfg: dict) -> float:
 
 
 def trivial_last_value(seq, indices, future_x: float, cfg: dict) -> float:
-    """Last observed value.  accelerators.py overrides this entry with the
-    current_value function object itself so the alias is literal."""
+    """The last observed value of the window (the deployable floor)."""
     return float(seq[-1]) if len(seq) else float("nan")
 
 

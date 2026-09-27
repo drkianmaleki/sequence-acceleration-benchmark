@@ -3,7 +3,8 @@ evaluation.py
 =============
 Main benchmark loop (Phase 1) under redesign v2.
 
-Grid:  54 methods (49 accelerators + 5 trivial comparators; counts derived from the registry)
+Grid:  every registered method (METHOD_NAMES = the accelerator roster
+       src.pipeline.ACCEL_METHODS plus the trivial comparators of src.trivial)
        x (18 core + 6 held-out) regimes x noise levels x seeds
        x gap-stratified horizons g in config.HORIZON_GAP_FRACTIONS
 
@@ -77,8 +78,8 @@ from src.trivial import (MED_SKILL_VS_COLS, ORACLE_METHODS, SKILL_VS_AGG_COLS,
 
 # Family label for each method (used in plots)
 FAMILY = {
-    'current_value': 'baseline',  'linear': 'baseline',
-    'log_linear': 'baseline',     'geom_avg_diff': 'baseline',
+    'linear': 'baseline',         'log_linear': 'baseline',
+    'geom_avg_diff': 'baseline',
     'richardson_1': 'richardson',  'richardson_2': 'richardson',
     'richardson_3': 'richardson',  'richardson_a05': 'richardson',
     'richardson_a10': 'richardson','richardson_a20': 'richardson',
@@ -92,7 +93,8 @@ FAMILY = {
     'wynn_rho_3': 'wynn_rho',
     'pade_11': 'pade', 'pade_12': 'pade', 'pade_13': 'pade',
     'pade_21': 'pade', 'pade_22': 'pade', 'pade_23': 'pade',
-    'pade_31': 'pade', 'pade_32': 'pade',
+    'pade_31': 'pade', 'pade_32': 'pade', 'pade_33': 'pade',
+    'pade_34': 'pade', 'pade_44': 'pade', 'pade_45': 'pade',
     'levin_t1': 'levin',  'levin_t2': 'levin',
     'levin_u1': 'levin',  'levin_u2': 'levin',
     'levin_v1': 'levin',  'levin_v2': 'levin',
@@ -117,7 +119,8 @@ for _m in [
     'richardson_a05', 'richardson_a10', 'richardson_a20',
     'single_exp_fit', 'double_exp_fit', 'rational_fit', 'log_fit',
     'pade_11', 'pade_12', 'pade_13', 'pade_21', 'pade_22',
-    'pade_23', 'pade_31', 'pade_32',
+    'pade_23', 'pade_31', 'pade_32', 'pade_33', 'pade_34',
+    'pade_44', 'pade_45',
     'neville_2', 'neville_3', 'neville_4',
     'median_ensemble', 'stability_weighted',   # pool contains Richardson
 ]:

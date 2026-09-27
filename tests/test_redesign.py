@@ -30,7 +30,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(_HERE))
 
 import src.config as CFG_MOD  # noqa: E402
-from src.accelerators import METHODS, METHOD_NAMES, accel_current_value  # noqa: E402
+from src.accelerators import METHODS, METHOD_NAMES  # noqa: E402
 from src.asymptote import assumed_asymptote  # noqa: E402
 from src.evaluation import build_cfg, run_phase1  # noqa: E402
 from src.generators import (  # noqa: E402
@@ -39,9 +39,10 @@ from src.generators import (  # noqa: E402
     regime_functions, true_asymptote,
 )
 from src.horizons import horizon_for_gap, horizon_table  # noqa: E402
+from src.pipeline import ACCEL_METHODS  # noqa: E402
 from src.trivial import (  # noqa: E402
     ORACLE_METHODS, SKILL_REFERENCE_METHODS, TRIVIAL_METHOD_NAMES,
-    best_reference_error, skill_score,
+    best_reference_error, skill_score, trivial_last_value,
 )
 
 FIXTURE = os.path.join(_HERE, "fixtures", "legacy_means_d5dc041.csv")
@@ -245,7 +246,6 @@ def test_trivial_methods_exact_outputs_on_toy_window():
     assert METHODS["window_mean"](seq, idx, 99.0, cfg) == 2.5
     assert METHODS["window_min"](seq, idx, 99.0, cfg) == 1.0
     assert METHODS["last_value"](seq, idx, 99.0, cfg) == 4.0
-    assert METHODS["current_value"](seq, idx, 99.0, cfg) == 4.0
     assert math.isnan(METHODS["constant_oracle"](seq, idx, 99.0, {"L_inf": 0.25}))
     assert math.isnan(METHODS["constant_assumed"](seq, idx, 99.0, {}))
 
@@ -253,12 +253,13 @@ def test_trivial_methods_exact_outputs_on_toy_window():
 def test_trivial_methods_are_registered_and_flagged():
     for m in TRIVIAL_METHOD_NAMES:
         assert m in METHODS and m in METHOD_NAMES
-    assert METHODS["last_value"] is accel_current_value        # literal alias
+    assert METHODS["last_value"] is trivial_last_value         # implemented once, in src.trivial
+    assert "last_value" not in ACCEL_METHODS                   # a comparator, not an accelerator
     assert ORACLE_METHODS == frozenset({"constant_oracle"})
     assert "constant_oracle" not in SKILL_REFERENCE_METHODS
     assert set(SKILL_REFERENCE_METHODS) == {
         "constant_assumed", "last_value", "window_mean", "window_min"}
-    assert len(set(METHOD_NAMES)) == len(METHOD_NAMES) == 49 + 5   # 49 accelerators + 5 trivial comparators (Prompt 5B)
+    assert len(set(METHOD_NAMES)) == len(METHOD_NAMES) == len(ACCEL_METHODS) + len(TRIVIAL_METHOD_NAMES)
 
 
 def test_skill_score_definition():

@@ -5,13 +5,15 @@ Phase 5A — Full-Pool Ensemble with Ablation.
 
 Key ablation questions
 -----------------------
-Q1. Does the full accelerator pool beat the 9-method pool?  diag_9 vs diag_<N>
+Q1. Does the full accelerator pool beat the small pool?  diag_<P> vs diag_<N>
 Q2. Does weighting beat equal?         equal_<N> vs diag_<N>
 Q3. Does threshold filter beat equal?  equal_<N> vs threshold_ens_010
-Q4. How much does oracle improve?      oracle_9 vs oracle_<N>
-    (<N> = the roster size, src.pipeline.N_ACCEL, 49 since Prompt 5B; the
-    selector names oracle_<N>, equal_ensemble_<N>, diag_ensemble_<N>,
-    capped_diag_<N> are built from it, never hard-coded)
+Q4. How much does oracle improve?      oracle_<P> vs oracle_<N>
+    (<N> = the roster size len(src.pipeline.ACCEL_METHODS), <P> = the size of
+    the Phase-2 pool len(src.pipeline.PHASE2_POOL); the selector names
+    oracle_<N>, equal_ensemble_<N>, diag_ensemble_<N>, capped_diag_<N>,
+    oracle_<P>, equal_ensemble_<P>, diag_ensemble_<P> are built from these
+    lengths, never hard-coded)
 Q5. Where is the residual gap?         per-regime decomposition
 Q6. Are dangerous methods auto-IDed?   method weight ranking
 
@@ -71,17 +73,26 @@ from src.trivial      import (MED_SKILL_VS_COLS, REFERENCE_TAGS, TRIVIAL_METHOD_
                               WIN_RATE_VS_COLS, best_reference_error, skill_score,
                               skill_vs_from_arrays, skill_vs_table)
 
-PHASE2_METHODS = list(PHASE2_POOL)     # src.pipeline: the 9-method pool (levin_t2 since Prompt 5B)
+PHASE2_METHODS = list(PHASE2_POOL)     # src.pipeline: the Phase-2 pool (eight accelerators + last_value)
 
 POOL         = list(ACCEL_METHODS)                 # the accelerator roster (ensembles, oracles)
-N_POOL       = len(POOL)                           # 49 since Prompt 5B; selector names derive from it
+N_POOL       = len(POOL)                           # selector names derive from it
 ORACLE_POOL  = f'oracle_{N_POOL}'
 EQUAL_POOL   = f'equal_ensemble_{N_POOL}'
 DIAG_POOL    = f'diag_ensemble_{N_POOL}'
 CAPPED_POOL  = f'capped_diag_{N_POOL}'
 ABL_THRESHOLD_VS_EQUAL = f'threshold_vs_equal_{N_POOL}'
 ABL_DIAG_VS_EQUAL      = f'diag_vs_equal_{N_POOL}'
-EVAL_METHODS = POOL + list(TRIVIAL_METHOD_NAMES)   # + 5 trivial comparators (reference rows)
+N_SMALL      = len(PHASE2_METHODS)                 # the Phase-2 pool size; small-pool selector names derive from it
+ORACLE_SMALL = f'oracle_{N_SMALL}'
+EQUAL_SMALL  = f'equal_ensemble_{N_SMALL}'
+DIAG_SMALL   = f'diag_ensemble_{N_SMALL}'
+ABL_WEIGHTING_SMALL = f'weighting_gain_{N_SMALL}'
+EVAL_METHODS = POOL + list(TRIVIAL_METHOD_NAMES)   # + the trivial comparators (reference rows)
+# perturb_iqr is computed for every ensemble / oracle pool member: the
+# accelerator roster and the Phase-2 pool (whose last_value member is a
+# trivial comparator but takes part in the small-pool ensembles).
+PERTURB_METHODS = [m for m in EVAL_METHODS if m in POOL or m in PHASE2_METHODS]
 TRIVIAL_SELECTORS = list(TRIVIAL_METHOD_NAMES)
 _SKILL_VS_RECORD  = [f'skill_vs_{t}' for _, t in REFERENCE_TAGS] + [f'win_vs_{t}' for _, t in REFERENCE_TAGS]
 
@@ -241,7 +252,7 @@ def evaluate_block(obs_idx, sigma, n_max, n_seeds, regimes, gap_fractions,
                         curr_err > 1e-12 and err > CFG_MOD.CAT_MULT * curr_err)
                     p_iqr = (_perturb_iqr(seq_win, idx_win, float(n_f), method, cfg,
                                           perturb_trials, perturb_scale, rng_p)
-                             if method in POOL else float('nan'))
+                             if method in PERTURB_METHODS else float('nan'))
                     rec = {
                         'regime':       regime,
                         'is_holdout':   hold,
@@ -329,7 +340,8 @@ def run_phase5a(obs_idx_list, noise_list, gap_fractions, n_seeds,
 
     if verbose:
         print(f'  Pool (ensembles): {len(POOL)} accelerators  '
-              f'({len(dangerous & set(POOL))} dangerous per artifact)')
+              f'({len(dangerous & set(POOL))} dangerous per artifact); '
+              f'small pool {len(PHASE2_METHODS)} (perturb_iqr for {len(PERTURB_METHODS)} methods)')
         print(f'  Reference rows  : {len(TRIVIAL_METHOD_NAMES)} trivial comparators '
               f'(oracle labelled, never pooled)')
         print(f'  Chunking        : {n_blocks} (obs_idx x noise) blocks of '
@@ -411,7 +423,6 @@ def _compute_ensembles(grp, true_val, pool, phase2_methods, slope, r2, dangerous
     # ── Fixed single methods ───────────────────────────────────────────────────
     out['fixed_rational']   = _err('rational_fit')
     out['fixed_richardson'] = _err('richardson_1')
-    out['current_value']    = _err('current_value')
     out['phase2_cascade']   = _err(_phase2_cascade(slope, r2))
 
     # ── Trivial comparators as fixed reference selectors (oracle labelled) ─────
@@ -419,10 +430,10 @@ def _compute_ensembles(grp, true_val, pool, phase2_methods, slope, r2, dangerous
         out[m] = _err(m)
 
     # ── Oracles ───────────────────────────────────────────────────────────────
-    e9  = [_err(m) for m in phase2_methods if math.isfinite(_err(m))]
-    e_pool = [_err(m) for m in pool           if math.isfinite(_err(m))]
-    out['oracle_9']  = min(e9)  if e9  else float('nan')
-    out[ORACLE_POOL] = min(e_pool) if e_pool else float('nan')
+    e_small = [_err(m) for m in phase2_methods if math.isfinite(_err(m))]
+    e_pool  = [_err(m) for m in pool           if math.isfinite(_err(m))]
+    out[ORACLE_SMALL] = min(e_small) if e_small else float('nan')
+    out[ORACLE_POOL]  = min(e_pool)  if e_pool  else float('nan')
 
     safe = [m for m in pool if m not in dangerous]
 
@@ -432,7 +443,7 @@ def _compute_ensembles(grp, true_val, pool, phase2_methods, slope, r2, dangerous
         return abs(float(np.median(ests)) - true_val) if ests else float('nan')
 
     out[EQUAL_POOL]   = _equal_ens(pool)
-    out['equal_ensemble_9']    = _equal_ens(phase2_methods)
+    out[EQUAL_SMALL]  = _equal_ens(phase2_methods)
     out['equal_ensemble_safe'] = _equal_ens(safe)
 
     # ── Diagnostic-weighted ensemble (continuous 1/IQR, EPS=0.01) ─────────────
@@ -448,7 +459,7 @@ def _compute_ensembles(grp, true_val, pool, phase2_methods, slope, r2, dangerous
         return abs(float(np.dot(w, ests)) - true_val)
 
     out[DIAG_POOL]   = _diag_ens(pool)
-    out['diag_ensemble_9']    = _diag_ens(phase2_methods)
+    out[DIAG_SMALL]  = _diag_ens(phase2_methods)
     out['diag_ensemble_safe'] = _diag_ens(safe)
 
     # ── Capped diagnostic ensemble (weight <= 5x median weight) ───────────────
@@ -494,7 +505,7 @@ def _compute_ensembles(grp, true_val, pool, phase2_methods, slope, r2, dangerous
 
 SELECTORS = [
     ORACLE_POOL,
-    'oracle_9',
+    ORACLE_SMALL,
     'threshold_ens_010',
     'threshold_ens_050',
     'threshold_ens_safe',
@@ -504,17 +515,16 @@ SELECTORS = [
     'diag_ensemble_safe',
     EQUAL_POOL,
     'equal_ensemble_safe',
-    'diag_ensemble_9',
-    'equal_ensemble_9',
+    DIAG_SMALL,
+    EQUAL_SMALL,
     'phase2_cascade',
     'fixed_rational',
     'fixed_richardson',
-    'current_value',
 ] + TRIVIAL_SELECTORS
 
 SELECTOR_COLOURS = {
     ORACLE_POOL:          '#000000',
-    'oracle_9':           '#444444',
+    ORACLE_SMALL:         '#444444',
     'threshold_ens_010':  '#2e7d32',
     'threshold_ens_050':  '#66bb6a',
     'threshold_ens_safe': '#a5d6a7',
@@ -524,12 +534,11 @@ SELECTOR_COLOURS = {
     'diag_ensemble_safe': '#9fa8da',
     EQUAL_POOL:           '#1565c0',
     'equal_ensemble_safe':'#42a5f5',
-    'diag_ensemble_9':    '#ff9800',
-    'equal_ensemble_9':   '#ffc107',
+    DIAG_SMALL:           '#ff9800',
+    EQUAL_SMALL:          '#ffc107',
     'phase2_cascade':     '#e65100',
     'fixed_rational':     '#c62828',
     'fixed_richardson':   '#f4a261',
-    'current_value':      '#bbbbbb',
     'constant_assumed':   '#212121',
     'constant_oracle':    '#9e9e9e',
     'window_mean':        '#616161',
@@ -665,9 +674,9 @@ def aggregate_results(df, out_dir, dangerous, default_g=None):
             ('threshold_ens_010', 'fixed_rational',     'threshold_vs_rational'),
             (CAPPED_POOL,    EQUAL_POOL,  'capped_diag_vs_equal'),
             (DIAG_POOL,  EQUAL_POOL,  ABL_DIAG_VS_EQUAL),
-            ('diag_ensemble_9',   'equal_ensemble_9',   'weighting_gain_9'),
+            (DIAG_SMALL,          EQUAL_SMALL,          ABL_WEIGHTING_SMALL),
             ('threshold_ens_010', 'threshold_ens_safe', 'filter_benefit'),
-            (EQUAL_POOL, 'equal_ensemble_9',   'pool_expansion_gain'),
+            (EQUAL_POOL,          EQUAL_SMALL,          'pool_expansion_gain'),
             ('threshold_ens_010', 'constant_assumed',   'threshold_vs_constant_assumed'),
             ('fixed_rational',    'window_min',         'rational_vs_window_min'),
         ]

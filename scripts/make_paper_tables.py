@@ -66,6 +66,8 @@ if _ROOT not in sys.path:
 import src.config as C                                    # noqa: E402
 from src.pipeline import ACCEL_METHODS, PHASE2_POOL, TRIVIAL_NON_ORACLE   # noqa: E402
 from src.trivial import ORACLE_METHODS, SKILL_REFERENCE_METHODS  # noqa: E402
+from phases.phase5a import (ORACLE_SMALL, EQUAL_SMALL, DIAG_SMALL,  # noqa: E402
+                            N_SMALL as N_POOL_SMALL)
 
 STRATA = list(C.HORIZON_GAP_FRACTIONS)          # [0.5, 0.1, 0.02]
 HEADLINE_G = float(C.HEADLINE_G)                # 0.1
@@ -211,7 +213,7 @@ LEGACY = set(C.LEGACY_DANGEROUS_METHODS)
 FAM = G_CORE.drop_duplicates("method").set_index("method")["family"].to_dict()
 TYP = G_CORE.drop_duplicates("method").set_index("method")["method_type"].to_dict()
 assert set(ACCEL_METHODS) == set(G_CORE[G_CORE.is_trivial == 0].method), "accelerator roster mismatch"
-N_ACC = len(ACCEL_METHODS)          # 49 since Prompt 5B; never hard-coded below
+N_ACC = len(ACCEL_METHODS)          # the roster size; never hard-coded below
 assert len(DEPLOYABLE) == 4
 CLASSICAL = sorted([m for m in ACCEL_METHODS if FAM[m] in CLASSICAL_FAMILIES],
                    key=lambda m: (CLASSICAL_FAMILIES.index(FAM[m]), m))
@@ -885,8 +887,8 @@ def f09():
     cv_mean = CV.groupby("selector").mean_stability.mean()
     NAME3 = {"oracle": "oracle (regime known)", "phase2_cascade": "Phase-2 cascade", "enhanced_cascade": "enhanced cascade",
              "fixed_rational": r"fixed \meth{rational\_fit}", "fixed_richardson": r"fixed \meth{richardson\_1}",
-             "fixed_single_exp": r"fixed \meth{single\_exp\_fit}", "fixed_current": "current value (baseline)"}
-    order3 = ["oracle", "phase2_cascade", "enhanced_cascade", "fixed_rational", "fixed_richardson", "fixed_single_exp", "fixed_current"]
+             "fixed_single_exp": r"fixed \meth{single\_exp\_fit}", "fixed_last": r"fixed \meth{last\_value} (the trivial floor)"}
+    order3 = ["oracle", "phase2_cascade", "enhanced_cascade", "fixed_rational", "fixed_richardson", "fixed_single_exp", "fixed_last"]
     rows = [r"Selector & " + " & ".join(rf"$\Stab$ ($g = {gname(g)}$)" for g in STRATA) + r" & $n$ & capped excl. & LORO $\Stab$ \\",
             r"\midrule"]
     for s in order3:
@@ -910,18 +912,18 @@ def f09():
 
     # b/c) Phase 5a ensembles
     ORDER5 = [(f"oracle_{N_ACC}", f"oracle over the {N_ACC}-method pool"), ("constant_oracle", r"\meth{constant\_oracle} \textit{(reference)}"),
-              ("oracle_9", "oracle over the 9-method pool"),
+              (ORACLE_SMALL, f"oracle over the {N_POOL_SMALL}-method pool"),
               ("fixed_rational", r"fixed \meth{rational\_fit}"), ("fixed_richardson", r"fixed \meth{richardson\_1}"),
               ("phase2_cascade", "Phase-2 cascade"),
-              ("equal_ensemble_9", "equal ensemble (9)"), ("diag_ensemble_9", "diagnostic-weighted ensemble (9)"),
+              (EQUAL_SMALL, f"equal ensemble ({N_POOL_SMALL})"), (DIAG_SMALL, f"diagnostic-weighted ensemble ({N_POOL_SMALL})"),
               (f"equal_ensemble_{N_ACC}", f"equal ensemble ({N_ACC})"), (f"diag_ensemble_{N_ACC}", f"diagnostic-weighted ensemble ({N_ACC})"),
               (f"capped_diag_{N_ACC}", f"capped diagnostic-weighted ({N_ACC})"),
               ("equal_ensemble_safe", "equal ensemble (safe)"), ("diag_ensemble_safe", "diagnostic-weighted (safe)"),
               ("capped_diag_safe", "capped diagnostic-weighted (safe)"),
               ("threshold_ens_010", "threshold ensemble, IQR $\\leq 0.10$"), ("threshold_ens_050", "threshold ensemble, IQR $\\leq 0.50$"),
               ("threshold_ens_safe", "threshold ensemble, no threshold"),
-              ("current_value", r"\meth{current\_value}"), ("constant_assumed", r"\meth{constant\_assumed}"),
-              ("last_value", r"\meth{last\_value}"), ("window_min", r"\meth{window\_min}"), ("window_mean", r"\meth{window\_mean}")]
+              ("constant_assumed", r"\meth{constant\_assumed}"), ("last_value", r"\meth{last\_value}"),
+              ("window_min", r"\meth{window\_min}"), ("window_mean", r"\meth{window\_mean}")]
     for fname, path, label in (("f09b_ensemble_phase5a_core.tex", "phase5a_ensemble.csv", "core"),
                                ("f09c_ensemble_phase5a_holdout.tex", "phase5a_ensemble_holdout.csv", "held-out")):
         E = read("phase5a", path)
@@ -941,10 +943,10 @@ def f09():
                         cells += [f4(float(r.median_error)), f3(float(r.med_skill))]
                 else:
                     cells += ["--"] * (3 if g == HEADLINE_G else 2)
-            if sel in ("fixed_rational", "equal_ensemble_9", "current_value"):
+            if sel in ("fixed_rational", EQUAL_SMALL, "constant_assumed"):
                 rows.append(r"\addlinespace[2pt]")
             rows.append(f"{name} & " + " & ".join(cells) + r" \\")
-        for sel in (f"oracle_{N_ACC}", "constant_oracle", "oracle_9", "fixed_rational", "fixed_richardson", "phase2_cascade", "equal_ensemble_9", "constant_assumed"):
+        for sel in (f"oracle_{N_ACC}", "constant_oracle", ORACLE_SMALL, "fixed_rational", "fixed_richardson", "phase2_cascade", EQUAL_SMALL, "constant_assumed"):
             r = E[(E.selector == sel) & (E.target_g == HEADLINE_G)]
             if len(r):
                 r = r.iloc[0]
@@ -1293,7 +1295,7 @@ def named_facts():
     fact(sec, "Levin remainder naming (docstring correction, no numerical change)",
          "'t' = forward-difference remainder w_n = Delta s_n (Weniger's d~-type; not Levin's backward-difference t); 'u' = (n+1) Delta s_n; 'v' = the ratio-of-differences form",
          "src/accelerators.py::_levin_transform (docstring)", "-", "-")
-    fact(sec, "9-method Phase 2/3/4 pool", ", ".join(PHASE2_POOL) + " (weniger_d2 replaced by levin_t2, to which the corrected weniger_d2 is identical; the pool is defined once in src.pipeline.PHASE2_POOL)",
+    fact(sec, f"{len(PHASE2_POOL)}-method Phase 2/3/4 pool (eight accelerators + last_value)", ", ".join(PHASE2_POOL) + " (weniger_d2 replaced by levin_t2, to which the corrected weniger_d2 is identical; the pool is defined once in src.pipeline.PHASE2_POOL)",
          "src/pipeline.py::PHASE2_POOL", "-", "-")
     fact(sec, "L_hat consumers (accelerators whose output depends on the assumed asymptote)",
          "log_linear, richardson_1, richardson_2, richardson_3, single_exp_fit, double_exp_fit, rational_fit, log_fit, stability_weighted, median_ensemble (10; measured on the 96 audit windows)",

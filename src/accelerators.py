@@ -1,9 +1,12 @@
 """
 accelerators.py
 ===============
-The 49 evaluated sequence-acceleration methods organised in 12 families, plus
-the five trivial comparators of redesign v2 (src/trivial.py): 54 registered
-methods (METHOD_NAMES).  The Weniger delta pair (weniger_d1 / weniger_d2) was
+The evaluated sequence-acceleration methods, organised in families.  The
+accelerator roster is every entry of METHODS that is not a trivial comparator
+(src.pipeline.ACCEL_METHODS; its size is len(ACCEL_METHODS), never a literal);
+the trivial comparators of redesign v2 (src/trivial.py) are registered
+alongside so that every table shows them, and METHOD_NAMES lists everything
+registered.  The Weniger delta pair (weniger_d1 / weniger_d2) was
 retired from the roster in Prompt 5B: after the Prompt-5A correction it is
 numerically identical to levin_t1 / levin_t2 (tests/test_accelerators.py
 asserts the identity); the implementation is kept under RETIRED_METHODS.
@@ -92,11 +95,6 @@ def _normalise_x(x_raw: np.ndarray, future_x: float):
 # =============================================================================
 # FAMILY 1 — Baselines
 # =============================================================================
-
-def accel_current_value(seq, indices, future_x: float, cfg: dict) -> float:
-    """Last observed value — the hard baseline every method must beat."""
-    return float(seq[-1])
-
 
 def accel_linear(seq, indices, future_x: float, cfg: dict) -> float:
     """Linear extrapolation: fit s = a + b*n and evaluate at future_x."""
@@ -567,6 +565,22 @@ def accel_pade_32(seq, indices, future_x: float, cfg: dict) -> float:
     """Pade [3,2]  [BRZ91]."""
     return _pade_fit(seq, indices, future_x, 3, 2, cfg)
 
+def accel_pade_33(seq, indices, future_x: float, cfg: dict) -> float:
+    """Pade [3,3]  [BRZ91]."""
+    return _pade_fit(seq, indices, future_x, 3, 3, cfg)
+
+def accel_pade_34(seq, indices, future_x: float, cfg: dict) -> float:
+    """Pade [3,4]  [BRZ91]."""
+    return _pade_fit(seq, indices, future_x, 3, 4, cfg)
+
+def accel_pade_44(seq, indices, future_x: float, cfg: dict) -> float:
+    """Pade [4,4]  [BRZ91]."""
+    return _pade_fit(seq, indices, future_x, 4, 4, cfg)
+
+def accel_pade_45(seq, indices, future_x: float, cfg: dict) -> float:
+    """Pade [4,5]  [BRZ91]."""
+    return _pade_fit(seq, indices, future_x, 4, 5, cfg)
+
 
 # =============================================================================
 # FAMILY 8 — Levin Transforms  [LE73, WE89]
@@ -1013,6 +1027,9 @@ def accel_stability_weighted(seq, indices, future_x: float,
     """
     Stability-weighted average over the same pool as the median ensemble.
     Weight = 1 / (shift_IQR + epsilon); consistent methods get higher weight.
+    The weight is 1 / (window-shift IQR + 1e-6), a property of each pool
+    member's sensitivity to the window start; it has nothing to do with the
+    retired composite stability score S of the evaluation.
     """
     pool_fns = [
         accel_richardson_1, accel_shanks_1, accel_shanks_2, accel_shanks_3,
@@ -1043,8 +1060,8 @@ def accel_best_shanks_wynn(seq, indices, future_x: float,
                            cfg: dict) -> float:
     """
     Runtime selector: return the Shanks or Wynn-epsilon estimate with
-    the smallest window-shift IQR.  Falls back to current_value if all
-    are invalid.
+    the smallest window-shift IQR.  Falls back to the last observed value
+    if all are invalid.
     """
     candidates = {
         "sh1": accel_shanks_1, "sh2": accel_shanks_2, "sh3": accel_shanks_3,
@@ -1073,7 +1090,6 @@ def accel_best_shanks_wynn(seq, indices, future_x: float,
 
 METHODS = {
     # Family 1 — Baselines
-    "current_value":      accel_current_value,
     "linear":             accel_linear,
     "log_linear":         accel_log_linear,
     "geom_avg_diff":      accel_geom_avg_diff,
@@ -1111,6 +1127,10 @@ METHODS = {
     "pade_23":            accel_pade_23,
     "pade_31":            accel_pade_31,
     "pade_32":            accel_pade_32,
+    "pade_33":            accel_pade_33,
+    "pade_34":            accel_pade_34,
+    "pade_44":            accel_pade_44,
+    "pade_45":            accel_pade_45,
     # Family 8 — Levin
     "levin_t1":           accel_levin_t1,
     "levin_t2":           accel_levin_t2,
@@ -1136,12 +1156,13 @@ METHODS = {
     "best_shanks_wynn":   accel_best_shanks_wynn,
 }
 
-# Family 14 — Trivial comparators (redesign v2, src/trivial.py).  last_value
-# is registered as the current_value function object itself: a literal alias.
+# Family 14 — Trivial comparators (redesign v2, src/trivial.py), registered
+# as methods so every table shows them next to the accelerators.  The last
+# observed value is one of them (last_value); it is a comparator, not an
+# accelerator, and src.pipeline.ACCEL_METHODS excludes all of them.
 from src.trivial import TRIVIAL_METHODS as _TRIVIAL_METHODS, ORACLE_METHODS  # noqa: E402,F401
 
 METHODS.update(_TRIVIAL_METHODS)
-METHODS["last_value"] = accel_current_value
 
 METHOD_NAMES = list(METHODS.keys())
 

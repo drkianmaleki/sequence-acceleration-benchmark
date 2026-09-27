@@ -29,8 +29,8 @@ if _ROOT not in sys.path:
 import src.config as CFG_MOD
 from src.dangerous import load_dangerous
 from src.pipeline import resolve_regimes
-from phases.phase5a import (run_all, SELECTORS, EPS, POOL, EVAL_METHODS, default_jobs,
-                            ORACLE_POOL, EQUAL_POOL, CAPPED_POOL)
+from phases.phase5a import (run_all, SELECTORS, EPS, POOL, EVAL_METHODS, PERTURB_METHODS,
+                            default_jobs, ORACLE_POOL, EQUAL_POOL, CAPPED_POOL)
 
 
 def n_evaluations(cfg: dict) -> dict:
@@ -38,7 +38,7 @@ def n_evaluations(cfg: dict) -> dict:
     cells = (len(cfg['obs_idx_list']) * len(cfg['noise_list']) * cfg['n_seeds']
              * len(regimes) * len(cfg['gap_fractions']))
     central = cells * len(EVAL_METHODS)
-    perturb = cells * len(POOL) * cfg['perturb_trials']
+    perturb = cells * len(PERTURB_METHODS) * cfg['perturb_trials']
     return {'central': central, 'diagnostic_calls': perturb, 'total_calls': central + perturb}
 
 
