@@ -54,9 +54,13 @@ enter selector or cascade training; HOLDOUT flags them):
   random_knots    seeded 3-knot continuous piecewise power law
                   (knots ~ U{20..200}, exponents ~ U[0.3, 0.9]); the shape
                   depends on the sequence seed
-  real_boot_a     smoothing-spline lower envelope of the recorded XGBoost
-  real_boot_b     curves (adult, higgs) in results/real_data/, rescaled to
-                  gap(0) = 0.7 and shifted to L_true
+  real_boot_a     smoothing-spline lower envelope of an XGBoost validation
+  real_boot_b     curve trained on an OpenML dataset OUTSIDE the recorded-curve
+                  test set (_REAL_BOOT_SOURCES: electricity 151, nomao 1486;
+                  results/real_data/real_boot_sources.csv, built by
+                  scripts/make_real_boot_sources.py under pre-specified
+                  inclusion criteria), rescaled to gap(0) = 0.7 and shifted
+                  to L_true
 
 Two regimes carry intrinsic noise present even at sigma = 0, because
 irreducible observation noise is the property under test:
@@ -293,40 +297,56 @@ def _gap_random_knots(n, seed: Optional[int]) -> np.ndarray:
     return consts[seg] * (n + 1.0) ** (-exps[seg])
 
 
+# The real_boot generator inputs: validation-loss curves of two OpenML
+# datasets that are not in the recorded-curve test set
+# (src.datasets.REAL_BOOT_SOURCE_IDS), written by
+# scripts/make_real_boot_sources.py together with their provenance and the
+# inclusion criteria they passed.  The recorded curves of the test set
+# (results/real_data/real_data_curves.csv) are never used as a generator.
 _REAL_CURVES_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "results", "real_data", "real_data_curves.csv")
-_REAL_BOOT_SOURCES = {"real_boot_a": "adult", "real_boot_b": "higgs"}
+    "results", "real_data", "real_boot_sources.csv")
+_REAL_BOOT_SOURCES = {"real_boot_a": "electricity", "real_boot_b": "nomao"}
 _REAL_BOOT_LAMBDA = 0.01          # smoothing on the log(n+1) axis
 _REAL_BOOT_GAP0 = 0.7
 _real_boot_cache: Dict[str, Tuple[np.ndarray, np.ndarray]] = {}
 
 
+def envelope_profile(n, y) -> np.ndarray:
+    """
+    The real_boot gap profile of a loss curve y on the round grid n.
+
+    Construction: smoothing spline of the validation loss against log(n+1)
+    (lambda = _REAL_BOOT_LAMBDA, mild smoothing that keeps the steep start),
+    lower envelope (running minimum, so the profile is non-increasing even
+    where the curve overfits and rises), rescaled to gap(0) = _REAL_BOOT_GAP0
+    with the envelope's final value as the floor, so the profile ends at 0.
+    """
+    from scipy.interpolate import make_smoothing_spline
+    n = np.asarray(n, dtype=float)
+    y = np.asarray(y, dtype=float)
+    x = np.log(n + 1.0)
+    fitted = make_smoothing_spline(x, y, lam=_REAL_BOOT_LAMBDA)(x)
+    env = np.minimum.accumulate(fitted)
+    floor = env[-1]
+    return _REAL_BOOT_GAP0 * (env - floor) / (env[0] - floor)
+
+
 def real_boot_profile(dataset: str) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Gap profile of a recorded real curve on its integer round grid.
-
-    Construction: smoothing spline of the recorded validation loss against
-    log(n+1) (lambda = 0.01, mild smoothing that keeps the steep start),
-    lower envelope (running minimum, so the profile is non-increasing even
-    where the real curve overfits and rises), rescaled to gap(0) = 0.7 with
-    the envelope's final value as the floor.  Beyond the recorded range the
-    gap is 0, so L_true is the exact limit of the regime.
+    Gap profile of a real source curve on its integer round grid
+    (envelope_profile of the column ``dataset`` of _REAL_CURVES_PATH).
+    Beyond the recorded range the gap is 0, so L_true is the exact limit of
+    the regime.
     """
     if dataset in _real_boot_cache:
         return _real_boot_cache[dataset]
-    from scipy.interpolate import make_smoothing_spline
     if not os.path.exists(_REAL_CURVES_PATH):
         raise FileNotFoundError(
             f"real_boot regimes need {_REAL_CURVES_PATH}")
     data = np.genfromtxt(_REAL_CURVES_PATH, delimiter=",", names=True)
     n = np.asarray(data["round"], dtype=float)
-    y = np.asarray(data[dataset], dtype=float)
-    x = np.log(n + 1.0)
-    fitted = make_smoothing_spline(x, y, lam=_REAL_BOOT_LAMBDA)(x)
-    env = np.minimum.accumulate(fitted)
-    floor = env[-1]
-    prof = _REAL_BOOT_GAP0 * (env - floor) / (env[0] - floor)
+    prof = envelope_profile(n, data[dataset])
     _real_boot_cache[dataset] = (n, prof)
     return n, prof
 
@@ -337,8 +357,8 @@ def _make_gap_real_boot(dataset: str) -> Callable:
         n = _as_float_array(n)
         return np.interp(n, grid_n, prof, left=prof[0], right=0.0)
     gap.__name__ = f"_gap_real_boot_{dataset}"
-    gap.__doc__ = (f"Smoothing-spline lower envelope of the recorded "
-                   f"{dataset} curve, rescaled to gap(0) = 0.7.")
+    gap.__doc__ = (f"Smoothing-spline lower envelope of the {dataset} source "
+                   f"curve (results/real_data/real_boot_sources.csv), rescaled to gap(0) = 0.7.")
     return gap
 
 
@@ -371,8 +391,8 @@ _HOLDOUT_GAPS: Dict[str, Callable] = {
     "logistic_tail": _gap_logistic_tail,
     "inv_sqrt_log":  _gap_inv_sqrt_log,
     "random_knots":  _gap_random_knots,
-    "real_boot_a":   _make_gap_real_boot("adult"),
-    "real_boot_b":   _make_gap_real_boot("higgs"),
+    "real_boot_a":   _make_gap_real_boot(_REAL_BOOT_SOURCES["real_boot_a"]),
+    "real_boot_b":   _make_gap_real_boot(_REAL_BOOT_SOURCES["real_boot_b"]),
 }
 
 # Regimes whose *shape* depends on the sequence seed (gap needs the seed).

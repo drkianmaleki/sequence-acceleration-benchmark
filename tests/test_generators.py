@@ -28,9 +28,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import src.config as CFG_MOD  # noqa: E402
 from src.generators import (  # noqa: E402
     ALL_REGIME_NAMES, GAP, GENERATORS, HOLDOUT, HOLDOUT_REGIME_NAMES,
-    INTRINSIC_NOISE_REGIMES, REGIME_NAMES, TRUTH, regime_functions,
-    true_asymptote,
+    INTRINSIC_NOISE_REGIMES, REGIME_NAMES, TRUTH, _REAL_BOOT_SOURCES,
+    _REAL_CURVES_PATH, real_boot_profile, regime_functions, true_asymptote,
 )
+
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 INTRINSIC_NOISE = set(INTRINSIC_NOISE_REGIMES)
 DETERMINISTIC = [r for r in ALL_REGIME_NAMES if r not in INTRINSIC_NOISE]
@@ -125,6 +127,37 @@ def test_generator_shape_and_finiteness(regime):
         out = GENERATORS[regime](N_GRID, np.random.RandomState(3), sigma, 0.03, seed=0)
         assert out.shape == N_GRID.shape
         assert np.all(np.isfinite(out))
+
+
+def test_real_boot_sources_are_outside_the_recorded_curve_test_set():
+    """The real_boot generator inputs are never among the scored real curves."""
+    from src.datasets import DATASET_IDS, REAL_BOOT_SOURCE_IDS
+    sources = set(_REAL_BOOT_SOURCES.values())
+    assert sources == set(REAL_BOOT_SOURCE_IDS)
+    assert not sources & set(DATASET_IDS)
+    assert not set(REAL_BOOT_SOURCE_IDS.values()) & set(DATASET_IDS.values())
+    curves = os.path.join(_ROOT, "results", "real_data", "real_data_curves.csv")
+    with open(curves, encoding="utf-8") as fh:
+        recorded = set(fh.readline().strip().split(",")) - {"round"}
+    assert recorded == set(DATASET_IDS)
+    assert not sources & recorded
+    assert os.path.basename(_REAL_CURVES_PATH) == "real_boot_sources.csv"
+    with open(_REAL_CURVES_PATH, encoding="utf-8") as fh:
+        columns = set(fh.readline().strip().split(",")) - {"round"}
+    assert columns == sources
+
+
+@pytest.mark.parametrize("regime", sorted(_REAL_BOOT_SOURCES))
+def test_real_boot_gap_profile_is_a_non_increasing_envelope(regime):
+    """Each real_boot profile starts at 0.7, never rises, and ends at exactly 0."""
+    n, prof = real_boot_profile(_REAL_BOOT_SOURCES[regime])
+    assert len(n) == len(prof) >= 100 and n[0] == 0.0
+    assert prof[0] == pytest.approx(0.7)
+    assert prof[-1] == 0.0
+    assert np.all(np.diff(prof) <= 1e-12)
+    assert float(GAP[regime](0)) == pytest.approx(0.7)
+    assert float(GAP[regime](n[-1] + 100)) == 0.0
+    assert float(GAP[regime](CFG_MOD.OBS_IDX)) > 0.0
 
 
 def test_noise_is_reproducible_from_seed():

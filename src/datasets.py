@@ -4,8 +4,17 @@ datasets.py
 Real-data pipeline: OpenML dataset loading and XGBoost training.
 
 Downloads tabular classification datasets from OpenML,
-trains XGBoost for 500 rounds recording validation log-loss every round,
+trains XGBoost for N_ROUNDS rounds recording validation log-loss every round,
 and returns the loss curves for use in the real-data experiment.
+
+Two id dictionaries:
+    DATASET_IDS            the recorded-curve TEST SET (results/real_data/
+                           real_data_curves.csv): the six datasets whose
+                           curves are scored by the real-data step
+    REAL_BOOT_SOURCE_IDS   the generator inputs of the held-out real_boot_a /
+                           real_boot_b regimes (scripts/make_real_boot_sources.py
+                           -> results/real_data/real_boot_sources.csv); never
+                           scored, disjoint from DATASET_IDS
 """
 
 import os
@@ -26,6 +35,17 @@ DATASET_IDS = {
     "bank_marketing": 1461,
 }
 
+# Generator inputs only (the real_boot_a / real_boot_b held-out regimes are
+# built from these curves' lower envelopes); never scored; disjoint from the
+# recorded-curve test set DATASET_IDS by construction (asserted below and in
+# tests/test_generators.py).
+REAL_BOOT_SOURCE_IDS = {
+    "electricity": 151,
+    "nomao":       1486,
+}
+assert not set(REAL_BOOT_SOURCE_IDS) & set(DATASET_IDS)
+assert not set(REAL_BOOT_SOURCE_IDS.values()) & set(DATASET_IDS.values())
+
 N_ROUNDS      = 500
 VAL_FRACTION  = 0.2
 RANDOM_STATE  = 42
@@ -33,13 +53,17 @@ RANDOM_STATE  = 42
 
 # ── Loaders ────────────────────────────────────────────────────────────────────
 
-def load_datasets() -> dict:
+def load_datasets(ids: dict = DATASET_IDS, with_meta: bool = False) -> dict:
     """
-    Download all datasets from OpenML and return as {name: (X, y)} dict.
-    X is a numpy array of floats; y is a numpy array of integers.
+    Download the datasets of ``ids`` ({name: OpenML id}; default: the
+    recorded-curve test set DATASET_IDS) from OpenML and return them as
+    {name: (X, y)}.  X is a numpy array of floats (categoricals coded, NaNs
+    replaced by column medians); y is a numpy array of integer labels.
+    With with_meta=True every value is (X, y, meta) where meta records the
+    OpenML id, version and name.
     """
     datasets = {}
-    for name, did in DATASET_IDS.items():
+    for name, did in ids.items():
         print(f"  Loading {name} (OpenML id={did}) ...")
         ds = openml.datasets.get_dataset(
             did,
@@ -69,7 +93,11 @@ def load_datasets() -> dict:
         X[nan_mask] = np.take(col_medians, np.where(nan_mask)[1])
 
         print(f"    {name}: X={X.shape}, classes={len(np.unique(y))}")
-        datasets[name] = (X, y)
+        if with_meta:
+            meta = dict(openml_id=int(did), openml_version=int(ds.version), openml_name=str(ds.name))
+            datasets[name] = (X, y, meta)
+        else:
+            datasets[name] = (X, y)
 
     return datasets
 

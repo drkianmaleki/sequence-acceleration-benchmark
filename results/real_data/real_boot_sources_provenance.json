@@ -1,0 +1,108 @@
+{
+  "purpose": "generator inputs of the held-out real_boot_a / real_boot_b regimes; never scored; disjoint from the recorded-curve test set (src.datasets.DATASET_IDS)",
+  "sources": {
+    "electricity": 151,
+    "nomao": 1486
+  },
+  "test_set": {
+    "covertype": 1596,
+    "higgs": 23512,
+    "adult": 1590,
+    "jannis": 41168,
+    "miniboone": 41150,
+    "bank_marketing": 1461
+  },
+  "training": {
+    "function": "src.datasets.train_xgboost",
+    "n_rounds": 500,
+    "seed": 42,
+    "val_fraction": 0.2,
+    "learning_rate": 0.05,
+    "max_depth": 6,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8
+  },
+  "versions": {
+    "xgboost": "3.3.0",
+    "sklearn": "1.9.0",
+    "openml": "0.15.1",
+    "numpy": "2.5.1",
+    "pandas": "3.0.3"
+  },
+  "criteria": {
+    "min_rows": 20000,
+    "min_gap_ratio_at_obs_depth": 0.05,
+    "obs_depth": 90,
+    "min_argmin_round": 150,
+    "gap_ratio_definition": "gap(obs_depth) / gap(0) of the smoothing-spline lower-envelope profile of src.generators.envelope_profile (the real_boot construction)"
+  },
+  "git_head": "ab04bfc",
+  "created": "2026-09-27T14:16:08",
+  "all_passed": true,
+  "datasets": {
+    "electricity": {
+      "openml_id": 151,
+      "openml_version": 1,
+      "openml_name": "electricity",
+      "n_rows": 45312,
+      "n_features": 8,
+      "n_classes": 2,
+      "loss_round_1": 0.6723241493045053,
+      "loss_round_obs": 0.3482620105727242,
+      "loss_round_last": 0.2449443401276191,
+      "min_loss": 0.2449443401276191,
+      "argmin_round": 500,
+      "gap_ratio_obs": 0.23810558116512387,
+      "criteria": {
+        "rows": {
+          "value": 45312,
+          "threshold": 20000,
+          "passed": true
+        },
+        "gap_ratio_90": {
+          "value": 0.23810558116512387,
+          "threshold": 0.05,
+          "passed": true
+        },
+        "argmin_round": {
+          "value": 500,
+          "threshold": 150,
+          "passed": true
+        }
+      },
+      "passed_all": true
+    },
+    "nomao": {
+      "openml_id": 1486,
+      "openml_version": 1,
+      "openml_name": "nomao",
+      "n_rows": 34465,
+      "n_features": 118,
+      "n_classes": 2,
+      "loss_round_1": 0.5601515983715469,
+      "loss_round_obs": 0.10599868264476649,
+      "loss_round_last": 0.06999417693558856,
+      "min_loss": 0.06993148478542166,
+      "argmin_round": 495,
+      "gap_ratio_obs": 0.07300777546376783,
+      "criteria": {
+        "rows": {
+          "value": 34465,
+          "threshold": 20000,
+          "passed": true
+        },
+        "gap_ratio_90": {
+          "value": 0.07300777546376783,
+          "threshold": 0.05,
+          "passed": true
+        },
+        "argmin_round": {
+          "value": 495,
+          "threshold": 150,
+          "passed": true
+        }
+      },
+      "passed_all": true
+    }
+  }
+}

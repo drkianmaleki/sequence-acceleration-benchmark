@@ -341,8 +341,9 @@ def test_random_knots_is_seeded_continuous_and_in_spec():
     assert len(seen) >= 3                              # genuinely seeded
 
 
-def test_real_boot_profiles_come_from_the_recorded_curves():
-    for ds, regime in (("adult", "real_boot_a"), ("higgs", "real_boot_b")):
+def test_real_boot_profiles_come_from_the_source_curves():
+    from src.generators import _REAL_BOOT_SOURCES
+    for regime, ds in _REAL_BOOT_SOURCES.items():
         n, prof = real_boot_profile(ds)
         assert len(n) == 500 and prof[0] == pytest.approx(0.7) and prof[-1] == 0.0
         assert np.all(np.diff(prof) <= 1e-12)
