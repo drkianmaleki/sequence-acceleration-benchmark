@@ -20,6 +20,9 @@ in the required order:
               for any job count, see scripts/run_phase5a.py --jobs)
     Phase 5b  sensitivity sweeps (assumed asymptote, window length)
     real data re-evaluation of the recorded XGBoost curves on the (depth x target) grid
+    tables    scripts/make_paper_tables.py  ->  paper_fragments/*.tex + FACTS.md
+    terciles  scripts/analyze_by_ltrue.py   ->  results/phase1/phase1_by_Ltrue.csv, f13, its FACTS section
+              (after the tables step, because it replaces its own section of FACTS.md)
 
 The excluded-method set is derived from Phase-1 output into
 results/phase1/dangerous_methods.json; phases 2-5 refuse to run without
@@ -40,7 +43,6 @@ Usage
 
 Afterwards:
     python scripts/check_dangerous.py      # artifact still matches Phase 1
-    python scripts/make_paper_tables.py    # paper_fragments/ + FACTS.md
 
 Per-phase grids live in src/config.py (PHASE1 ... PHASE5B, REAL_DATA).
 Results are only meaningful alongside the commit that produced them, so
@@ -70,6 +72,8 @@ STEPS = [
     ("Phase 5a — ensemble ablation",               "scripts/run_phase5a.py",      True),
     ("Phase 5b — sensitivity sweeps",              "scripts/run_phase5b.py",      True),
     ("Real data — recorded-curve re-evaluation",   "scripts/run_real_data.py",    True),
+    ("Paper tables and FACTS",                     "scripts/make_paper_tables.py", False),
+    ("L_true terciles (FACTS section, f13)",       "scripts/analyze_by_ltrue.py",  False),
 ]
 
 
@@ -203,7 +207,7 @@ def main():
     print(f"  Reproducing all results  [{mode} mode, redesign v2]")
     print("=" * 72)
     print(f"  {len(steps)} steps.  Order: Phase 0 -> Phase 1 -> Phase 0b (ladders) -> "
-          f"excluded-set re-derivation -> Phases 2-5 -> real data")
+          f"excluded-set re-derivation -> Phases 2-5 -> real data -> tables -> L_true terciles")
     print("  Output: results/<phase>/\n")
 
     outcomes = []

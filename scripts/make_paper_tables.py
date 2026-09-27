@@ -41,6 +41,15 @@ Fragments (paper_fragments/, one tabular per file, booktabs, no \\begin{table})
   f10d_diagnostics_filter.tex       Phase 4 cascade + perturb_iqr screen
   f11_capped_block.tex              every capped (regime x stratum) cell with achieved_g; depth-grid counts
   f12_validity_by_depth.tex         validity by observation depth: every method below the 0.9 floor at some depth
+  f14_real_fixed_methods.tex        real data (Table tab:realmethods): rational_fit, richardson_1 and the cascade per dataset and pooled,
+                                    pre- / post-minimum targets: n, win vs last, fail, valid, median error and skill
+  f15_bootstrap.tex                 family bootstrap over core regimes (Table tab:boot): rational_fit's win rate vs last and its
+                                    cell-median error against each comparator, point and 2.5 / 97.5 percentiles
+  f16_generalisation_summary.tex    generalisation summary (Table tab:gen): eligible accelerators core / held-out / both, Spearman rho,
+                                    ranks of rational_fit and log_linear
+  f18_ladders_classical.tex         Phase 0b order ladders of the classical families (every order next to the roster orders)
+  f19_ladders_fits.tex              Phase 0b order ladders of the fits (Richardson terms, fixed exponents, parametric models)
+  f20_roster.tex                    the method roster by family (Table tab:roster), derived from the registry
 
 Macros used (defined in the paper preamble): \\meth{}, \\diag{},
 \\rhoC, \\rhoV, \\TE, \\LE, \\nobs, \\nf.
@@ -77,6 +86,10 @@ CLASSICAL_FAMILIES = ("shanks", "wynn_eps", "wynn_rho", "levin", "brezinski", "a
 NOOP_BAND = (0.9, 1.1)                          # median improvement factor within +/-10 % of 1
 SKILL_NOOP = 0.9                                # median skill >= 0.9: no better than 10 % over the best trivial
 WIN_BAND = (0.4, 0.6)                           # win rate vs last_value within a coin flip +/- 0.1
+# Family bootstrap (paper §5.4, fragment f15): the resampling unit is the core regime.
+BOOT_SEED = 20260927                            # RandomState seed of the bootstrap draws; fixed once, never tuned
+BOOT_N = 5000                                   # resamples of the core regimes (with replacement)
+BOOT_COMPARATORS = ["log_linear", "richardson_1", "richardson_2", "richardson_3", "double_exp_fit"]   # rational_fit against each
 FAMILY_ORDER = ["richardson", "parametric", "pade", "neville", "baseline", "ensemble",
                 "shanks", "wynn_eps", "wynn_rho", "levin", "brezinski", "anderson", "trivial"]
 TYPE_MACRO = {"trajectory": r"\TE", "limit": r"\LE"}
@@ -615,6 +628,18 @@ def f05b():
                  "results/phase5b/phase5b_sweep1_consumers.csv", f"assumed_mode == zero, regime_set == {rs}, target_g == {g}", "win_rate_vs_last")
 
 
+def generalisation_rhos():
+    """Per stratum: Spearman rho between the core and held-out med_error ranks over
+    the accelerators rank-eligible in both regime sets, and that count.  The one
+    computation behind the generalisation facts (f06) and the summary table (f16)."""
+    out = []
+    for g in STRATA:
+        both = [m for m in ACCEL_METHODS if m in RANK_CORE[g] and m in RANK_HOLD[g]]
+        rho = spearmanr([RANK_CORE[g][m] for m in both], [RANK_HOLD[g][m] for m in both]).correlation if len(both) >= 2 else float("nan")
+        out.append((g, float(rho), len(both)))
+    return out
+
+
 def f06():
     head = [r"Method & \multicolumn{3}{c}{$g = 0.5$} & \multicolumn{5}{c}{$g = 0.1$} & \multicolumn{3}{c}{$g = 0.02$} \\",
             r"\cmidrule(lr){2-4}\cmidrule(lr){5-9}\cmidrule(lr){10-12}",
@@ -639,11 +664,7 @@ def f06():
             label = r"\textbf{" + label + "}"
         rows.append(f"{label} & " + " & ".join(cells) + r" \\")
     rows.append(r"\midrule")
-    rhos = []
-    for g in STRATA:
-        both = [m for m in ACCEL_METHODS if m in RANK_CORE[g] and m in RANK_HOLD[g]]
-        rho = spearmanr([RANK_CORE[g][m] for m in both], [RANK_HOLD[g][m] for m in both]).correlation
-        rhos.append((g, rho, len(both)))
+    rhos = generalisation_rhos()
     rows.append(r"\multicolumn{12}{l}{Spearman $\rho$ of core vs held-out rank over methods ranked in both: " +
                 ", ".join(rf"$g = {gname(g)}$: {rho:.3f} ($n = {n}$)" for g, rho, n in rhos) + r"} \\")
     for g, rho, n in rhos:
@@ -1176,6 +1197,341 @@ def f12():
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# F14  real data, fixed methods and the cascade (Table tab:realmethods, §8)
+# ═════════════════════════════════════════════════════════════════════════════
+def f14():
+    """Per dataset and pooled, split by pre-/post-minimum target and total: for
+    rational_fit, richardson_1 and the cascade row, n_cells, n_win_vs_last,
+    n_fail (skill >= 1 or non-finite error), valid rows, median error and
+    median skill over the valid rows (conditional on validity)."""
+    L = read("real_data", "real_data_results_v2.csv")
+    if "post_min_target" not in L.columns:
+        print("  (real_data_results_v2.csv has no post_min_target column: fragment f14 skipped)")
+        return
+    SEL = [("rational_fit", L.method == "rational_fit"), ("richardson_1", L.method == "richardson_1"),
+           ("cascade", L.is_cascade == 1)]
+    SPLITS = [("pre-minimum", 0), ("post-minimum", 1), ("total", None)]
+    datasets = [d for d in REAL_DATASETS if d in set(L.dataset)] + sorted(set(L.dataset) - set(REAL_DATASETS))
+
+    def block(sub):
+        n = int(len(sub))
+        err = sub.error.to_numpy(dtype=float)
+        valid = np.isfinite(err)
+        fail = (sub.skill.to_numpy(dtype=float) >= 1.0) | ~valid
+        ok = sub[valid]
+        return dict(n=n, win=int((sub.win_vs_last == 1).sum()), fail=int(fail.sum()), valid=int(valid.sum()),
+                    med_err=float(ok.error.median()) if len(ok) else float("nan"),
+                    med_skill=float(ok.skill.median()) if len(ok) else float("nan"))
+
+    rows = [r"Dataset & split & method & $n$ & win vs last & fail & valid & med.\ err & med.\ skill \\", r"\midrule"]
+    sec = "real data fixed methods (§8)"
+    for d in ["pooled"] + datasets:
+        sd = L if d == "pooled" else L[L.dataset == d]
+        first_split = True
+        for label, flag in SPLITS:
+            ss = sd if flag is None else sd[sd.post_min_target == flag]
+            for i, (mname, mask) in enumerate(SEL):
+                b = block(ss[mask.loc[ss.index]])
+                lab_d = (r"\textbf{pooled}" if d == "pooled" else tt(d)) if (first_split and i == 0) else ""
+                lab_s = label if i == 0 else ""
+                rows.append(f"{lab_d} & {lab_s} & {mth(mname) if mname != 'cascade' else 'cascade'} & {b['n']} & "
+                            f"{b['win']}/{b['n']} & {b['fail']}/{b['n']} & {b['valid']}/{b['n']} & {f4(b['med_err'])} & {f3(b['med_skill'])} \\\\")
+                fact(sec, f"{d}, {label} targets, {mname}: win vs last / fail / valid (of n); median error; median skill",
+                     f"{b['win']}/{b['n']} / {b['fail']}/{b['n']} / {b['valid']}/{b['n']}; {b['med_err']:.5f}; {b['med_skill']:.3f}",
+                     "results/real_data/real_data_results_v2.csv",
+                     ("all datasets" if d == "pooled" else f"dataset == {d}") + ("" if flag is None else f", post_min_target == {flag}")
+                     + (f", is_cascade == 1" if mname == "cascade" else f", method == {mname}"),
+                     "win = count(win_vs_last == 1); fail = count(skill >= 1 or error not finite); medians over rows with finite error")
+            first_split = False
+            if flag is not None:
+                rows.append(r"\addlinespace[1pt]")
+        rows.append(r"\midrule" if d == "pooled" else r"\addlinespace[3pt]")
+    frag("f14_real_fixed_methods.tex", "lllrrrrrr", rows,
+         ["results/real_data/real_data_results_v2.csv (recorded curves re-evaluated on the (depth x target) grid; L_hat mode zero)"],
+         "method in {rational_fit, richardson_1} and the cascade row (is_cascade == 1); split = pre-minimum (target_round <= argmin_round) / "
+         "post-minimum / total; win vs last = rows with win_vs_last == 1 (error below the last observed value's); fail = skill >= 1 or "
+         "error not finite (no better than the hindsight best trivial; the definition of real_data_strata_v2.csv); valid = rows with a "
+         "finite error; med. err and med. skill over the valid rows only (conditional on validity)",
+         "Real data: fixed rational_fit and richardson_1 next to the cascade, per dataset and pooled, pre- and post-minimum targets")
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# F15  family bootstrap (Table tab:boot, §5.4)
+# ═════════════════════════════════════════════════════════════════════════════
+def f15():
+    """Resampling unit = core regime.  Cells = uncapped (regime, noise) cells at
+    the headline stratum; each draw samples the core regimes with replacement
+    and takes their cells.  Point estimates on the unresampled cells; 2.5th /
+    97.5th percentiles over BOOT_N draws from RandomState(BOOT_SEED)."""
+    A = AGG[(AGG.is_holdout == 0) & (AGG.capped == 0) & (AGG.target_g == HEADLINE_G)]
+    cells = A.pivot_table(index=["regime", "noise"], columns="method", values="med_error")
+    win = A[A.method == "rational_fit"].set_index(["regime", "noise"]).win_rate_vs_last.reindex(cells.index)
+    regimes = sorted(cells.index.get_level_values("regime").unique())
+    codes = np.array([regimes.index(r) for r in cells.index.get_level_values("regime")])
+    by_regime = [np.flatnonzero(codes == k) for k in range(len(regimes))]
+    rat = cells["rational_fit"].to_numpy(dtype=float)
+    winv = win.to_numpy(dtype=float)
+    comps = {m: cells[m].to_numpy(dtype=float) for m in BOOT_COMPARATORS if m in cells.columns}
+    missing = [m for m in BOOT_COMPARATORS if m not in cells.columns]
+    if missing:
+        print(f"  (bootstrap comparators absent from phase1_aggregated.csv: {missing})")
+
+    def stats(idx):
+        out = {"win_rate_vs_last": float(np.nanmean(winv[idx]))}
+        for m, arr in comps.items():
+            both = np.isfinite(rat[idx]) & np.isfinite(arr[idx])
+            r, c = rat[idx][both], arr[idx][both]
+            out[f"lower_error_frac:{m}"] = float((r < c).mean()) if both.any() else float("nan")
+            out[f"delta_median:{m}"] = float(np.median(r) - np.median(c)) if both.any() else float("nan")
+            out[f"n_cells_excluded:{m}"] = int((~np.isfinite(arr[idx])).sum())
+            out[f"n_cells:{m}"] = int(both.sum())
+        return out
+
+    all_idx = np.arange(len(cells))
+    point = stats(all_idx)
+    rng = np.random.RandomState(BOOT_SEED)
+    draws = rng.randint(0, len(regimes), size=(BOOT_N, len(regimes)))
+    boot = {k: np.empty(BOOT_N) for k in point}
+    for b, draw in enumerate(draws):
+        idx = np.concatenate([by_regime[k] for k in draw])
+        st = stats(idx)
+        for k in point:
+            boot[k][b] = st[k]
+
+    def ci(k):
+        v = boot[k][np.isfinite(boot[k])]
+        return (float(np.percentile(v, 2.5)), float(np.percentile(v, 97.5))) if v.size else (float("nan"), float("nan"))
+
+    sec = "family bootstrap (§5.4)"
+    rows = [r"Statistic & comparator & point & 2.5\% & 97.5\% & cells & excl. \\", r"\midrule"]
+    lo, hi = ci("win_rate_vs_last")
+    rows.append(rf"\meth{{rational\_fit}} win rate vs last & -- & {f3(point['win_rate_vs_last'])} & {f3(lo)} & {f3(hi)} & {len(cells)} & -- \\")
+    fact(sec, f"rational_fit win rate vs last_value at g={gname(HEADLINE_G)} core: point [2.5%, 97.5%] over {BOOT_N} regime resamples",
+         f"{point['win_rate_vs_last']:.4f} [{lo:.4f}, {hi:.4f}] ({len(cells)} cells, {len(regimes)} regimes)",
+         "results/phase1/phase1_aggregated.csv", f"is_holdout == 0, capped == 0, target_g == {HEADLINE_G}, method == rational_fit",
+         f"mean over drawn cells of win_rate_vs_last; regimes resampled with replacement, RandomState({BOOT_SEED}), {BOOT_N} draws")
+    rows.append(r"\addlinespace[2pt]")
+    for m in comps:
+        lo1, hi1 = ci(f"lower_error_frac:{m}")
+        lo2, hi2 = ci(f"delta_median:{m}")
+        n_c, n_x = point[f"n_cells:{m}"], point[f"n_cells_excluded:{m}"]
+        rows.append(rf"lower-error fraction & {mth(m)} & {f3(point[f'lower_error_frac:{m}'])} & {f3(lo1)} & {f3(hi1)} & {n_c} & {n_x} \\")
+        rows.append(rf"$\Delta$ median error & {mth(m)} & {signed(point[f'delta_median:{m}'], 5)} & {signed(lo2, 5)} & {signed(hi2, 5)} & {n_c} & {n_x} \\")
+        fact(sec, f"rational_fit vs {m} at g={gname(HEADLINE_G)} core: lower-error fraction of cells, point [2.5%, 97.5%]",
+             f"{point[f'lower_error_frac:{m}']:.4f} [{lo1:.4f}, {hi1:.4f}] ({n_c} cells with both medians finite; {n_x} excluded)",
+             "results/phase1/phase1_aggregated.csv", f"is_holdout == 0, capped == 0, target_g == {HEADLINE_G}, methods rational_fit and {m}",
+             "fraction of drawn cells (both medians finite) with med_error(rational_fit) < med_error(M)")
+        fact(sec, f"rational_fit vs {m} at g={gname(HEADLINE_G)} core: delta of median cell errors (positive = rational worse), point [2.5%, 97.5%]",
+             f"{point[f'delta_median:{m}']:+.6f} [{lo2:+.6f}, {hi2:+.6f}]",
+             "results/phase1/phase1_aggregated.csv", f"is_holdout == 0, capped == 0, target_g == {HEADLINE_G}, methods rational_fit and {m}",
+             "median over drawn cells of med_error(rational_fit) - median over drawn cells of med_error(M), cells with both finite")
+    frag("f15_bootstrap.tex", "llrrrrr", rows,
+         ["results/phase1/phase1_aggregated.csv (core regimes, uncapped cells at the headline stratum)"],
+         f"is_holdout == 0, capped == 0, target_g == {gname(HEADLINE_G)}; resampling unit = core regime ({len(regimes)} regimes, "
+         f"{len(cells)} cells), {BOOT_N} draws with replacement from RandomState({BOOT_SEED}); point = unresampled cells; interval = "
+         "2.5th / 97.5th percentile of the draws; lower-error fraction and delta median over the cells where both methods have a finite "
+         "cell-median error (excl. = cells where the comparator has none); positive delta = rational_fit worse",
+         "Family bootstrap over core regimes: rational_fit's win rate vs the last value and its cell-median error against each comparator")
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# F16  generalisation summary (Table tab:gen)
+# ═════════════════════════════════════════════════════════════════════════════
+def _rank_or_unranked(G, RK, g, m):
+    if m in RK[g]:
+        return str(RK[g][m])
+    r = row_of(G, g, m)
+    return "unranked (valid rate " + (f3(float(r.valid_rate)) if r is not None else "--") + ")"
+
+
+def f16():
+    rows = [r"$g$ & eligible core & eligible held-out & eligible both & Spearman $\rho$ & "
+            r"\meth{rational\_fit} core / held-out & \meth{log\_linear} core / held-out \\", r"\midrule"]
+    sec = "generalisation"
+    rhos = {g: (rho, n) for g, rho, n in generalisation_rhos()}
+    for g in STRATA:
+        n_core, n_hold = len(RANK_CORE[g]), len(RANK_HOLD[g])
+        rho, n_both = rhos[g]
+        rf_c, rf_h = _rank_or_unranked(G_CORE, RANK_CORE, g, "rational_fit"), _rank_or_unranked(G_HOLD, RANK_HOLD, g, "rational_fit")
+        ll_c, ll_h = _rank_or_unranked(G_CORE, RANK_CORE, g, "log_linear"), _rank_or_unranked(G_HOLD, RANK_HOLD, g, "log_linear")
+        rows.append(f"{gname(g)} & {n_core}/{N_ACC} & {n_hold}/{N_ACC} & {n_both} & {f3(float(rho))} & {rf_c} / {rf_h} & {ll_c} / {ll_h} \\\\")
+        fact(sec, f"g={gname(g)}: accelerators eligible (valid_rate >= {C.RANK_MIN_VALID}) on core / held-out / both",
+             f"{n_core} / {n_hold} / {n_both} of {N_ACC}", "; ".join(SRC_G), f"target_g == {g}, is_trivial == 0", "count(rank_eligible == 1)")
+        fact(sec, f"g={gname(g)}: rational_fit and log_linear ranks, core / held-out",
+             f"rational_fit {rf_c} / {rf_h}; log_linear {ll_c} / {ll_h}", "; ".join(SRC_G), f"target_g == {g}",
+             "rank by med_error among the rank-eligible accelerators; below the floor: unranked with the valid rate")
+    frag("f16_generalisation_summary.tex", "lrrrrll", rows, SRC_G,
+         f"per stratum; eligible = accelerators with valid_rate >= {C.RANK_MIN_VALID} (rank_eligible == 1) in that regime set; rho = Spearman "
+         "correlation of the core and held-out med_error ranks over the accelerators eligible on both (the generalisation FACTS rows); "
+         "ranks are among the eligible accelerators of that regime set",
+         "Generalisation summary: eligible accelerators per regime set, rank correlation core vs held-out, and the two headline fits")
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# F18 / F19  order ladders (Phase 0b)
+# ═════════════════════════════════════════════════════════════════════════════
+LADDERS_CLASSICAL = ["shanks", "wynn_eps", "wynn_rho", "levin_t", "levin_u", "levin_v", "brezinski_theta", "anderson", "neville", "pade"]
+LADDERS_FITS = ["richardson_free", "richardson_fixed", "parametric"]
+
+
+def _ladder_panels():
+    path = os.path.join(RES, "phase0b", "order_ladders_panels.csv")
+    if not os.path.exists(path):
+        print("  (results/phase0b/order_ladders_panels.csv absent: fragments f18 / f19 skipped; produced by scripts/order_ladders.py)")
+        return None
+    P = pd.read_csv(path)
+    return P[P.noise.astype(str) == "pooled"]
+
+
+def _ladder_fragment(name, families, description):
+    P = _ladder_panels()
+    if P is None:
+        return
+    P = P[P.family.isin(families)]
+    core, hold = P[P.regime_set == "core"], P[P.regime_set == "holdout"]
+    n_core = int(core.n_cells.max()) if len(core) else 0
+    n_hold = int(hold.n_cells.max()) if len(hold) else 0
+    rows = [r"Family & order & \multicolumn{4}{c}{core} & \multicolumn{3}{c}{held-out} \\",
+            r"\cmidrule(lr){3-6}\cmidrule(lr){7-9}",
+            r" & & $\rhoV$ & med.\ err & q25--q75 & win vs last & $\rhoV$ & med.\ err & win vs last \\", r"\midrule"]
+    sec = "order ladders (Phase 0b)"
+    for fam in families:
+        fc = core[core.family == fam]
+        if fc.empty:
+            continue
+        best = fc.loc[fc.med_error.idxmin()] if fc.med_error.notna().any() else None
+        for i, (_, r) in enumerate(fc.iterrows()):
+            h = hold[(hold.family == fam) & (hold.variant == r.variant)]
+            h = h.iloc[0] if len(h) else None
+            marker = r" \textbullet" if int(r.is_roster) else ""
+            lab = esc(r.order_label) + marker
+            hc = ([f3(float(h.valid_rate)), f4(float(h.med_error)), f3(float(h.win_rate_vs_last))] if h is not None else ["--"] * 3)
+            rows.append(f"{esc(fam) if i == 0 else ''} & {lab} & {f3(float(r.valid_rate))} & {f4(float(r.med_error))} & "
+                        f"{f4(float(r.q25_error))}--{f4(float(r.q75_error))} & {f3(float(r.win_rate_vs_last))} & " + " & ".join(hc) + r" \\")
+        rows.append(r"\addlinespace[2pt]")
+        if best is not None:
+            fact(sec, f"{fam}: order with the lowest core median error (noise pooled, uncapped cells, conditional on validity)",
+                 f"{best.order_label}{' (roster: ' + best.roster_name + ')' if int(best.is_roster) else ' (ladder only)'}: med. err {best.med_error:.5f}, valid rate {best.valid_rate:.3f}",
+                 "results/phase0b/order_ladders_panels.csv", f"family == {fam}, regime_set == core, noise == pooled", "argmin med_error")
+        ros = fc[fc.is_roster == 1]
+        fact(sec, f"{fam}: the roster orders' core median error and valid rate",
+             "; ".join(f"{r.roster_name} ({r.order_label}): {r.med_error:.5f}, valid {r.valid_rate:.3f}" for _, r in ros.iterrows()) or "none",
+             "results/phase0b/order_ladders_panels.csv", f"family == {fam}, regime_set == core, noise == pooled, is_roster == 1", "med_error, valid_rate")
+        if fam == "neville":
+            fact(sec, "neville: valid rate and core median error by degree",
+                 "; ".join(f"{r.order_label}: valid {r.valid_rate:.3f}, med. err {r.med_error:.5f}" for _, r in fc.iterrows()),
+                 "results/phase0b/order_ladders_panels.csv", "family == neville, regime_set == core, noise == pooled", "valid_rate, med_error per degree")
+    frag(name, "ll" + "rrrr" + "rrr", rows,
+         ["results/phase0b/order_ladders_panels.csv (Phase 0b: every order of every family with an order parameter, evaluated on Phase 1's "
+          "grid at the headline stratum; noise pooled; uncapped cells; the roster orders reproduce phase1_records.csv exactly, "
+          "results/phase0b/order_ladders_agreement.txt)"],
+         f"regime_set core ({n_core} cells) | held-out ({n_hold} cells), noise == pooled; bullet = roster method; rho_V = valid rate over all "
+         "records; med. err, q25--q75 over the valid records (conditional on validity); win vs last = fraction of all records where the "
+         "variant is valid and below the last-value error",
+         description)
+
+
+def f18():
+    _ladder_fragment("f18_ladders_classical.tex", LADDERS_CLASSICAL,
+                     "Order ladders of the classical families: every order next to the roster orders, core and held-out")
+
+
+def f19():
+    _ladder_fragment("f19_ladders_fits.tex", LADDERS_FITS,
+                     "Order ladders of the fits: Richardson terms, fixed exponents and the parametric models, core and held-out")
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# F20  roster (Table tab:roster)
+# ═════════════════════════════════════════════════════════════════════════════
+def f20():
+    from src.accelerators import METHOD_NAMES
+    from src.evaluation import FAMILY, USES_FUTURE_X
+    from src.trivial import TRIVIAL_METHOD_NAMES
+    fams = list(dict.fromkeys(FAMILY[m] for m in METHOD_NAMES if m not in TRIVIAL_METHOD_NAMES))
+    rows = [r"Family & type & $K$ & members \\", r"\midrule"]
+    sec = "roster"
+    total = 0
+    for fam in fams:
+        members = [m for m in METHOD_NAMES if FAMILY[m] == fam and m not in TRIVIAL_METHOD_NAMES]
+        types = {("TE" if USES_FUTURE_X[m] else "LE") for m in members}
+        t = "mixed" if len(types) > 1 else (r"\TE" if "TE" in types else r"\LE")
+        total += len(members)
+        rows.append(f"{esc(fam)} & {t} & {len(members)} & " + ", ".join(mth(m) for m in members) + r" \\")
+        fact(sec, f"{fam}: K and type", f"K = {len(members)}, type {t.replace(chr(92), '')}; members {', '.join(members)}",
+             "src/accelerators.py (METHODS), src/evaluation.py (FAMILY, USES_FUTURE_X)", "-", "registry order")
+    rows.append(r"\midrule")
+    rows.append(rf"\textbf{{accelerators}} & & {total} & {len(fams)} families \\")
+    rows.append(r"\addlinespace[2pt]")
+    triv = list(TRIVIAL_METHOD_NAMES)
+    rows.append(f"trivial comparators (not counted) & & {len(triv)} & " + ", ".join(mth(m) for m in triv) + r" \\")
+    assert total == N_ACC
+    fact(sec, "totals", f"{total} accelerators in {len(fams)} families; {len(triv)} trivial comparators ({len(METHOD_NAMES)} registered methods)",
+         "src/accelerators.py", "-", "len(ACCEL_METHODS), len(TRIVIAL_METHOD_NAMES), len(METHOD_NAMES)")
+    frag("f20_roster.tex", "llrp{0.62\\linewidth}", rows,
+         ["src/accelerators.py (METHODS registry), src/evaluation.py (FAMILY, USES_FUTURE_X)"],
+         "families in order of first appearance in the registry; type TE = evaluates at the target index (USES_FUTURE_X), LE = estimates the "
+         "limit, mixed = a family with both; K = accelerators in the family; the trivial comparators are listed as comparators and not counted",
+         "Method roster by family, with type and member count")
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Facts for §7.1 (Phase 2) and Phase 3 that need no fragment of their own
+# ═════════════════════════════════════════════════════════════════════════════
+CASCADE_RULES = [("log_log_slope", ">", -0.10, "rational_fit"), ("richardson_r2", "<", 0.50, "rational_fit")]
+
+
+def facts_phase2():
+    sec = "Richardson failure (§7.1, Phase 2)"
+    path = os.path.join(RES, "phase2", f"phase2_correlations_g{gname(HEADLINE_G)}.csv")
+    if os.path.exists(path):
+        Cr = pd.read_csv(path)
+        if "spearman_vs_RR" in Cr.columns:
+            for _, r in Cr[Cr.regime == "ALL"].iterrows():
+                fact(sec, f"pooled Spearman correlation of {r.feature} with richardson_1's R_R_med / log median error at g={gname(HEADLINE_G)}",
+                     f"{r.spearman_vs_RR:.4f} (p {r.p_vs_RR:.3f}) / {r.spearman_vs_log_err:.4f} (p {r.p_vs_log_err:.3f}); n_cells {int(r.n_cells)}, dropped {int(r.n_dropped_nan)}",
+                     rel(path), f"regime == ALL, feature == {r.feature}", "spearman_vs_RR, spearman_vs_log_err over uncapped cells (features averaged over seeds)")
+        else:
+            print("  (phase2_correlations lacks the descriptive columns: §7.1 correlation facts skipped)")
+    path = os.path.join(RES, "phase2", f"phase2_rules_g{gname(HEADLINE_G)}.csv")
+    if os.path.exists(path):
+        Ru = pd.read_csv(path)
+        if "lower_error_frac_cells" in Ru.columns:
+            for feat, op, thr, alt in CASCADE_RULES:
+                r = Ru[(Ru.feature == feat) & (Ru.operator == op) & (Ru.threshold == thr) & (Ru.alternative == alt)]
+                if len(r):
+                    r = r.iloc[0]
+                    fact(sec, f"adopted cascade rule {feat} {op} {thr} -> {alt} at g={gname(HEADLINE_G)}: fire rate; cells fired; lower-error fraction of cells / of records; median relative change; r1 / alt valid rate on the fired records",
+                         f"{r.fire_rate:.4f}; {int(r.n_cells_fired)} of {int(r.n_cells_total)}; {r.lower_error_frac_cells:.4f} / {r.lower_error_frac_records:.4f}; "
+                         f"{r.median_rel_change:+.4f}; {r.r1_valid_rate:.4f} / {r.alt_valid_rate:.4f}",
+                         rel(path), f"feature == {feat}, operator == {op}, threshold == {thr}, alternative == {alt}", "src.panels.rule_panel over the uncapped cells with a finite feature")
+    path = os.path.join(RES, "phase2", "phase2_denominator_counts.csv")
+    if os.path.exists(path):
+        D = pd.read_csv(path)
+        fact(sec, "zero-denominator branch of R_R = E_R / E_last (E_last <= SKILL_EPS): records and cells where it fired, per horizon",
+             "; ".join(f"g={r.target_g:g}: {int(r.n_records_zero_denominator)} of {int(r.n_records_total)} records, {int(r.n_cells_affected)} of {int(r.n_cells_total)} cells" for _, r in D.iterrows()),
+             rel(path), "all rows (uncapped cells)", "src.panels.zero_denominator_flags")
+
+
+def facts_phase3():
+    SC = read("phase3", "phase3_selector_comparison.csv")
+    if "valid_rate" not in SC.columns:
+        return
+    sec = "selectors (Phase 3)"
+    for g in STRATA:
+        sg = SC[SC.target_g == g]
+        for _, r in sg.iterrows():
+            fact(sec, f"{r.selector} at g={gname(g)}: valid_rate; n_valid/n_total; median error; mean error (conditional on validity)",
+                 f"{r.valid_rate:.4f}; {int(r.n_valid)}/{int(r.n_total)}; {r.med_error:.5f}; {r.mean_error:.5f}",
+                 "results/phase3/phase3_selector_comparison.csv", f"selector == {r.selector}, target_g == {g}", "src.panels.error_panel over the chosen records")
+        if len(sg):
+            spread = float(sg.valid_rate.max() - sg.valid_rate.min())
+            fact(sec, f"g={gname(g)}: does the validity rate differ across selectors?",
+                 f"{'YES' if spread > 0.001 else 'no'} (spread {spread:.4f}; the Phase-3 warning fires above 0.001)",
+                 "results/phase3/phase3_selector_comparison.csv", f"target_g == {g}", "max - min of valid_rate over selectors")
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # Named facts that need no fragment
 # ═════════════════════════════════════════════════════════════════════════════
 def named_facts():
@@ -1363,10 +1719,13 @@ def named_facts():
 # FACTS.md and the fragment index
 # ═════════════════════════════════════════════════════════════════════════════
 def write_facts(answer_lines):
-    order = ["trivial baseline", "ranking", "skill summary", "classical no-op", "generalisation", "dangerous set",
+    order = ["roster", "trivial baseline", "ranking", "family bootstrap (§5.4)", "skill summary", "classical no-op",
+             "order ladders (Phase 0b)", "generalisation", "dangerous set",
              "richardson_3 validity by depth", "sigma = 0 cancellation NaNs", "invalid rates", "capped cells",
-             "sweep 1 (assumed asymptote)", "selectors (Phase 3)", "ensembles (Phase 5a)", "diagnostics (Phase 4)",
-             "real data (v2)", "real data (v2) perturbation diagnostic", "real data (legacy 18-cell run)", "pipeline provenance"]
+             "sweep 1 (assumed asymptote)", "Richardson failure (§7.1, Phase 2)", "selectors (Phase 3)",
+             "ensembles (Phase 5a)", "diagnostics (Phase 4)",
+             "real data (v2)", "real data fixed methods (§8)", "real data (v2) perturbation diagnostic",
+             "real data (legacy 18-cell run)", "pipeline provenance"]
     secs = list(dict.fromkeys(order + [f["section"] for f in FACTS]))
     with open(ARGS.facts, "w", encoding="utf-8", newline="\n") as f:
         f.write("# FACTS.md -- headline numbers of the redesign-v2 results, with provenance\n\n")
@@ -1414,6 +1773,8 @@ def main():
     f01(); f02(); f03(); f04(); f05(); f05b(); f06(); f07()
     answer = f08()
     f09(); f10(); f11(); f12()
+    f14(); f15(); f16(); f18(); f19(); f20()
+    facts_phase2(); facts_phase3()
     named_facts()
     write_facts(answer)
     write_index()
