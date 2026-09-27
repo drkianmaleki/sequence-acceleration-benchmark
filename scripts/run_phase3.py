@@ -25,7 +25,7 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 import src.config as CFG_MOD
-from phases.phase3 import run_phase3, CASCADES
+from phases.phase3 import run_phase3
 
 
 def parse_args():
@@ -63,7 +63,7 @@ def main():
     results = run_phase3(args.phase2_dir, args.out_dir, CFG_MOD.HEADLINE_G)
 
     df_comp = results['comparison']
-    df_cv   = results['cv']
+    df_regime = results['regime']
     df_clf  = results['classifier']
 
     print('\n' + '=' * 72)
@@ -89,16 +89,17 @@ def main():
     print(f"\n  Validity warning fired: {'YES' if results['validity_warned'] else 'no'} "
           f"(spread of valid_rate across selectors above 0.001 at some horizon)")
 
-    print('\n  Leave-one-regime-out (the cascades; per held-out regime, median over regimes of the panel):')
-    print(f"  {'Selector':<18} {'g':>5} {'med of med err':>15} {'min':>10} {'max':>10} {'med valid':>10}")
-    print('  ' + '─' * 74)
-    for sel in CASCADES:
-        for g in sorted(df_cv['target_g'].unique(), reverse=True):
-            sub = df_cv[(df_cv['selector'] == sel) & (df_cv['target_g'] == g)]
+    print('\n  Per-family evidence (phase3_regime_results.csv; the cascades have fixed thresholds, so the '
+          'per-regime panel is the out-of-regime view and Phase 5a\'s held-out families the out-of-sample test):')
+    print(f"  {'Selector':<18} {'g':>5} {'regimes':>8} {'med of med err':>15} {'min':>10} {'max':>10} {'med valid':>10}")
+    print('  ' + '─' * 84)
+    for sel in ('phase2_cascade', 'enhanced_cascade'):
+        for g in sorted(df_regime['target_g'].unique(), reverse=True):
+            sub = df_regime[(df_regime['selector'] == sel) & (df_regime['target_g'] == g)]
             e = sub['med_error'].dropna()
             if e.empty:
                 continue
-            print(f"  {sel:<18} {g:>5g} {e.median():>15.5f} {e.min():>10.5f} {e.max():>10.5f} "
+            print(f"  {sel:<18} {g:>5g} {len(sub):>8} {e.median():>15.5f} {e.min():>10.5f} {e.max():>10.5f} "
                   f"{sub['valid_rate'].median():>10.4f}")
 
     if not df_clf.empty:

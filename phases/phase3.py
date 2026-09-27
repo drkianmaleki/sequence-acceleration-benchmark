@@ -4,8 +4,10 @@ phase3.py
 Phase 3 — Adaptive Selector Pipeline (redesign v2, descriptive).
 
 Loads Phase 2 data (no new simulations) and evaluates a set of method
-selectors, a regime classifier and the two rule cascades under
-leave-one-regime-out.
+selectors and a regime classifier.  The cascades' thresholds are fixed
+constants, so there is no cross-validation to run: the per-regime panel
+(phase3_regime_results.csv) is the per-family evidence, and the six held-out
+families of Phase 5a are the out-of-sample test.
 
 Selector evaluation
 -------------------
@@ -55,11 +57,10 @@ Input files (from results/phase2/)
 Output files (to results/phase3/)
 ----------------------------------
     phase3_selector_comparison.csv  selector x stratum: the panel of the chosen records
-    phase3_regime_results.csv       selector x regime x stratum: the same
-    phase3_cv_results.csv           leave-one-regime-out: the cascades' panels per held-out regime
+    phase3_regime_results.csv       selector x regime x stratum: the same (the per-family evidence)
     phase3_regime_classifier.csv    regime classification accuracy
     phase3_capped_cells.csv         capped cells (excluded above) with the chosen method
-    figure_p3_01 ... figure_p3_05
+    figure_p3_01 ... figure_p3_04
 
 Author : Kian Maleki
 Date   : 2026-05-24 (v1), 2026-09-19 (redesign v2), 2026-09-27 (descriptive reporting)
@@ -242,7 +243,6 @@ SELECTORS = {
     'enhanced_cascade': _apply_enhanced_cascade,
     'oracle':           lambda row: row['oracle_method'],
 }
-CASCADES = ['phase2_cascade', 'enhanced_cascade']
 
 
 # =============================================================================
@@ -336,37 +336,6 @@ def evaluate_selectors(grid: pd.DataFrame,
         print(f'  Saved: {p}  ({len(df)} rows)')
 
     return df_comp, df_regime, warned
-
-
-# =============================================================================
-# 4.  LEAVE-ONE-REGIME-OUT CROSS-VALIDATION
-# =============================================================================
-
-def cross_validate(grid: pd.DataFrame, df_rec: pd.DataFrame, out_dir: str) -> pd.DataFrame:
-    """
-    Leave-one-regime-out for the two cascades on the non-capped cells: per
-    held-out regime and stratum, the panel of the cascade's chosen records
-    on that regime.  The cascade rules use fixed thresholds, so this is the
-    out-of-regime view of the same evaluation.
-    """
-    pooled  = exclude_capped(grid)
-    regimes = sorted(pooled['regime'].unique())
-    cv_rows = []
-
-    for held_out in regimes:
-        test_grid = pooled[pooled['regime'] == held_out]
-        for sel_name in CASCADES:
-            recs = chosen_records(test_grid, df_rec, SELECTORS[sel_name])
-            for g, grp in recs.groupby('target_g'):
-                cv_rows.append({'held_out_regime': held_out, 'selector': sel_name, 'target_g': g,
-                                **_panel_row(grp),
-                                'n_cells': int(grp[GRID_KEYS].drop_duplicates().shape[0])})
-
-    df_cv = pd.DataFrame(cv_rows)
-    p = os.path.join(out_dir, 'phase3_cv_results.csv')
-    df_cv.to_csv(p, index=False)
-    print(f'  Saved: {p}  ({len(df_cv)} rows)')
-    return df_cv
 
 
 # =============================================================================
@@ -710,45 +679,6 @@ def fig_p3_04_obs_depth(grid: pd.DataFrame,
     return path
 
 
-def fig_p3_05_cv_summary(df_regime: pd.DataFrame, default_g: float, out_dir: str) -> str:
-    """Box plot: distribution over regimes of each selector's median error at
-    the headline stratum (the per-regime panels; for the cascades these are
-    the leave-one-regime-out results), validity rates listed underneath."""
-    sel_order = ['fixed_richardson', 'fixed_single_exp', 'phase2_cascade', 'enhanced_cascade', 'oracle']
-    sub = df_regime[df_regime['target_g'] == default_g]
-    sel_order = [s for s in sel_order if s in sub['selector'].unique()]
-    if not sel_order:
-        return ''
-
-    data    = [sub[sub['selector'] == s]['med_error'].dropna().values for s in sel_order]
-    vrates  = [sub[sub['selector'] == s]['valid_rate'].mean() for s in sel_order]
-    colours = [SELECTOR_COLOURS.get(s, '#999') for s in sel_order]
-    labels  = [f"{s.replace('_', chr(10))}\nmean V={v:.2f}" for s, v in zip(sel_order, vrates)]
-    n_reg   = sub['regime'].nunique()
-
-    fig, ax = plt.subplots(figsize=(9, 6))
-    bps = ax.boxplot(data, positions=range(len(sel_order)), widths=0.5,
-                     patch_artist=True,
-                     medianprops=dict(color='white', lw=2),
-                     flierprops=dict(marker='.', markersize=4, alpha=0.5))
-    for patch, colour in zip(bps['boxes'], colours):
-        patch.set_facecolor(colour)
-        patch.set_alpha(0.8)
-
-    ax.set_xticks(range(len(sel_order)))
-    ax.set_xticklabels(labels, fontsize=8)
-    ax.set_yscale('log')
-    ax.set_ylabel(f'Per-regime median error of the chosen records ({COND}, log scale)', fontsize=9)
-    ax.set_title(
-        f'Figure P3-5 — Per-regime spread at g = {default_g:g} (leave-one-regime-out view of the cascades)\n'
-        f'Box = distribution across {n_reg} regimes; V = validity rate averaged over regimes',
-        fontsize=10, fontweight='bold')
-    fig.tight_layout()
-    path = os.path.join(out_dir, 'figure_p3_05_cv_summary.png')
-    _save(fig, path)
-    return path
-
-
 # =============================================================================
 # MASTER RUN FUNCTION
 # =============================================================================
@@ -782,9 +712,6 @@ def run_phase3(phase2_dir: str, out_dir: str,
     print('  Evaluating selectors (per record; no fallback for invalid choices) ...')
     df_comp, df_regime, warned = evaluate_selectors(grid, df_rec, out_dir)
 
-    print('\n  Running leave-one-regime-out cross-validation ...')
-    df_cv = cross_validate(grid, df_rec, out_dir)
-
     print('\n  Building regime fingerprinting classifier ...')
     df_clf = regime_classifier(df_feat, out_dir)
 
@@ -794,14 +721,12 @@ def run_phase3(phase2_dir: str, out_dir: str,
         fig_p3_02_improvement_map(df_regime, out_dir),
         fig_p3_03_classifier_accuracy(df_clf, out_dir),
         fig_p3_04_obs_depth(grid, df_rec, default_g, out_dir),
-        fig_p3_05_cv_summary(df_regime, default_g, out_dir),
     ]
 
     return {
         'grid':       grid,
         'comparison': df_comp,
         'regime':     df_regime,
-        'cv':         df_cv,
         'classifier': df_clf,
         'validity_warned': warned,
         'default_g':  default_g,

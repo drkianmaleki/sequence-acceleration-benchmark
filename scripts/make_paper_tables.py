@@ -888,14 +888,13 @@ def f08():
 def f09():
     # a) Phase 3
     SC = read("phase3", "phase3_selector_comparison.csv")
-    CV = read("phase3", "phase3_cv_results.csv")
     NAME3 = {"oracle": r"oracle \textit{(hindsight: lowest cell-median error)}", "phase2_cascade": "Phase-2 cascade",
              "enhanced_cascade": "enhanced cascade",
              "fixed_rational": r"fixed \meth{rational\_fit}", "fixed_richardson": r"fixed \meth{richardson\_1}",
              "fixed_single_exp": r"fixed \meth{single\_exp\_fit}", "fixed_last": r"fixed \meth{last\_value} (the trivial floor)"}
     order3 = ["oracle", "phase2_cascade", "enhanced_cascade", "fixed_rational", "fixed_richardson", "fixed_single_exp", "fixed_last"]
     order3 = [s for s in order3 if s in set(SC.selector)]
-    rows = [r"Selector & valid rate & $n_{\mathrm{valid}}/n_{\mathrm{total}}$ & med.\ err & q25--q75 & p90 & win vs last & LORO med.\ err \\",
+    rows = [r"Selector & valid rate & $n_{\mathrm{valid}}/n_{\mathrm{total}}$ & med.\ err & q25--q75 & p90 & win vs last \\",
             r"\midrule"]
     for g in STRATA:
         sg = SC[SC.target_g == g]
@@ -903,16 +902,14 @@ def f09():
             continue
         n_excl = int(sg.n_capped_excluded.max())
         rows.append(mid(rf"\textit{{$g = {gname(g)}$}}" + (r" (headline)" if g == HEADLINE_G else "")
-                        + rf"; {int(sg.n_cells.max())} cells, {n_excl} capped cells excluded", 8))
+                        + rf"; {int(sg.n_cells.max())} cells, {n_excl} capped cells excluded", 7))
         for s in order3:
             r = sg[sg.selector == s]
             if r.empty:
                 continue
             r = r.iloc[0]
-            cv = CV[(CV.selector == s) & (CV.target_g == g)].med_error.dropna()
-            loro = f4(float(cv.median())) if len(cv) else "--"
             rows.append(f"{NAME3[s]} & {f3(float(r.valid_rate))} & {int(r.n_valid)}/{int(r.n_total)} & {f4(float(r.med_error))} & "
-                        f"{f4(float(r.q25_error))}--{f4(float(r.q75_error))} & {f4(float(r.p90_error))} & {f3(float(r.win_rate_vs_last))} & {loro} \\\\")
+                        f"{f4(float(r.q25_error))}--{f4(float(r.q75_error))} & {f4(float(r.p90_error))} & {f3(float(r.win_rate_vs_last))} \\\\")
         if g != STRATA[-1]:
             rows.append(r"\addlinespace[2pt]")
     for s in order3:
@@ -927,13 +924,13 @@ def f09():
     fact("selectors (Phase 3)", "validity-rate spread across selectors per stratum (the Phase-3 warning fires above 0.001)",
          ", ".join(f"g={gname(g)}: {v:.4f}" for g, v in spread.items()),
          "results/phase3/phase3_selector_comparison.csv", "per target_g", "max - min of valid_rate over selectors")
-    frag("f09a_selectors_phase3.tex", "lrrrrrrr", rows,
-         ["results/phase3/phase3_selector_comparison.csv (core regimes, capped cells excluded; src.panels.error_panel over the chosen records)",
-          "results/phase3/phase3_cv_results.csv (leave-one-regime-out: the cascades' panel per held-out regime; median over regimes shown)"],
+    frag("f09a_selectors_phase3.tex", "lrrrrrr", rows,
+         ["results/phase3/phase3_selector_comparison.csv (core regimes, capped cells excluded; src.panels.error_panel over the chosen records)"],
          "all selectors, per stratum; a selector picks one method per cell and is scored on every record of that cell (the chosen method's "
          "record; an invalid choice stays invalid, no fallback); valid rate and n_valid/n_total over all records; med. err, q25--q75 and p90 "
          "over the valid records only; win vs last = fraction of all records where the chosen record is valid and below the last-value error; "
-         "LORO = median over held-out regimes of the per-regime median error (cascades only)",
+         "the cascades' thresholds are fixed constants, so the per-regime panel (phase3_regime_results.csv) is the per-family evidence and "
+         "the held-out families of Phase 5a the out-of-sample test",
          "Phase 3 selectors: conditional on validity; validity rate alongside")
 
     # b/c) Phase 5a ensembles

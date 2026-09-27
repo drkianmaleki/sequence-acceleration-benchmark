@@ -267,8 +267,7 @@ def test_phase2_sweep_schema_targets_rules_and_phase3_selectors(tmp_path):
     from phases.phase2 import (PHASE2_BASE_METHODS, PHASE2_METHODS, RANK_POOL, RECORD_COLS,
                                UNRANKED_COMPARATORS, denominator_counts, evaluate_rules,
                                richardson_targets, run_correlation_analysis, run_sweep)
-    from phases.phase3 import (CANDIDATES, SELECTORS, build_grid, cross_validate,
-                               evaluate_selectors)
+    from phases.phase3 import CANDIDATES, SELECTORS, build_grid, evaluate_selectors
     assert PHASE2_METHODS == list(PHASE2_POOL) + ["constant_assumed", "constant_oracle"]
     # decision 4: constant_assumed is reported alongside like the oracle and is
     # no selector candidate; the pool (with last_value) is the candidate set
@@ -345,12 +344,12 @@ def test_phase2_sweep_schema_targets_rules_and_phase3_selectors(tmp_path):
     fl = df_comp[df_comp.selector == "fixed_last"]
     assert (fl.valid_rate == 1.0).all() and (fl.win_rate_vs_last == 0.0).all()   # the floor never beats itself
     assert isinstance(warned, bool)
-    df_cv = cross_validate(grid, df_rec, str(tmp_path))
-    assert set(df_cv.selector) == {"phase2_cascade", "enhanced_cascade"}
-    assert {"held_out_regime", "target_g", "med_error", "valid_rate", "n_cells"} <= set(df_cv.columns)
-    for f in ("phase3_selector_comparison.csv", "phase3_regime_results.csv",
-              "phase3_capped_cells.csv", "phase3_cv_results.csv"):
-        assert (tmp_path / f).exists()
+    # the per-regime panel is the per-family evidence (no cross-validation step)
+    assert set(df_regime.selector) == set(SELECTORS)
+    assert {"regime", "target_g", "med_error", "valid_rate", "n_cells", "n_capped_excluded"} <= set(df_regime.columns)
+    # exactly the three Phase-3 tables of the selector evaluation, nothing else
+    assert sorted(p.name for p in tmp_path.glob("phase3_*.csv")) == [
+        "phase3_capped_cells.csv", "phase3_regime_results.csv", "phase3_selector_comparison.csv"]
     with pytest.raises(ValueError):
         run_sweep([90], [0.0], [0.5], 1, 60, str(tmp_path), core_regimes=["stretched_exp"])
 
