@@ -66,3 +66,9 @@ tmp/
 temp/
 # Phase 5a per-block shards (concatenated into phase5a_raw.csv)
 results/phase5a/shards/
+
+# local project folders (K-25): not part of the public repository
+reports/
+documents/
+paper/
+archive/
