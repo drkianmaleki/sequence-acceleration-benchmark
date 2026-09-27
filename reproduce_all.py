@@ -7,6 +7,9 @@ in the required order:
     Phase 0   analytic unit tests of the accelerator roster (src.pipeline.ACCEL_METHODS)
     Phase 1   main benchmark (24 regimes x 30 seeds x 3 noise x 3 gap strata x every
               registered method; the counts are printed by --plan)
+    Phase 0b  order ladders: every order of every family with an order parameter,
+              on Phase 1's grid at the headline stratum, with an exact-agreement
+              check against phase1_records.csv (scripts/order_ladders.py)
     derive    excluded-method re-derivation  ->  results/phase1/dangerous_methods.json
               (pooled validity below config.RANK_MIN_VALID; 'dangerous' is the legacy name)
     Phase 2   Richardson failure characterisation (13 depths, core regimes)
@@ -59,6 +62,7 @@ if _ROOT not in sys.path:
 STEPS = [
     ("Phase 0 — analytic unit tests",              "scripts/run_phase0_tests.py", False),
     ("Phase 1 — main benchmark",                   "scripts/run_phase1.py",       True),
+    ("Phase 0b — order ladders",                   "scripts/order_ladders.py",    True),
     ("Dangerous re-derivation (Phase 1 -> artifact)", "scripts/derive_dangerous.py", False),
     ("Phase 2 — failure detection",                "scripts/run_phase2.py",       True),
     ("Phase 3 — adaptive selection",               "scripts/run_phase3.py",       True),
@@ -98,6 +102,12 @@ def plan(mode: str) -> list:
     n1 = len(r) * c["n_seeds"] * len(c["noise_levels"]) * len(c["gap_fractions"]) * len(METHOD_NAMES)
     rows.append(("Phase 1", n1, f"{len(r)} regimes x {c['n_seeds']} seeds x {len(c['noise_levels'])} noise x "
                                 f"{len(c['gap_fractions'])} strata x {len(METHOD_NAMES)} methods"))
+    from scripts.order_ladders import all_variants, build_ladders, COMPARATORS
+    n_lad, n_all = len(build_ladders()), len(all_variants())
+    n0b = n_all * len(r) * c["n_seeds"] * len(c["noise_levels"])
+    rows.append(("Phase 0b", n0b, f"{n_lad} ladder variants + {len(COMPARATORS)} comparators x {len(r)} regimes x "
+                                  f"{c['n_seeds']} seeds x {len(c['noise_levels'])} noise at g = {C.HEADLINE_G} "
+                                  f"(+ agreement check against phase1_records.csv)"))
     rows.append(("Dangerous derivation", 0, "reads phase1_aggregated.csv"))
 
     c = C.PHASE2[mode]
@@ -192,8 +202,8 @@ def main():
     print("=" * 72)
     print(f"  Reproducing all results  [{mode} mode, redesign v2]")
     print("=" * 72)
-    print(f"  {len(steps)} steps.  Order: Phase 0 -> Phase 1 -> dangerous re-derivation "
-          f"-> Phases 2-5 -> real data")
+    print(f"  {len(steps)} steps.  Order: Phase 0 -> Phase 1 -> Phase 0b (ladders) -> "
+          f"excluded-set re-derivation -> Phases 2-5 -> real data")
     print("  Output: results/<phase>/\n")
 
     outcomes = []
