@@ -21,7 +21,8 @@ Descriptive panel (error_panel) of a set of records:
         over the VALID records only -- every table that prints them labels
         them "conditional on validity" and shows the validity rate alongside
         (sd_error is the sample standard deviation, NaN below two records;
-        quantiles use numpy's default linear interpolation);
+        med_error is numpy's median, the quartiles and p90 use numpy's
+        default linear interpolation);
     win_rate_vs_last
         fraction of ALL records where the method is valid and its error is
         below E_last; an invalid record never wins.
@@ -101,11 +102,11 @@ def error_panel(errors, valid, catastrophic, last_errors) -> Dict[str, float]:
         "cat_rate": float(c.mean()) if n_total else nan,
     }
     if n_valid:
-        q25, q50, q75, p90 = np.percentile(ev, [25, 50, 75, 90])
+        q25, q75, p90 = np.percentile(ev, [25, 75, 90])
         out.update({
             "mean_error": float(ev.mean()),
             "sd_error": float(ev.std(ddof=1)) if n_valid >= 2 else nan,
-            "med_error": float(q50),
+            "med_error": float(np.median(ev)),      # np.median, as every med_error before the panel
             "q25_error": float(q25),
             "q75_error": float(q75),
             "p90_error": float(p90),

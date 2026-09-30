@@ -30,8 +30,8 @@ if _ROOT not in sys.path:
 import pandas as pd  # noqa: E402
 
 import src.config as CFG_MOD  # noqa: E402
-from src.dangerous import (CRITERION, SCHEMA, artifact_path, derive_dangerous,  # noqa: E402
-                           load_artifact)
+from src.dangerous import (CRITERION, SCHEMA, TABLE_DECIMALS, artifact_path,  # noqa: E402
+                           derive_dangerous, load_artifact)
 
 
 def main() -> int:
@@ -75,10 +75,20 @@ def main() -> int:
     flagged_rows = {r["method"] for r in payload.get("table", []) if r.get("dangerous") == 1}
     if flagged_rows != declared:
         problems.append("the artifact's table flags differ from its dangerous_methods list")
+    # The stored valid_rate carries TABLE_DECIMALS decimals while the flag is decided on the
+    # unrounded mean, so a rate within half a unit of the last stored decimal of the floor
+    # cannot be judged from the table; every other row must agree with its flag.
     elig = table[table["eligible"] == 1]
-    below = set(elig.loc[elig["valid_rate"] < CFG_MOD.RANK_MIN_VALID, "method"])
-    if below != observed:
-        problems.append("re-derived flags do not equal 'eligible and valid_rate below the floor'")
+    floor = float(CFG_MOD.RANK_MIN_VALID)
+    tol = 0.5 * 10 ** (-TABLE_DECIMALS)
+    surely_below = set(elig.loc[elig["valid_rate"] < floor - tol, "method"])
+    surely_above = set(elig.loc[elig["valid_rate"] > floor + tol, "method"])
+    if not surely_below <= observed or (surely_above & observed):
+        problems.append("re-derived flags do not equal 'eligible and valid_rate below the floor' "
+                        "outside the rounding band of the stored table")
+    band = sorted(set(elig["method"]) - surely_below - surely_above)
+    if band:
+        print(f"note: {band} within {tol:g} of the floor in the stored table; the flag was decided on the unrounded mean")
 
     missing = observed - declared
     stale = declared - observed

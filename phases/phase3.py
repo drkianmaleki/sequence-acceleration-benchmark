@@ -39,8 +39,8 @@ oracle            lowest cell-median error among the candidates (hindsight)
 Redesign v2
 -----------
   * Cells are keyed by target_g (gap stratum); each carries n_f, achieved_g
-    and capped.  Capped cells are excluded from every pooled comparison and
-    from the cross-validation; they are listed in phase3_capped_cells.csv.
+    and capped.  Capped cells are excluded from every pooled comparison;
+    they are listed in phase3_capped_cells.csv.
   * Selector candidates are the Phase-2 pool (src.pipeline.PHASE2_POOL;
     Report-2 review, decision 4).  constant_assumed and constant_oracle are
     evaluated in Phase 2, never a candidate, never in the oracle selector.
@@ -265,9 +265,13 @@ def chosen_records(grid: pd.DataFrame, df_rec: pd.DataFrame, sel_fn) -> pd.DataF
     return recs
 
 
-def _panel_row(recs: pd.DataFrame) -> Dict[str, float]:
-    panel = error_panel(recs['error'], recs['valid'], recs['catastrophic'], recs['E_last'])
+def _round_panel(panel: Dict[str, float]) -> Dict[str, float]:
+    """The written form of a panel: rates rounded to four decimals, errors as computed."""
     return {k: (round(v, 4) if k in RATE_COLS and math.isfinite(v) else v) for k, v in panel.items()}
+
+
+def _panel_row(recs: pd.DataFrame) -> Dict[str, float]:
+    return _round_panel(error_panel(recs['error'], recs['valid'], recs['catastrophic'], recs['E_last']))
 
 
 def evaluate_selectors(grid: pd.DataFrame,
@@ -282,6 +286,7 @@ def evaluate_selectors(grid: pd.DataFrame,
     """
     pooled = exclude_capped(grid)
     comp_rows, regime_rows, capped_rows = [], [], []
+    raw_valid: Dict[float, Dict[str, float]] = {}      # unrounded valid_rate per (g, selector) for the warning
 
     for sel_name, sel_fn in SELECTORS.items():
         recs = chosen_records(pooled, df_rec, sel_fn)
@@ -289,7 +294,9 @@ def evaluate_selectors(grid: pd.DataFrame,
         for g, grp in recs.groupby('target_g'):
             n_all = int((grid['target_g'] == g).sum())
             n_cells = int(grp[GRID_KEYS].drop_duplicates().shape[0])
-            comp_rows.append({'selector': sel_name, 'target_g': g, **_panel_row(grp),
+            panel = error_panel(grp['error'], grp['valid'], grp['catastrophic'], grp['E_last'])
+            raw_valid.setdefault(float(g), {})[sel_name] = float(panel['valid_rate'])
+            comp_rows.append({'selector': sel_name, 'target_g': g, **_round_panel(panel),
                               'n_cells': n_cells, 'n_capped_excluded': n_all - n_cells})
 
         for (regime, g), grp in recs.groupby(['regime', 'target_g']):
@@ -317,13 +324,15 @@ def evaluate_selectors(grid: pd.DataFrame,
 
     # validity check: every selector's records are the same cells x seeds, so
     # a validity gap between selectors is what the reader must weigh against
-    # the conditional error statistics
+    # the conditional error statistics.  The spread is taken on the unrounded
+    # rates; the table rounds only for writing.
     warned = False
-    for g, grp in df_comp.groupby('target_g'):
-        spread = float(grp['valid_rate'].max() - grp['valid_rate'].min())
+    for g in sorted(raw_valid):
+        rates = raw_valid[g]
+        spread = max(rates.values()) - min(rates.values())
         if spread > VALIDITY_WARN_TOL:
             warned = True
-            detail = ', '.join(f"{r.selector} {r.valid_rate:.4f}" for r in grp.itertuples())
+            detail = ', '.join(f"{sel} {vr:.4f}" for sel, vr in rates.items())
             print(f'  WARNING: validity rate differs between selectors by {spread:.4f} at g = {g:g} '
                   f'({detail}); the error statistics are conditional on validity -- read them '
                   f'together with the validity rates')

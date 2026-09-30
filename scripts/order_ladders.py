@@ -293,7 +293,7 @@ def evaluate_regime(regime: str, n_seeds: int, noise_levels: List[float], obs_id
     exactly as run_phase1 builds the window, the horizon and the record.
     """
     variants = all_variants()
-    last_key = f'trivial:last_value'
+    last_key = 'trivial:last_value'
     n_arr   = np.arange(obs_idx + 1, dtype=float)
     w_start = max(0, obs_idx - window_len + 1)
     idx_win = list(range(w_start, obs_idx + 1))

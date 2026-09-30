@@ -5,10 +5,14 @@ Before/after regression check for code changes that must not alter what any
 existing method computes.
 
     python scripts/dev/compare_quick_runs.py BEFORE_DIR AFTER_DIR
+    python scripts/dev/compare_quick_runs.py --aggregate-only BEFORE_DIR AFTER_DIR
 
 BEFORE_DIR and AFTER_DIR are two results/ trees produced by
 ``python reproduce_all.py --quick`` at two commits (including the git-ignored
-raw per-record files).  The script
+raw per-record files).  With --aggregate-only the script compares nothing but
+phase1/phase1_aggregated.csv med_error for the shared methods (exact,
+round-trip floats) and reports the number of differing values and the largest
+relative difference.  Otherwise the script
 
   * loads phase1/phase1_records.csv from both, keys the records on
     (regime, noise, seed, target_g, method), restricts to the methods present
@@ -30,11 +34,23 @@ raw per-record files).  The script
     selector by selector on mean_error, med_error and n_valid (a snapshot
     from before Prompt R8e Part C carries median_error and n, which are
     renamed first; rows of selectors without a valid record, which that
-    older summary omitted, are reported, not counted as mismatches): the
-    selectors whose definition does not read perturb_iqr must be identical; the
-    diagnostic-weighted, capped-diagnostic and IQR-threshold selectors
-    (``is_diag_selector``) are expected to differ after the pairing and are
-    listed as such with the number of rows that changed;
+    older summary omitted, are reported, not counted as mismatches).  The
+    selectors fall into three classes by what their formula in
+    phases/phase5a.py::_compute_ensembles reads (``selector_class``):
+      - fixed: fixed name lists -- the trivial comparators, the fixed single
+        methods, the Phase-2 cascade and the small-pool oracle / ensembles
+        over src.pipeline.PHASE2_POOL; these must be identical;
+      - roster/artifact-dependent: the whole accelerator roster or the
+        roster minus the excluded set (oracle_<N>, equal_ensemble_<N>,
+        *_safe); expected to differ across roster or artifact changes, which
+        the script detects from the method sets of phase1_records.csv and
+        the two dangerous_methods.json artifacts, and must be identical when
+        neither changed;
+      - diagnostic: reads perturb_iqr (diag_ensemble_*, capped_diag_*,
+        threshold_ens_*); expected to differ from a snapshot taken before
+        the pairing (R8b Part B) and listed with the number of values that
+        changed; the roster-sized and *_safe members are also
+        roster/artifact-dependent;
   * echoes phase0b/order_ladders_agreement.txt of the AFTER tree (the ladder
     script's own exact-agreement check against phase1_records.csv) and fails
     when it is missing or its verdict is not AGREE;
@@ -50,11 +66,20 @@ method's behaviour changed and must be explained before the change is
 accepted.
 """
 
+import argparse
+import json
 import os
+import re
 import sys
 
 import numpy as np
 import pandas as pd
+
+_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+
+from src.pipeline import PHASE2_POOL   # noqa: E402  (the small pool's size names the small-pool selectors)
 
 P1_KEYS = ["regime", "noise", "seed", "target_g", "method"]
 P1_COLS = ["estimate", "error", "valid", "catastrophic", "n_f", "capped", "L_true", "L_hat"]
@@ -91,14 +116,32 @@ def _equal(a: pd.Series, b: pd.Series) -> np.ndarray:
     return (a.astype(str) == b.astype(str)).to_numpy()
 
 
-def is_diag_selector(name: str) -> bool:
-    """True for the Phase 5a selectors whose definition reads perturb_iqr
-    (phases/phase5a.py::_compute_ensembles): the 1/IQR-weighted ensembles
-    (diag_ensemble_*), their capped variants (capped_diag_*) and the IQR-threshold
-    ensembles (threshold_ens_*).  Every other selector (oracles, equal-weight
-    medians, the Phase-2 cascade, the fixed methods, the trivials) uses only the
-    central estimates and must be unchanged by the pairing."""
-    return "diag" in name or name.startswith("threshold_ens")
+FIXED_SELECTORS = {"fixed_rational", "fixed_richardson", "phase2_cascade",
+                   "constant_assumed", "constant_oracle", "window_mean", "window_min", "last_value"}
+_SIZED = re.compile(r"(oracle|equal_ensemble|diag_ensemble|capped_diag)_(\d+)")
+
+
+def selector_class(name: str) -> str:
+    """
+    What a Phase 5a selector's formula reads (phases/phase5a.py::_compute_ensembles):
+    'fixed' (fixed name lists: the trivials, the fixed single methods, the cascade,
+    the small-pool oracle / ensembles over PHASE2_POOL), 'roster' (the whole roster
+    or the roster minus the excluded set: oracle_<N>, equal_ensemble_<N>, *_safe),
+    'diagnostic' (reads perturb_iqr: diag_ensemble_*, capped_diag_*, threshold_ens_*),
+    or 'diagnostic, roster' for the diagnostic selectors over the roster / the
+    safe set / the excluded-set-filtered pool (threshold_ens_*).
+    """
+    m = _SIZED.fullmatch(name)
+    small = m is not None and int(m.group(2)) == len(PHASE2_POOL)
+    diag = "diag" in name or name.startswith("threshold_ens")
+    roster = name.endswith("_safe") or name.startswith("threshold_ens") or (m is not None and not small)
+    if diag:
+        return "diagnostic, roster" if roster else "diagnostic"
+    if roster:
+        return "roster"
+    if name in FIXED_SELECTORS or small:
+        return "fixed"
+    return "roster"          # an unknown name is treated conservatively as roster-dependent
 
 
 def compare_expected_diff(name: str, before: pd.DataFrame, after: pd.DataFrame,
@@ -129,8 +172,24 @@ def _ens_frame(path: str, fname: str) -> pd.DataFrame:
     return df.rename(columns=ren)
 
 
-def compare_selectors(before_dir: str, after_dir: str) -> None:
-    """Selector-level comparison of the Phase 5a ensemble tables."""
+def _artifact_set(results_dir: str):
+    """The excluded set of a results tree, or None when its artifact is absent / unreadable."""
+    p = os.path.join(results_dir, "phase1", "dangerous_methods.json")
+    try:
+        with open(p, encoding="utf-8") as fh:
+            return frozenset(json.load(fh)["dangerous_methods"])
+    except Exception:
+        return None
+
+
+def compare_selectors(before_dir: str, after_dir: str, roster_same: bool, artifact_same) -> None:
+    """
+    Selector-level comparison of the Phase 5a ensemble tables.  ``roster_same``
+    says whether the two trees evaluated the same method set, ``artifact_same``
+    whether their excluded sets agree (None when an artifact is missing); the
+    roster/artifact-dependent selectors must be identical only when both hold.
+    """
+    strict_roster = roster_same and artifact_same is True
     for fname in ("phase5a_ensemble.csv", "phase5a_ensemble_holdout.csv"):
         pb, pa = os.path.join(before_dir, "phase5a", fname), os.path.join(after_dir, "phase5a", fname)
         if not (os.path.exists(pb) and os.path.exists(pa)):
@@ -138,8 +197,10 @@ def compare_selectors(before_dir: str, after_dir: str) -> None:
             continue
         b, a = _ens_frame(pb, fname), _ens_frame(pa, fname)
         shared = sorted(set(b["selector"]) & set(a["selector"]))
-        non_diag = [s for s in shared if not is_diag_selector(s)]
-        diag = [s for s in shared if is_diag_selector(s)]
+        classes = {s: selector_class(s) for s in shared}
+        non_diag = [s for s in shared if classes[s] == "fixed"]
+        roster_dep = [s for s in shared if classes[s] == "roster"]
+        diag = [s for s in shared if classes[s].startswith("diagnostic")]
         only_after = sorted(set(a["selector"]) - set(b["selector"]))
         only_before = sorted(set(b["selector"]) - set(a["selector"]))
         merged = b.merge(a, on=ENS_KEYS, how="inner", suffixes=("_b", "_a"))
@@ -157,6 +218,14 @@ def compare_selectors(before_dir: str, after_dir: str) -> None:
         if omitted:
             print(f"  {fname}: {len(omitted)} row(s) only in AFTER with n_valid == 0 (selectors without a valid record on that "
                   f"slice, which the summary before R8e omitted): {sorted(omitted)}")
+        def _n_diff(sel_list):
+            counts = []
+            for s in sel_list:
+                ss = merged[merged["selector"] == s]
+                n = sum(int((~_equal(ss[c + "_b"], ss[c + "_a"])).sum()) for c in ENS_COLS)
+                counts.append((s, n, len(ss) * len(ENS_COLS)))
+            return counts
+
         sub = merged[merged["selector"].isin(non_diag)]
         n_bad = 0
         for c in ENS_COLS:
@@ -164,20 +233,53 @@ def compare_selectors(before_dir: str, after_dir: str) -> None:
             if not ok.all():
                 n_bad += int((~ok).sum())
                 bad = sub.loc[~ok, ENS_KEYS + [c + "_b", c + "_a"]].head(5)
-                problem(f"{fname}: {int((~ok).sum())} of {len(sub)} non-diagnostic selector rows differ in {c}; first rows:\n{bad.to_string()}")
-        print(f"  {fname}: {len(non_diag)} selectors not involving the perturbation diagnostic, "
+                problem(f"{fname}: {int((~ok).sum())} of {len(sub)} fixed-list selector rows differ in {c}; first rows:\n{bad.to_string()}")
+        print(f"  {fname}: {len(non_diag)} fixed-list selectors, "
               f"{len(sub):,} rows compared on {ENS_COLS}: {'IDENTICAL' if n_bad == 0 else f'{n_bad} differing values'}")
-        print(f"    compared (must be identical): {non_diag}")
-        rows = []
-        for s in diag:
-            ss = merged[merged["selector"] == s]
-            n_diff = 0
-            for c in ENS_COLS:
-                n_diff += int((~_equal(ss[c + "_b"], ss[c + "_a"])).sum())
-            rows.append(f"{s} ({n_diff} of {len(ss) * len(ENS_COLS)} values differ)")
-        print(f"    diagnostic-dependent, EXPECTED to differ after the pairing (R8b Part B): {rows}")
+        print(f"    fixed-list (must be identical): {non_diag}")
+        rdep = _n_diff(roster_dep)
+        tag = ("must be identical: same roster and excluded set" if strict_roster
+               else "EXPECTED to differ across roster or artifact changes"
+                    + ("" if artifact_same is not None else " (an artifact is missing)"))
+        print(f"    roster/artifact-dependent ({tag}): {[f'{s} ({n} of {m} values differ)' for s, n, m in rdep]}")
+        if strict_roster:
+            for s, n, m in rdep:
+                if n:
+                    problem(f"{fname}: roster/artifact-dependent selector {s} differs in {n} of {m} values although the roster and the excluded set are unchanged")
+        print(f"    diagnostic-dependent, EXPECTED to differ after the pairing (R8b Part B): "
+              f"{[f'{s} ({n} of {m} values differ; {classes[s]})' for s, n, m in _n_diff(diag)]}")
         print(f"    selectors only in AFTER : {only_after}")
         print(f"    selectors only in BEFORE: {only_before}")
+
+
+def aggregate_only(before_dir: str, after_dir: str) -> int:
+    """
+    phase1/phase1_aggregated.csv med_error for the shared methods, exact
+    equality on round-trip floats: the number of differing values and the
+    largest relative difference among them.  Exit 0 when nothing differs.
+    """
+    print(f"BEFORE: {before_dir}\nAFTER : {after_dir}\n")
+    ba = _read(os.path.join(before_dir, "phase1", "phase1_aggregated.csv"))
+    aa = _read(os.path.join(after_dir, "phase1", "phase1_aggregated.csv"))
+    shared = sorted(set(ba["method"]) & set(aa["method"]))
+    merged = (ba[ba["method"].isin(shared)][AGG_KEYS + ["med_error"]]
+              .merge(aa[aa["method"].isin(shared)][AGG_KEYS + ["med_error"]], on=AGG_KEYS, how="inner",
+                     suffixes=("_b", "_a")))
+    x, y = merged["med_error_b"].to_numpy(dtype=float), merged["med_error_a"].to_numpy(dtype=float)
+    ok = (x == y) | (np.isnan(x) & np.isnan(y))
+    n_diff = int((~ok).sum())
+    rel = 0.0
+    if n_diff:
+        d = ~ok & np.isfinite(x) & np.isfinite(y)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            r = np.abs(x[d] - y[d]) / np.maximum(np.abs(x[d]), np.abs(y[d]))
+        rel = float(np.nanmax(r)) if r.size else float("nan")
+        bad = merged.loc[~ok].head(5)
+        print(bad.to_string(index=False))
+    print(f"phase1_aggregated med_error: {len(shared)} shared methods, {len(merged):,} values compared "
+          f"(exact, round-trip floats): {n_diff} differ; largest relative difference {rel:.3e}")
+    print(f"RESULT: {'IDENTICAL' if n_diff == 0 else f'{n_diff} differing med_error values'}")
+    return 0 if n_diff == 0 else 1
 
 
 def echo_agreement(after_dir: str) -> None:
@@ -269,7 +371,12 @@ def main(before_dir: str, after_dir: str) -> int:
         compare_expected_diff(fname, rb, ra, RAW_KEYS, RAW_EXPECTED_DIFF)
 
     # ── Phase 5a selector tables ───────────────────────────────────────────────
-    compare_selectors(before_dir, after_dir)
+    roster_same = set(b1["method"]) == set(a1["method"])
+    art_b, art_a = _artifact_set(before_dir), _artifact_set(after_dir)
+    artifact_same = (art_b == art_a) if (art_b is not None and art_a is not None) else None
+    print(f"  roster {'unchanged' if roster_same else 'CHANGED'} between the trees; excluded set "
+          f"{'unchanged' if artifact_same else ('CHANGED' if artifact_same is False else 'unknown (artifact missing)')}")
+    compare_selectors(before_dir, after_dir, roster_same, artifact_same)
 
     # ── Phase 0b agreement check (AFTER tree) ──────────────────────────────────
     echo_agreement(after_dir)
@@ -310,7 +417,12 @@ def main(before_dir: str, after_dir: str) -> int:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        print(__doc__)
-        sys.exit(2)
-    sys.exit(main(sys.argv[1], sys.argv[2]))
+    ap = argparse.ArgumentParser(description="Before/after regression check of two --quick results trees")
+    ap.add_argument("before_dir")
+    ap.add_argument("after_dir")
+    ap.add_argument("--aggregate-only", action="store_true",
+                    help="compare only phase1_aggregated.csv med_error for the shared methods (exact, round-trip floats)")
+    args = ap.parse_args()
+    if args.aggregate_only:
+        sys.exit(aggregate_only(args.before_dir, args.after_dir))
+    sys.exit(main(args.before_dir, args.after_dir))

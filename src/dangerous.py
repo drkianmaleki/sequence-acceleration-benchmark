@@ -46,7 +46,8 @@ _ELIGIBLE = frozenset(ACCEL_METHODS)
 SCHEMA = "dangerous_methods/v3"
 CRITERION = ("pooled valid_rate < RANK_MIN_VALID on the core regimes at the Phase-1 depth, "
              "pooled over gap strata and noise, capped cells excluded, oracle excluded; "
-             "accelerators only")
+             "accelerators only; the flag is computed on the unrounded pooled mean")
+TABLE_DECIMALS = 6      # valid_rate, cat_rate and med_error are stored with this many decimals
 
 
 def artifact_path(path: Optional[str] = None) -> str:
@@ -65,8 +66,10 @@ def derive_dangerous(df_agg: pd.DataFrame) -> Tuple[FrozenSet[str], pd.DataFrame
     and its pooled valid_rate is below config.RANK_MIN_VALID.  The non-oracle
     trivial comparators are tabulated for the record but can never be flagged.
     Returns (dangerous, table); the table has one row per tabulated method
-    with the pooled valid_rate, cat_rate and med_error, the cell count, the
-    eligibility and the flag, sorted by valid_rate ascending.
+    with the pooled valid_rate, cat_rate and med_error (stored with
+    TABLE_DECIMALS decimals; the flag itself is computed on the unrounded
+    pooled mean), the cell count, the eligibility and the flag, sorted by
+    valid_rate ascending.
     """
     required = {"method", "valid_rate", "cat_rate", "med_error", "capped",
                 "is_holdout", "is_oracle"}
@@ -88,10 +91,10 @@ def derive_dangerous(df_agg: pd.DataFrame) -> Tuple[FrozenSet[str], pd.DataFrame
             "method": method,
             "is_trivial": int(grp["is_trivial"].iloc[0]) if "is_trivial" in grp else 0,
             "eligible": int(eligible),
-            "valid_rate": round(vr, 4), "cat_rate": round(cr, 4),
-            "med_error": float(me.median()) if len(me) else float("nan"),
+            "valid_rate": round(vr, TABLE_DECIMALS), "cat_rate": round(cr, TABLE_DECIMALS),
+            "med_error": round(float(me.median()), TABLE_DECIMALS) if len(me) else float("nan"),
             "n_cells": int(len(grp)),
-            "dangerous": int(eligible and vr < floor),
+            "dangerous": int(eligible and vr < floor),      # the unrounded mean decides
         })
     table = (pd.DataFrame(rows).sort_values(["valid_rate", "method"])
                                 .reset_index(drop=True))

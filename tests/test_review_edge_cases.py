@@ -359,7 +359,7 @@ def test_exclusion_boundary_0899_excluded_0900_kept():
         _agg_row("shanks_2", "r1", 0.1, 0.900),                         # at the floor -> kept
         _agg_row("shanks_3", "r1", 0.5, 0.898), _agg_row("shanks_3", "r1", 0.1, 0.900),   # mean 0.899
         _agg_row("shanks_4", "r1", 0.5, 0.880), _agg_row("shanks_4", "r1", 0.1, 0.920),   # mean 0.900
-        _agg_row("wynn_eps_1", "r1", 0.1, 0.89996),                     # prints as 0.9000, still excluded
+        _agg_row("wynn_eps_1", "r1", 0.1, 0.8999996),                   # stored as 0.900000 (six decimals), still excluded
         _agg_row("wynn_eps_2", "r1", 0.1, 0.5), _agg_row("wynn_eps_2", "r2", 0.1, 1.0, capped=1),  # capped cell ignored
         _agg_row("last_value", "r1", 0.1, 0.1, trivial=1),              # a trivial is never excluded
         _agg_row("constant_oracle", "r1", 0.1, 1.0, oracle=1, trivial=1),
@@ -370,7 +370,8 @@ def test_exclusion_boundary_0899_excluded_0900_kept():
     assert t.loc["shanks_2"].dangerous == 0 and t.loc["shanks_4"].dangerous == 0
     assert t.loc["shanks_3"].valid_rate == pytest.approx(0.899)
     assert t.loc["shanks_4"].valid_rate == pytest.approx(0.900)
-    # the flag is decided on the unrounded rate while the table shows the rounded one
+    # the flag is decided on the unrounded rate while the table stores six decimals (the
+    # criterion text says so)
     assert t.loc["wynn_eps_1"].valid_rate == 0.9 and t.loc["wynn_eps_1"].dangerous == 1
     assert t.loc["wynn_eps_2"].n_cells == 1 and t.loc["wynn_eps_2"].valid_rate == 0.5
     assert t.loc["last_value"].dangerous == 0 and "constant_oracle" not in t.index

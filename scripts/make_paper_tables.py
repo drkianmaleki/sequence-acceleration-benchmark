@@ -1319,7 +1319,7 @@ def f15():
             r, c = rat[idx][both], arr[idx][both]
             out[f"lower_error_frac:{m}"] = float((r < c).mean()) if both.any() else float("nan")
             out[f"delta_median:{m}"] = float(np.median(r) - np.median(c)) if both.any() else float("nan")
-            out[f"n_cells_excluded:{m}"] = int((~np.isfinite(arr[idx])).sum())
+            out[f"n_cells_excluded:{m}"] = int((~both).sum())     # every cell dropped: either median missing
             out[f"n_cells:{m}"] = int(both.sum())
         return out
 
@@ -1366,7 +1366,7 @@ def f15():
          f"is_holdout == 0, capped == 0, target_g == {gname(HEADLINE_G)}; resampling unit = core regime ({len(regimes)} regimes, "
          f"{len(cells)} cells), {BOOT_N} draws with replacement from RandomState({BOOT_SEED}); point = unresampled cells; interval = "
          "2.5th / 97.5th percentile of the draws; lower-error fraction and delta median over the cells where both methods have a finite "
-         "cell-median error (excl. = cells where the comparator has none); positive delta = rational_fit worse",
+         "cell-median error (excl. = cells dropped because either method has none; cells + excl. = the cell total); positive delta = rational_fit worse",
          "Family bootstrap over core regimes: rational_fit's win rate vs the last value and its cell-median error against each comparator")
 
 

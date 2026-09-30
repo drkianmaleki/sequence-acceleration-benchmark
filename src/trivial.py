@@ -158,8 +158,10 @@ def skill_vs_from_arrays(err_method, ref_errors: Dict[str, "np.ndarray"]) -> Dic
     Aggregates for a selector evaluated on many records at once:
     err_method and each ref_errors[tag] are equal-length arrays.  Returns
     med_skill_vs_<tag> (median over records where both are finite) and
-    win_rate_vs_<tag> (mean of the win indicator over records where the
-    method is finite; an invalid method never wins).
+    win_rate_vs_<tag> (mean of the win indicator over ALL records, the
+    descriptive-panel denominator; a record wins only when the method and
+    the reference are both finite and the method's error is below the
+    reference's, so an invalid method never wins).
     """
     err_method = np.asarray(err_method, dtype=float)
     out: Dict[str, float] = {}
@@ -174,7 +176,7 @@ def skill_vs_from_arrays(err_method, ref_errors: Dict[str, "np.ndarray"]) -> Dic
             out[f"med_skill_vs_{tag}"] = float("nan")
         wins = np.zeros(err_method.shape, dtype=float)
         wins[both] = (err_method[both] < e_ref[both]).astype(float)
-        out[f"win_rate_vs_{tag}"] = round(float(wins[ok_m | np.isfinite(e_ref)].mean()), 4) if (ok_m | np.isfinite(e_ref)).any() else float("nan")
+        out[f"win_rate_vs_{tag}"] = round(float(wins.mean()), 4) if wins.size else float("nan")
     return out
 
 

@@ -564,10 +564,13 @@ def run_correlation_analysis(df_feat:    pd.DataFrame,
     """
     Spearman rank correlation between each cell-level window feature and
     (i) R_R_med, (ii) log_med_error_R at stratum g; per regime and pooled
-    over regimes ('ALL').  Capped cells are excluded.  A row needs MIN_OBS
-    cells where the feature and both targets are not NaN (+inf is a value and
-    ranks largest); the cells dropped for a NaN feature or target are counted
-    in n_dropped_nan.  Returns (df_corr, base) where base is the merged
+    over regimes ('ALL').  Capped cells are excluded.  A cell is dropped from
+    BOTH correlations when the feature or either target is NaN (in practice
+    the two targets are NaN together: no valid richardson_1 record); the
+    dropped cells are counted in n_dropped_nan.  +inf (the E_last <= SKILL_EPS
+    branch) is a value and ranks largest; -inf (a conditional median error of
+    exactly 0, log_med_error_R) is kept and ranks smallest.  A row needs
+    MIN_OBS kept cells.  Returns (df_corr, base) where base is the merged
     cell table.
     """
     tgt = exclude_capped(df_targets)
