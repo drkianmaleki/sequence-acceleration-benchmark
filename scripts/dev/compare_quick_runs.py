@@ -27,8 +27,11 @@ raw per-record files).  The script
     every method), so perturb_iqr is EXPECTED to differ from a snapshot taken
     before that change while estimate, error and shift_iqr are not;
   * compares phase5a/phase5a_ensemble.csv and phase5a_ensemble_holdout.csv
-    selector by selector on mean_error, median_error and n: the selectors
-    whose definition does not read perturb_iqr must be identical; the
+    selector by selector on mean_error, med_error and n_valid (a snapshot
+    from before Prompt R8e Part C carries median_error and n, which are
+    renamed first; rows of selectors without a valid record, which that
+    older summary omitted, are reported, not counted as mismatches): the
+    selectors whose definition does not read perturb_iqr must be identical; the
     diagnostic-weighted, capped-diagnostic and IQR-threshold selectors
     (``is_diag_selector``) are expected to differ after the pairing and are
     listed as such with the number of rows that changed;
@@ -59,7 +62,11 @@ RAW_KEYS = ["regime", "obs_idx", "noise", "seed", "target_g", "method"]
 RAW_COLS = ["estimate", "error", "shift_iqr"]        # must be identical
 RAW_EXPECTED_DIFF = ["perturb_iqr"]                   # paired since R8b Part B: expected to differ, reported only
 ENS_KEYS = ["target_g", "regime_set", "selector"]
-ENS_COLS = ["mean_error", "median_error", "n"]
+ENS_COLS = ["mean_error", "med_error", "n_valid"]
+# Column names of the Phase 5a selector tables before Prompt R8e Part C (mean / median
+# error and the count of valid records); a snapshot that still carries them is renamed
+# to the descriptive-panel names before the comparison.
+ENS_LEGACY = {"median_error": "med_error", "n": "n_valid"}
 AGG_KEYS = ["method", "regime", "noise", "target_g"]
 AGG_COLS = ["valid_rate", "cat_rate", "med_error", "med_skill", "win_rate_vs_last"]
 
@@ -113,6 +120,15 @@ def compare_expected_diff(name: str, before: pd.DataFrame, after: pd.DataFrame,
               f"diagnostic is paired per window since R8b Part B; estimate / error / shift_iqr are checked above")
 
 
+def _ens_frame(path: str, fname: str) -> pd.DataFrame:
+    """A Phase 5a selector table with the descriptive-panel column names (ENS_LEGACY renamed)."""
+    df = _read(path)
+    ren = {old: new for old, new in ENS_LEGACY.items() if old in df.columns and new not in df.columns}
+    if ren:
+        print(f"  {fname}: {os.path.dirname(path)} carries the pre-R8e columns {sorted(ren)}; compared as {sorted(ren.values())}")
+    return df.rename(columns=ren)
+
+
 def compare_selectors(before_dir: str, after_dir: str) -> None:
     """Selector-level comparison of the Phase 5a ensemble tables."""
     for fname in ("phase5a_ensemble.csv", "phase5a_ensemble_holdout.csv"):
@@ -120,17 +136,27 @@ def compare_selectors(before_dir: str, after_dir: str) -> None:
         if not (os.path.exists(pb) and os.path.exists(pa)):
             problem(f"{fname} missing in one of the trees")
             continue
-        b, a = _read(pb), _read(pa)
+        b, a = _ens_frame(pb, fname), _ens_frame(pa, fname)
         shared = sorted(set(b["selector"]) & set(a["selector"]))
         non_diag = [s for s in shared if not is_diag_selector(s)]
         diag = [s for s in shared if is_diag_selector(s)]
         only_after = sorted(set(a["selector"]) - set(b["selector"]))
         only_before = sorted(set(b["selector"]) - set(a["selector"]))
         merged = b.merge(a, on=ENS_KEYS, how="inner", suffixes=("_b", "_a"))
-        kb = set(map(tuple, b[ENS_KEYS].to_numpy()))
-        ka = set(map(tuple, a[ENS_KEYS].to_numpy()))
-        if {k for k in kb if k[2] in shared} != {k for k in ka if k[2] in shared}:
-            problem(f"{fname}: (target_g, regime_set, selector) key sets differ for the shared selectors")
+        kb = {k for k in map(tuple, b[ENS_KEYS].to_numpy()) if k[2] in shared}
+        ka = {k for k in map(tuple, a[ENS_KEYS].to_numpy()) if k[2] in shared}
+        # a selector without a valid record on a slice was omitted by the summary before R8e
+        # Part C and keeps its row (n_valid == 0) since; such rows only in AFTER are expected
+        omitted = set()
+        if "n_valid" in a.columns:
+            zero = a.set_index(ENS_KEYS)["n_valid"]
+            omitted = {k for k in ka - kb if int(zero.loc[k]) == 0}
+        if kb - ka or (ka - kb) - omitted:
+            problem(f"{fname}: (target_g, regime_set, selector) key sets differ for the shared selectors "
+                    f"({len(kb - ka)} only in BEFORE, {len((ka - kb) - omitted)} only in AFTER)")
+        if omitted:
+            print(f"  {fname}: {len(omitted)} row(s) only in AFTER with n_valid == 0 (selectors without a valid record on that "
+                  f"slice, which the summary before R8e omitted): {sorted(omitted)}")
         sub = merged[merged["selector"].isin(non_diag)]
         n_bad = 0
         for c in ENS_COLS:

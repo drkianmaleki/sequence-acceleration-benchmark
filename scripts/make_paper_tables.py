@@ -986,9 +986,17 @@ def f09():
     for fname, path, label in (("f09b_ensemble_phase5a_core.tex", "phase5a_ensemble.csv", "core"),
                                ("f09c_ensemble_phase5a_holdout.tex", "phase5a_ensemble_holdout.csv", "held-out")):
         E = read("phase5a", path)
-        head = [r"Selector & \multicolumn{2}{c}{$g = 0.5$} & \multicolumn{3}{c}{$g = 0.1$} & \multicolumn{2}{c}{$g = 0.02$} \\",
-                r"\cmidrule(lr){2-3}\cmidrule(lr){4-6}\cmidrule(lr){7-8}",
-                r" & med.\ err & med.\ skill & mean err & med.\ err & med.\ skill & med.\ err & med.\ skill \\", r"\midrule"]
+        # per stratum: validity rate, n_valid/n_total, (mean error at the headline stratum), median error, median skill
+        per = {g: (5 if g == HEADLINE_G else 4) for g in STRATA}
+        head = [r"Selector & " + " & ".join(rf"\multicolumn{{{per[g]}}}{{c}}{{$g = {gname(g)}$}}" for g in STRATA) + r" \\"]
+        cmid, start = "", 2
+        for g in STRATA:
+            cmid += rf"\cmidrule(lr){{{start}-{start + per[g] - 1}}}"
+            start += per[g]
+        head.append(cmid)
+        head.append(r" & " + " & ".join((r"$\rhoV$ & $n_v/n$ & mean err & med.\ err & med.\ skill" if g == HEADLINE_G
+                                          else r"$\rhoV$ & $n_v/n$ & med.\ err & med.\ skill") for g in STRATA) + r" \\")
+        head.append(r"\midrule")
         rows = list(head)
         for i, (sel, name) in enumerate(ORDER5):
             cells = []
@@ -996,12 +1004,12 @@ def f09():
                 r = E[(E.selector == sel) & (E.target_g == g)]
                 if len(r):
                     r = r.iloc[0]
+                    cells += [f3(float(r.valid_rate)), f"{int(r.n_valid)}/{int(r.n_total)}"]
                     if g == HEADLINE_G:
-                        cells += [f4(float(r.mean_error)), f4(float(r.median_error)), f3(float(r.med_skill))]
-                    else:
-                        cells += [f4(float(r.median_error)), f3(float(r.med_skill))]
+                        cells.append(f4(float(r.mean_error)))
+                    cells += [f4(float(r.med_error)), f3(float(r.med_skill))]
                 else:
-                    cells += ["--"] * (3 if g == HEADLINE_G else 2)
+                    cells += ["--"] * per[g]
             if sel in ("fixed_rational", EQUAL_SMALL, "constant_assumed"):
                 rows.append(r"\addlinespace[2pt]")
             rows.append(f"{name} & " + " & ".join(cells) + r" \\")
@@ -1009,31 +1017,35 @@ def f09():
             r = E[(E.selector == sel) & (E.target_g == HEADLINE_G)]
             if len(r):
                 r = r.iloc[0]
-                fact("ensembles (Phase 5a)", f"{sel} ({label}) at g={gname(HEADLINE_G)}",
-                     f"mean err {r.mean_error:.6f}, median err {r.median_error:.6f}, med. skill {r.med_skill:.4f} (n = {int(r.n)})",
+                fact("ensembles (Phase 5a)", f"{sel} ({label}) at g={gname(HEADLINE_G)}: validity rate; n_valid/n_total; mean error; median error (conditional on validity); med. skill",
+                     f"{r.valid_rate:.4f}; {int(r.n_valid)}/{int(r.n_total)}; {r.mean_error:.6f}; {r.med_error:.6f}; {r.med_skill:.4f}",
                      f"results/phase5a/{path}", f"selector == {sel}, target_g == {HEADLINE_G}",
-                     "mean/median of the selector's absolute error over records; med_skill = hindsight best-of-four (strict), median over records of err / best-of-four trivial")
-        frag(fname, "l" + "rr" + "rrr" + "rr", rows,
-             [f"results/phase5a/{path} ({label} regimes; obs 30/60/90/120 x 3 noise x 20 seeds; capped cells excluded)"],
-             "all selectors; error = |prediction - true value at n_f|; skill = hindsight best-of-four (strict): err / best-of-four trivial error per record, median over records",
-             f"Phase 5a selectors and ensembles, {label} regimes: median error and median skill per stratum "
-             f"(mean error at the headline stratum), oracle_{N_ACC} vs constant_oracle vs the fixed defaults")
+                     "src.panels.error_panel over the selector's records (an invalid choice stays invalid); med_skill = hindsight best-of-four (strict), median over the valid records of err / best-of-four trivial")
+        frag(fname, "l" + "r" * sum(per.values()), rows,
+             [f"results/phase5a/{path} ({label} regimes; the Phase-5a depth grid; capped cells excluded; src.panels.error_panel over each selector's records)"],
+             "all selectors; a selector's record on a cell is the record of the method it chose or the ensemble value, an invalid choice stays "
+             "invalid; rho_V = validity rate over all records, n_v/n = n_valid/n_total; mean err and med. err over the valid records only "
+             "(conditional on validity); skill = hindsight best-of-four (strict): err / best-of-four trivial error per record, median over the valid records",
+             f"Phase 5a selectors and ensembles, {label} regimes: validity rate and n_valid/n_total next to the median error and median skill per stratum "
+             f"(mean error at the headline stratum), conditional on validity; oracle_{N_ACC} vs constant_oracle vs the fixed defaults")
 
     # d) ablation
     AB = read("phase5a", "phase5a_ablation.csv")
     comps = list(dict.fromkeys(AB.comparison))
-    rows = [r"Comparison (positive = first is better) & " + " & ".join(rf"$g = {gname(g)}$" for g in STRATA) + r" & $n$ \\", r"\midrule"]
+    rows = [r"Comparison (positive = first is better) & " + " & ".join(rf"$g = {gname(g)}$" for g in STRATA) + r" & $n_{\mathrm{both}}/n$ \\", r"\midrule"]
     for cmp in comps:
         vals = []
         for g in STRATA:
             r = AB[(AB.comparison == cmp) & (AB.target_g == g)]
             vals.append(signed(float(r.mean_improvement.iloc[0]), 4) if len(r) else "--")
-        n = int(AB[(AB.comparison == cmp) & (AB.target_g == HEADLINE_G)].n.iloc[0])
-        rows.append(f"{esc(cmp)} & " + " & ".join(vals) + f" & {n} \\\\")
+        rh = AB[(AB.comparison == cmp) & (AB.target_g == HEADLINE_G)]
+        n_txt = f"{int(rh.n_both_valid.iloc[0])}/{int(rh.n_total.iloc[0])}" if len(rh) else "--"
+        rows.append(f"{esc(cmp)} & " + " & ".join(vals) + f" & {n_txt} \\\\")
     frag("f09d_ablation_phase5a.tex", "l" + "r" * (len(STRATA) + 1), rows,
          ["results/phase5a/phase5a_ablation.csv (core regimes, capped excluded)"],
-         "all comparisons; mean_improvement = mean over records of (error of the second selector - error of the first)",
-         "Phase 5a ablation: paired mean error differences between selectors per stratum")
+         "all comparisons; mean_improvement = mean over the records where both selectors are valid of (error of the second selector - error of "
+         "the first); n_both/n = those records over all records at the headline stratum",
+         "Phase 5a ablation: paired mean error differences between selectors per stratum, with the count of records where both are valid")
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1112,18 +1124,26 @@ def _f10_rest():
          "Phase 4 selectors with the trivial references: error and skill at the headline stratum")
 
     CF = read("phase4", "phase4_cascade_filter.csv")
-    rows = [r"Screen & mean err & med.\ err & $n$ \\", r"\midrule"]
+    rows = [r"Screen & $\rhoV$ & $n_v/n$ & med.\ err & mean err & win vs last \\", r"\midrule"]
     for _, r in CF.iterrows():
-        rows.append(f"{esc(r['filter'])} & {f4(float(r.mean_error))} & {f4(float(r.median_error))} & {int(r.n)} \\\\")
-    base = float(CF[CF['filter'] == 'no_filter'].mean_error.iloc[0])
+        rows.append(f"{esc(r['filter'])} & {f3(float(r.valid_rate))} & {int(r.n_valid)}/{int(r.n_total)} & {f4(float(r.med_error))} & "
+                    f"{f4(float(r.mean_error))} & {f3(float(r.win_rate_vs_last))} \\\\")
+    base = CF[CF['filter'] == 'no_filter'].iloc[0]
     best = CF.loc[CF.mean_error.idxmin()]
-    fact("diagnostics (Phase 4)", "perturb_IQR screen on the cascade: best threshold vs no filter (mean error)",
-         f"{best['filter']}: {best.mean_error:.6f} vs no_filter {base:.6f} ({100 * (best.mean_error - base) / base:+.2f}%)",
-         "results/phase4/phase4_cascade_filter.csv", "all rows", "mean_error column")
-    frag("f10d_diagnostics_filter.tex", "lrrr", rows,
-         ["results/phase4/phase4_cascade_filter.csv (core regimes, headline stratum)"],
-         "all rows; a cell whose routed prediction has perturb_IQR above the threshold falls back to the last observed value (last_value)",
-         "Phase 4: the perturb_IQR screen applied to the Phase-2 cascade")
+    fact("diagnostics (Phase 4)", "perturb_IQR screen on the cascade: lowest mean error (conditional on validity) vs no filter, validity rate alongside",
+         f"{best['filter']}: mean err {best.mean_error:.6f} (valid {best.valid_rate:.4f}, {int(best.n_valid)}/{int(best.n_total)}) vs no_filter "
+         f"{base.mean_error:.6f} (valid {base.valid_rate:.4f}, {int(base.n_valid)}/{int(base.n_total)}); {100 * (best.mean_error - base.mean_error) / base.mean_error:+.2f}%",
+         "results/phase4/phase4_cascade_filter.csv", "all rows", "argmin mean_error; src.panels.error_panel over the chosen records, no evaluation fallback")
+    fact("diagnostics (Phase 4)", "perturb_IQR screen on the cascade: validity rate and win rate vs last per threshold",
+         "; ".join(f"{r['filter']}: valid {r.valid_rate:.4f}, win vs last {r.win_rate_vs_last:.4f}" for _, r in CF.iterrows()),
+         "results/phase4/phase4_cascade_filter.csv", "all rows", "valid_rate, win_rate_vs_last")
+    frag("f10d_diagnostics_filter.tex", "lrrrrr", rows,
+         ["results/phase4/phase4_cascade_filter.csv (core regimes, headline stratum; src.panels.error_panel over the chosen records)"],
+         "all rows; a window whose routed prediction has perturb_IQR above the threshold is routed to the last observed value (last_value), "
+         "which is part of the screened method; the chosen record is then taken as it is (an invalid choice stays invalid, no evaluation "
+         "fallback); rho_V = validity rate, n_v/n = n_valid/n_total; med. err and mean err over the valid records (conditional on validity); "
+         "win vs last = fraction of all windows where the chosen record is valid and below the last-value error",
+         "Phase 4: the perturb_IQR screen applied to the Phase-2 cascade, conditional on validity; validity rate alongside")
 
 
 # ═════════════════════════════════════════════════════════════════════════════

@@ -117,11 +117,14 @@ def main():
 
     df_filt = results['filter']
     if not df_filt.empty:
-        print('\n  Cascade + perturb_IQR filter (mean error):')
-        print(f"  {'Filter':<25} {'Mean error':>12}")
-        print('  ' + '─' * 40)
+        print('\n  Cascade + perturb_IQR screen (errors conditional on validity; an invalid chosen '
+              'prediction stays invalid):')
+        print(f"  {'Screen':<25} {'valid':>7} {'n_valid/n_total':>16} {'Mean error':>12} {'Median':>10} {'win/last':>9}")
+        print('  ' + '─' * 86)
         for _, row in df_filt.iterrows():
-            print(f"  {row['filter']:<25} {row['mean_error']:>12.6f}")
+            print(f"  {row['filter']:<25} {row['valid_rate']:>7.4f} "
+                  f"{f'{int(row['n_valid'])}/{int(row['n_total'])}':>16} {row['mean_error']:>12.6f} "
+                  f"{row['med_error']:>10.6f} {row['win_rate_vs_last']:>9.4f}")
 
     if not df_ens.empty:
         print('\n  Selector mean error and skill (vs best-of-four trivial reference):')

@@ -58,9 +58,10 @@ def parse_args():
 
 def _print_comparison(df_comp, g, n_show=14):
     sub = (df_comp[df_comp['target_g'] == g].sort_values('mean_error').head(n_show))
-    print(f'\n  Global mean error  (g = {g:g}, core, capped excluded, top {n_show}):')
-    print(f"  {'Selector':<26} {'Mean err':>10} {'Median':>10} {'Skill':>8}")
-    print('  ' + '-' * 60)
+    print(f'\n  Global mean error  (g = {g:g}, core, capped excluded, top {n_show}; '
+          f'errors conditional on validity, read with the validity rate):')
+    print(f"  {'Selector':<26} {'valid':>7} {'n_valid/n_total':>16} {'Mean err':>10} {'Median':>10} {'Skill':>8}")
+    print('  ' + '-' * 84)
     for _, row in sub.iterrows():
         marker = ''
         if row['selector'] == 'threshold_ens_010':
@@ -71,8 +72,9 @@ def _print_comparison(df_comp, g, n_show=14):
             marker = '  <-- fixed baseline'
         elif row['selector'] == 'constant_oracle':
             marker = '  <-- oracle comparator (reference)'
-        print(f"  {row['selector']:<26} {row['mean_error']:>10.6f} "
-              f"{row['median_error']:>10.6f} {row['med_skill']:>8.3f}{marker}")
+        print(f"  {row['selector']:<26} {row['valid_rate']:>7.4f} "
+              f"{f'{int(row['n_valid'])}/{int(row['n_total'])}':>16} {row['mean_error']:>10.6f} "
+              f"{row['med_error']:>10.6f} {row['med_skill']:>8.3f}{marker}")
 
 
 def main():

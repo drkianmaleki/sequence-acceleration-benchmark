@@ -58,6 +58,7 @@ from src.accelerators import METHODS
 from src.generators   import regime_functions
 from src.asymptote    import assumed_asymptote
 from src.diagnostics  import perturbation_factors, perturb_iqr_with_factors
+from src.panels       import PANEL_COLS, error_panel
 from src.pipeline     import (PHASE2_POOL, REFERENCE_METHODS, capped_block, exclude_capped,
                               horizon_meta, is_holdout, method_flags,
                               resolve_regimes)
@@ -81,6 +82,8 @@ METHOD_COLOURS = {
 DIAGNOSTICS = ['shift_iqr', 'perturb_iqr']
 FIG_DPI = 150
 CELL = ['regime', 'obs_idx', 'noise', 'seed', 'target_g']
+RATE_COLS = ('valid_rate', 'cat_rate', 'win_rate_vs_last')                       # written with 4 decimals
+ERR_COLS  = ('mean_error', 'sd_error', 'med_error', 'q25_error', 'q75_error', 'p90_error')   # 6 decimals
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -359,9 +362,16 @@ def cascade_with_filter(df: pd.DataFrame,
                         out_dir: str,
                         default_g: Optional[float] = None) -> pd.DataFrame:
     """
-    Compare Phase 2 cascade with and without a perturb_IQR rejection filter
-    at the headline stratum.  Filter: if the chosen method's perturb_IQR
-    exceeds the threshold, fall back to last_value (the last observed value).
+    The Phase 2 cascade with and without a perturb_IQR screen at the headline
+    stratum.  The screen routes a window to last_value (the last observed
+    value) when the chosen method's perturb_IQR exceeds the threshold; that
+    routing is part of the screened method.  The chosen record is then
+    evaluated as it is: an invalid chosen prediction stays invalid, there is
+    no evaluation fallback.  Per threshold, the descriptive panel
+    (src.panels.error_panel) of the chosen records -- validity and
+    catastrophe rate over all windows, error statistics over the valid ones
+    (conditional on validity, next to the validity rate), win rate vs the
+    last value -- goes to phase4_cascade_filter.csv.
     """
     try:
         df_feat = pd.read_csv(df_feat_path)
@@ -383,7 +393,7 @@ def cascade_with_filter(df: pd.DataFrame,
     rows = []
 
     for threshold in thresholds:
-        errs = []
+        errs, valids, cats, e_lasts = [], [], [], []
         for _, grp in merged.groupby(['regime', 'obs_idx', 'noise', 'seed']):
             frow   = grp.iloc[0]
             slope  = float(frow.get('log_log_slope', float('nan')))
@@ -396,26 +406,28 @@ def cascade_with_filter(df: pd.DataFrame,
 
             if (threshold < float('inf') and math.isfinite(iqr)
                     and iqr > threshold):
-                chosen = 'last_value'
+                chosen = 'last_value'          # the screen's routing: part of the method
 
+            # the chosen record, as it is: no substitution when it is invalid
             chosen_row = grp[grp['method'] == chosen]
-            if chosen_row.empty or not math.isfinite(chosen_row['error'].values[0]):
-                chosen_row = grp[grp['method'] == 'last_value']
+            if chosen_row.empty:               # no record of the chosen method on this window
+                errs.append(float('nan')); valids.append(0); cats.append(1)
+            else:
+                r = chosen_row.iloc[0]
+                errs.append(float(r['error'])); valids.append(int(r['valid'])); cats.append(int(r['catastrophic']))
+            last_row = grp[grp['method'] == 'last_value']
+            e_lasts.append(float(last_row['error'].values[0]) if not last_row.empty else float('nan'))
 
-            err = (float(chosen_row['error'].values[0])
-                   if not chosen_row.empty else float('nan'))
-            errs.append(err)
-
+        panel = error_panel(errs, valids, cats, e_lasts)
         label = ('no_filter' if threshold == float('inf')
                  else f'perturb_iqr>{threshold}')
-        rows.append({
-            'filter':        label,
-            'iqr_threshold': threshold,
-            'target_g':      g,
-            'mean_error':    round(float(np.nanmean(errs)),   6) if errs else float('nan'),
-            'median_error':  round(float(np.nanmedian(errs)), 6) if errs else float('nan'),
-            'n':             len(errs),
-        })
+        row = {'filter': label, 'iqr_threshold': threshold, 'target_g': g}
+        for k in PANEL_COLS:
+            v = panel[k]
+            if isinstance(v, float) and math.isfinite(v):
+                v = round(v, 4) if k in RATE_COLS else (round(v, 6) if k in ERR_COLS else v)
+            row[k] = v
+        rows.append(row)
 
     df_filt = pd.DataFrame(rows)
     p = os.path.join(out_dir, 'phase4_cascade_filter.csv')

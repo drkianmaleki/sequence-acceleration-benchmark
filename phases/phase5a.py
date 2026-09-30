@@ -30,9 +30,15 @@ Redesign v2
     (src.dangerous.load_dangerous); the phase refuses to run without it.
   * Core and held-out regimes are evaluated; pooled comparisons use the core
     regimes with capped cells excluded; held-out and capped blocks are
-    written separately.  Every selector row carries a median skill (hindsight
-    best-of-four, strict) and med_skill_vs_* / win_rate_vs_* against each
-    deployable trivial.
+    written separately.  Every selector row is the descriptive panel
+    (src.panels.error_panel) of the selector's records on that slice --
+    n_total, n_valid, valid_rate, cat_rate over all records; mean / sd /
+    median / q25 / q75 / p90 error over the valid ones, conditional on
+    validity and written next to the validity rate; win_rate_vs_last -- plus
+    a median skill (hindsight best-of-four, strict) and med_skill_vs_* /
+    win_rate_vs_* against each deployable trivial.  A selector's record on a
+    cell is the record of the method it chose (or the ensemble value); an
+    invalid choice is an invalid record and is never replaced.
   * phase5a_validity_by_depth.csv (method x obs_idx x noise: valid rate, n)
     is written as a committed aggregate of the raw records, so the depth
     dependence of validity is on record without the git-ignored raw file.
@@ -73,6 +79,7 @@ from src.generators   import regime_functions
 from src.asymptote    import assumed_asymptote
 from src.dangerous    import load_dangerous
 from src.diagnostics  import perturbation_factors, perturb_iqr_with_factors
+from src.panels       import PANEL_COLS, error_panel
 from src.pipeline     import (PHASE2_POOL, ACCEL_METHODS, capped_block, exclude_capped,
                               horizon_meta, is_holdout, method_flags,
                               resolve_regimes)
@@ -106,6 +113,8 @@ _SKILL_VS_RECORD  = [f'skill_vs_{t}' for _, t in REFERENCE_TAGS] + [f'win_vs_{t}
 EPS     = 0.01   # for continuous weighting
 FIG_DPI = 150
 CELL    = ['regime', 'obs_idx', 'noise', 'seed', 'target_g']
+RATE_COLS = ('valid_rate', 'cat_rate', 'win_rate_vs_last')                       # written with 4 decimals
+ERR_COLS  = ('mean_error', 'sd_error', 'med_error', 'q25_error', 'q75_error', 'p90_error')   # 6 decimals
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -552,9 +561,26 @@ SELECTOR_COLOURS = {
 # =============================================================================
 
 def _selector_summary(sub: pd.DataFrame, extra: dict) -> List[dict]:
-    """mean / median error and median skill per selector on one slice."""
+    """
+    The descriptive panel (src.panels.error_panel) of every selector on one
+    slice of per-cell selector errors, plus the median skill.
+
+    A selector's record on a cell is the record of the method it chose (or
+    the ensemble value); an invalid choice is an invalid record, never
+    replaced.  The catastrophe flag follows the record rule (invalid, or
+    error above config.CAT_MULT times the cell's last-value error curr_err);
+    E_last is the last_value comparator's error on the cell, so
+    win_rate_vs_last counts every record.  The error statistics are
+    conditional on validity and are written next to valid_rate and
+    n_valid / n_total; a selector without a valid record on the slice keeps
+    its row (n_valid 0, conditional fields NaN).  med_skill is the median over
+    the valid records of the hindsight best-of-four (strict) skill;
+    med_skill_vs_* / win_rate_vs_* are the fixed-reference aggregates.
+    """
     rows = []
     refs = sub['ref_error'].to_numpy(dtype=float)
+    curr = sub['curr_err'].to_numpy(dtype=float)
+    e_last = sub['E_last'].to_numpy(dtype=float)
     # the four deployable trivials are selectors themselves, so their
     # per-record errors are columns of the frame
     ref_arrays = {tag: (sub[name].to_numpy(dtype=float) if name in sub.columns
@@ -564,22 +590,24 @@ def _selector_summary(sub: pd.DataFrame, extra: dict) -> List[dict]:
         if sel not in sub.columns:
             continue
         vals = sub[sel].to_numpy(dtype=float)
-        ok = np.isfinite(vals)
-        if not ok.any():
-            continue
+        valid = np.isfinite(vals)
+        with np.errstate(invalid='ignore'):
+            cat = (~valid) | ((curr > 1e-12) & (vals > CFG_MOD.CAT_MULT * curr))
+        panel = error_panel(vals, valid, cat, e_last)
         sk = np.array([skill_score(v, r) for v, r in zip(vals, refs)], dtype=float)
         sk = sk[~np.isnan(sk)]
         row = dict(extra)
-        row.update({
-            'selector':     sel,
-            'is_trivial':   int(sel in TRIVIAL_SELECTORS),
-            'is_oracle':    int(sel == 'constant_oracle'),
-            'mean_error':   round(float(vals[ok].mean()),   6),
-            'median_error': round(float(np.median(vals[ok])), 6),
-            'med_skill':    round(float(np.median(sk)), 4) if sk.size else float('nan'),
-            'n':            int(ok.sum()),
-            **skill_vs_from_arrays(vals, ref_arrays),   # med_skill_vs_* / win_rate_vs_*
-        })
+        row.update({'selector': sel,
+                    'is_trivial': int(sel in TRIVIAL_SELECTORS),
+                    'is_oracle': int(sel == 'constant_oracle')})
+        for k in PANEL_COLS:
+            v = panel[k]
+            if isinstance(v, float) and math.isfinite(v):
+                v = round(v, 4) if k in RATE_COLS else (round(v, 6) if k in ERR_COLS else v)
+            row[k] = v
+        row['med_skill'] = round(float(np.median(sk)), 4) if sk.size else float('nan')
+        svs = skill_vs_from_arrays(vals, ref_arrays)          # med_skill_vs_* / win_rate_vs_*
+        row.update({k: v for k, v in svs.items() if k not in row})   # the panel's win_rate_vs_last stands
         rows.append(row)
     return rows
 
@@ -599,16 +627,21 @@ def aggregate_results(df, out_dir, dangerous, default_g=None):
         first    = grp.iloc[0]
 
         out = _compute_ensembles(grp, true_val, pool, phase2_methods, slope, r2, dangerous)
+        mi = grp.set_index('method')
         row = {'regime': regime, 'is_holdout': int(first['is_holdout']),
                'obs_idx': obs_idx, 'noise': sigma, 'seed': seed, 'target_g': g,
                'n_f': float(first['n_f']), 'achieved_g': float(first['achieved_g']),
                'capped': int(first['capped']),
                'L_true': float(first['L_true']), 'L_hat': float(first['L_hat']),
-               'ref_error': float(first['ref_error'])}
+               'ref_error': float(first['ref_error']),
+               # the cell's last-value error (the catastrophe reference of every record) and the
+               # last_value comparator's error (E_last of the descriptive panel)
+               'curr_err': float(first['curr_err']),
+               'E_last': (float(mi.loc['last_value', 'error']) if 'last_value' in mi.index
+                          else float('nan'))}
         row.update(out)
         ens_rows.append(row)
 
-        mi = grp.set_index('method')
         for m in pool:
             if m not in mi.index:
                 continue
@@ -690,7 +723,8 @@ def aggregate_results(df, out_dir, dangerous, default_g=None):
             abl_rows.append({
                 'comparison': label, 'target_g': g,
                 'mean_improvement': round(gain, 6),
-                'n': int(idx.sum()),
+                'n_both_valid': int(idx.sum()),      # records where both selectors are valid
+                'n_total': int(len(sub)),
             })
     df_abl = pd.DataFrame(abl_rows)
     _save_csv(df_abl, out_dir, 'phase5a_ablation.csv')
@@ -725,7 +759,8 @@ def aggregate_results(df, out_dir, dangerous, default_g=None):
             gap_rows.append({
                 'obs_idx': obs_idx, 'target_g': g,
                 'selector': sel, 'mean_gap_vs_oracle': round(gap, 6),
-                'n': int(idx.sum()),
+                'n_both_valid': int(idx.sum()),      # records where the selector and the oracle are valid
+                'n_total': int(len(sub)),
             })
     df_gap = pd.DataFrame(gap_rows)
     _save_csv(df_gap, out_dir, 'phase5a_oracle_gap.csv')
