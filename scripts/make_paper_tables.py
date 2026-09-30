@@ -1288,7 +1288,8 @@ def f14():
          "post-minimum / total; win vs last = rows with win_vs_last == 1 (error below the last observed value's); fail = skill >= 1 or "
          "error not finite (no better than the hindsight best trivial; the definition of real_data_strata_v2.csv); valid = rows with a "
          "finite error; med. err and med. skill over the valid rows only (conditional on validity)",
-         "Real data: fixed rational_fit and richardson_1 next to the cascade, per dataset and pooled, pre- and post-minimum targets")
+         "Real data (Table tab:realmethods): fixed rational_fit and richardson_1 next to the cascade, per dataset and pooled, pre- and "
+         "post-minimum targets: n, win vs last, fail, valid, median error and skill")
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1367,7 +1368,8 @@ def f15():
          f"{len(cells)} cells), {BOOT_N} draws with replacement from RandomState({BOOT_SEED}); point = unresampled cells; interval = "
          "2.5th / 97.5th percentile of the draws; lower-error fraction and delta median over the cells where both methods have a finite "
          "cell-median error (excl. = cells dropped because either method has none; cells + excl. = the cell total); positive delta = rational_fit worse",
-         "Family bootstrap over core regimes: rational_fit's win rate vs the last value and its cell-median error against each comparator")
+         "Family bootstrap over core regimes (Table tab:boot): rational_fit's win rate vs the last value and its cell-median error against "
+         "each comparator, point and 2.5 / 97.5 percentiles")
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1400,7 +1402,7 @@ def f16():
          f"per stratum; eligible = accelerators with valid_rate >= {C.RANK_MIN_VALID} (rank_eligible == 1) in that regime set; rho = Spearman "
          "correlation of the core and held-out med_error ranks over the accelerators eligible on both (the generalisation FACTS rows); "
          "ranks are among the eligible accelerators of that regime set",
-         "Generalisation summary: eligible accelerators per regime set, rank correlation core vs held-out, and the two headline fits")
+         "Generalisation summary (Table tab:gen): eligible accelerators per regime set, rank correlation core vs held-out, and the two headline fits")
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1469,12 +1471,12 @@ def _ladder_fragment(name, families, description):
 
 def f18():
     _ladder_fragment("f18_ladders_classical.tex", LADDERS_CLASSICAL,
-                     "Order ladders of the classical families: every order next to the roster orders, core and held-out")
+                     "Order ladders of the classical families (Phase 0b): every order next to the roster orders, core and held-out")
 
 
 def f19():
     _ladder_fragment("f19_ladders_fits.tex", LADDERS_FITS,
-                     "Order ladders of the fits: Richardson terms, fixed exponents and the parametric models, core and held-out")
+                     "Order ladders of the fits (Phase 0b): Richardson terms, fixed exponents and the parametric models, core and held-out")
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1505,10 +1507,10 @@ def f20():
     fact(sec, "totals", f"{total} accelerators in {len(fams)} families; {len(triv)} trivial comparators ({len(METHOD_NAMES)} registered methods)",
          "src/accelerators.py", "-", "len(ACCEL_METHODS), len(TRIVIAL_METHOD_NAMES), len(METHOD_NAMES)")
     frag("f20_roster.tex", "llrp{0.62\\linewidth}", rows,
-         ["src/accelerators.py (METHODS registry), src/evaluation.py (FAMILY, USES_FUTURE_X)"],
+         ["src/accelerators.py (METHODS registry)", "src/evaluation.py (FAMILY, USES_FUTURE_X)"],
          "families in order of first appearance in the registry; type TE = evaluates at the target index (USES_FUTURE_X), LE = estimates the "
          "limit, mixed = a family with both; K = accelerators in the family; the trivial comparators are listed as comparators and not counted",
-         "Method roster by family, with type and member count")
+         "Method roster by family (Table tab:roster), with type and member count, derived from the registry")
 
 
 # ═════════════════════════════════════════════════════════════════════════════
