@@ -195,6 +195,7 @@ def _eval_methods(seq_win, idx_win, fid, cfg, methods):
 
 
 CASCADE_ROUTED = 'rational_fit'       # the method the two-rule cascade routes to
+CASCADE_EVAL_METHODS = ['richardson_1', CASCADE_ROUTED]   # the two methods a cascade window evaluates
 CASCADE_KEYS = ['regime', 'noise', 'seed']   # one window = one cell of the cascade evaluation
 
 
@@ -335,8 +336,7 @@ def sweep1_linf(assumed_modes, obs_idx, window_len, noise_list,
                         true_val = float(truth_fn(n_f))
                         curr_err = abs(curr_val - true_val)
                         cfg      = _cfg(n_f, L_hat)
-                        ests = _eval_methods(seq_win, idx_win, n_f, cfg,
-                                             ['richardson_1', CASCADE_ROUTED])
+                        ests = _eval_methods(seq_win, idx_win, n_f, cfg, CASCADE_EVAL_METHODS)
                         rec = _cascade_cell_record(regime, sigma, seed, hm, L_true, L_hat,
                                                    slope, r2, chosen, cascade_fired,
                                                    ests, true_val, curr_err)
@@ -526,8 +526,7 @@ def sweep2_window(window_lengths, obs_idx, noise_list, gap_fractions,
                         true_val = float(truth_fn(n_f))
                         curr_err = abs(curr_val - true_val)
                         cfg      = _cfg(n_f, L_hat)
-                        ests = _eval_methods(seq_win, idx_win, n_f, cfg,
-                                             ['richardson_1', CASCADE_ROUTED])
+                        ests = _eval_methods(seq_win, idx_win, n_f, cfg, CASCADE_EVAL_METHODS)
                         rec = _cascade_cell_record(regime, sigma, seed, hm, L_true, L_hat,
                                                    slope, r2, chosen, cascade_fired,
                                                    ests, true_val, curr_err)

@@ -69,6 +69,7 @@ and carry `rank` / `rank_eligible`; the below-floor methods form an
 
 | path | content |
 |---|---|
+| `run_manifest.json` | provenance of the run that produced this tree, written by `reproduce_all.py` at its end: mode, git head (full and short), start and end time, the worker count of the parallel steps, every step's wall seconds in order, the total, the evaluation plan of that mode and the library versions (Python, numpy, scipy, pandas, scikit-learn, xgboost); the committed copy is the full run's |
 | `phase0_unit_tests.csv/.txt` | analytic unit tests of the accelerator roster |
 | `phase0b/order_ladders_panels.csv` | Phase 0b: every order of every family with an order parameter (and the trivial comparators) on Phase 1's grid at the headline stratum; per (family, variant, regime set, noise or `pooled`) the descriptive panel, `n_cells`, `n_cells_capped_excluded`; `is_roster` / `roster_name` mark the orders that are roster methods |
 | `phase0b/order_ladders_agreement.txt` | the exact-agreement check of every roster-marked ladder variant against `phase1_records.csv` (variants checked, records compared, verdict) |

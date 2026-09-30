@@ -73,16 +73,18 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 import src.config as C                                    # noqa: E402
+from src.evaluation import FAMILY, METHOD_TYPE            # noqa: E402  (the registry's family and type maps)
 from src.pipeline import ACCEL_METHODS, PHASE2_POOL, TRIVIAL_NON_ORACLE   # noqa: E402
 from src.trivial import ORACLE_METHODS, SKILL_REFERENCE_METHODS  # noqa: E402
 from phases.phase5a import (ORACLE_SMALL, EQUAL_SMALL, DIAG_SMALL,  # noqa: E402
                             N_SMALL as N_POOL_SMALL)
+from phases.phase5b import LHAT_CONSUMERS                 # noqa: E402
 
 STRATA = list(C.HORIZON_GAP_FRACTIONS)          # [0.5, 0.1, 0.02]
 HEADLINE_G = float(C.HEADLINE_G)                # 0.1
 ORACLE = "constant_oracle"
 DEPLOYABLE = list(SKILL_REFERENCE_METHODS)      # constant_assumed, last_value, window_mean, window_min
-CLASSICAL_FAMILIES = ("shanks", "wynn_eps", "wynn_rho", "levin", "brezinski", "anderson")   # 21 variants (Weniger retired, Prompt 5B)
+CLASSICAL_FAMILIES = ("shanks", "wynn_eps", "wynn_rho", "levin", "brezinski", "anderson")   # the classical (limit-estimating) families; their member count is derived below
 NOOP_BAND = (0.9, 1.1)                          # median improvement factor within +/-10 % of 1
 SKILL_NOOP = 0.9                                # median skill >= 0.9: no better than 10 % over the best trivial
 WIN_BAND = (0.4, 0.6)                           # win rate vs last_value within a coin flip +/- 0.1
@@ -223,14 +225,23 @@ with open(os.path.join(RES, "phase1", "dangerous_methods.json"), encoding="utf-8
     ARTIFACT = json.load(fh)
 DANGEROUS = set(ARTIFACT["dangerous_methods"])
 LEGACY = set(C.LEGACY_DANGEROUS_METHODS)
+# One comparison of the excluded set with the legacy hard-coded set; every sentence about it derives from these.
+SAME_AS_LEGACY = DANGEROUS == LEGACY
+ADDED_VS_LEGACY = sorted(DANGEROUS - LEGACY)
+REMOVED_VS_LEGACY = sorted(LEGACY - DANGEROUS)
 FAM = G_CORE.drop_duplicates("method").set_index("method")["family"].to_dict()
 TYP = G_CORE.drop_duplicates("method").set_index("method")["method_type"].to_dict()
 assert set(ACCEL_METHODS) == set(G_CORE[G_CORE.is_trivial == 0].method), "accelerator roster mismatch"
 N_ACC = len(ACCEL_METHODS)          # the roster size; never hard-coded below
-assert len(DEPLOYABLE) == 4
-CLASSICAL = sorted([m for m in ACCEL_METHODS if FAM[m] in CLASSICAL_FAMILIES],
-                   key=lambda m: (CLASSICAL_FAMILIES.index(FAM[m]), m))
-assert len(CLASSICAL) == 21, len(CLASSICAL)
+assert len(DEPLOYABLE) == len(SKILL_REFERENCE_METHODS)
+# The classical variants: the limit-estimating members of the classical families, from the
+# registry's family and type maps; the count is derived, and the type filter must keep every
+# member of those families (they are all limit estimators).
+CLASSICAL = sorted([m for m in ACCEL_METHODS if FAMILY[m] in CLASSICAL_FAMILIES and METHOD_TYPE[m] == "limit"],
+                   key=lambda m: (CLASSICAL_FAMILIES.index(FAMILY[m]), m))
+assert len(CLASSICAL) == sum(1 for m in ACCEL_METHODS if FAMILY[m] in CLASSICAL_FAMILIES), \
+    "a member of a classical family is not a limit estimator"
+assert all(FAM[m] == FAMILY[m] for m in CLASSICAL), "family labels of phase1_global.csv differ from the registry"
 
 SRC_G = ["results/phase1/phase1_global.csv (core regimes, all three strata, capped cells excluded)",
          "results/phase1/phase1_global_holdout.csv (held-out regimes)"]
@@ -283,7 +294,9 @@ def f01():
         own = SELF.get(str(r["method"]), ())
         return ["--" if c in own else f(float(r[c])) for f, c in zip(FMT, COLS)]
 
-    rows = [r"Stratum / row & \multicolumn{6}{c}{core (18 regimes)} & \multicolumn{6}{c}{held-out (6 regimes)} \\",
+    n_core_reg = int(AGG[AGG.is_holdout == 0].regime.nunique())
+    n_hold_reg = int(AGG[AGG.is_holdout == 1].regime.nunique())
+    rows = [rf"Stratum / row & \multicolumn{{6}}{{c}}{{core ({n_core_reg} regimes)}} & \multicolumn{{6}}{{c}}{{held-out ({n_hold_reg} regimes)}} \\",
             r"\cmidrule(lr){2-7}\cmidrule(lr){8-13}",
             r" & med.\ err & win vs $\hat L$ & skill vs $\hat L$ & win vs last & skill vs last & strict skill "
             r"& med.\ err & win vs $\hat L$ & skill vs $\hat L$ & win vs last & skill vs last & strict skill \\",
@@ -759,14 +772,16 @@ def f07():
                      "results/real_data/real_data_summary_v2.csv", "as above", f"mean({col})")
     n_fail = int((S.cascade_skill >= 1).sum())
     n_neg = int((S.improvement < 0).sum())
-    fact("real data (v2)", "cells on the grid", f"{len(S)} = 6 datasets x 5 depths x 3 targets",
-         "results/real_data/real_data_summary_v2.csv", "all rows", "row count")
-    fact("real data (v2)", "median cascade skill over the 90 cells", f"{S.cascade_skill.median():.3f}",
+    n_cells = len(S)
+    fact("real data (v2)", "cells on the grid",
+         f"{n_cells} = {S.dataset.nunique()} datasets x {S.obs_depth.nunique()} depths x {S.target_round.nunique()} targets",
+         "results/real_data/real_data_summary_v2.csv", "all rows", "row count; nunique of dataset, obs_depth, target_round")
+    fact("real data (v2)", f"median cascade skill over the {n_cells} cells", f"{S.cascade_skill.median():.3f}",
          "results/real_data/real_data_summary_v2.csv", "all rows", "median(cascade_skill); skill = hindsight best-of-four (strict): cascade_err / best-of-four trivial error")
-    fact("real data (v2)", "cells with cascade skill >= 1 (cascade no better than the best trivial)", f"{n_fail} of 90",
+    fact("real data (v2)", "cells with cascade skill >= 1 (cascade no better than the best trivial)", f"{n_fail} of {n_cells}",
          "results/real_data/real_data_summary_v2.csv", "all rows", "count(cascade_skill >= 1)")
-    fact("real data (v2)", "cells with negative improvement over the current value", f"{n_neg} of 90",
-         "results/real_data/real_data_summary_v2.csv", "all rows", "count(improvement < 0); improvement = (current_err - cascade_err) / current_err")
+    fact("real data (v2)", "cells with negative improvement over the last observed value", f"{n_neg} of {n_cells}",
+         "results/real_data/real_data_summary_v2.csv", "all rows", "count(improvement < 0); improvement = (current_err - cascade_err) / current_err, current_err = error of the last observed value")
     fail = S[S.cascade_skill >= 1]
     fact("real data (v2)", "failing cells by dataset", ", ".join(f"{k} {v}" for k, v in fail.dataset.value_counts().items()),
          "results/real_data/real_data_summary_v2.csv", "cascade_skill >= 1", "value counts of dataset")
@@ -784,7 +799,7 @@ def f07():
     frag("f07_real_data_v2.tex", "lr" + "lrr" * len(targets), rows,
          ["results/real_data/real_data_summary_v2.csv (recorded XGBoost validation curves re-evaluated under the v2 design; "
           "L_hat mode zero; cascade = Phase-2 rules on the window features)"],
-         "all 90 cells; routed: R1 = richardson_1, RF = rational_fit; err = |cascade prediction - recorded value at the "
+         f"all {len(S)} cells; routed: R1 = richardson_1, RF = rational_fit; err = |cascade prediction - recorded value at the "
          "target round|; skill = hindsight best-of-four (strict): err / best-of-four trivial error on the same cell, bold when >= 1; a trailing + marks a post-minimum target (target round beyond the recorded curve's argmin)",
          "Real-data re-evaluation over the (depth x target) grid: routed method, cascade error and skill per cell")
 
@@ -809,15 +824,15 @@ def f07():
              "results/real_data/real_data_results.csv", f"obs_depth == {int(ob)}",
              "100 * (mean current_err - mean cascade_err) / mean current_err")
     red_all = 100 * (L.current_err.mean() - L.cascade_err.mean()) / L.current_err.mean()
-    fact("real data (legacy 18-cell run)", "reduction in mean error, all 18 cells", f"{red_all:+.1f}%",
+    fact("real data (legacy 18-cell run)", f"reduction in mean error, all {len(L)} cells", f"{red_all:+.1f}%",
          "results/real_data/real_data_results.csv", "all rows", "100 * (mean current_err - mean cascade_err) / mean current_err")
-    fact("real data (legacy 18-cell run)", "cells worse than the current value", f"{int((L.improvement < 0).sum())} of 18",
-         "results/real_data/real_data_results.csv", "all rows", "count(cascade_err > current_err)")
+    fact("real data (legacy 18-cell run)", "cells worse than the last observed value", f"{int((L.improvement < 0).sum())} of {len(L)}",
+         "results/real_data/real_data_results.csv", "all rows", "count(cascade_err > current_err); current_err = error of the last observed value")
     rows.append(r"\multicolumn{7}{l}{reduction in mean error: " + ", ".join(parts) + f"; all cells ${red_all:+.1f}$\\%" + r"} \\")
     frag("f07b_real_data_legacy18.tex", "lrlrrrr", rows,
          ["results/real_data/real_data_results.csv (the pre-redesign 18-cell run: fixed target = final recorded round, "
           "legacy assumed asymptote 0.01; kept for the record, regenerable with scripts/analyze_real_diagnostics_legacy.py)"],
-         "all 18 rows; bold = cascade worse than the current value",
+         f"all {len(L)} rows; bold = cascade worse than the last observed value",
          "Legacy 18-cell real-data table (pre-redesign design), preserved unchanged")
 
 
@@ -849,7 +864,7 @@ def f08():
 
     res = {}
     for dlabel, fail, dexpr in defs:
-        res[dexpr] = auc_row("all 90", S, fail, dlabel, dexpr)
+        res[dexpr] = auc_row(f"all {len(S)}", S, fail, dlabel, dexpr)
     rows.append(r"\addlinespace[2pt]")
     for label, flag in REAL_STRATA[1:]:
         sub = S[S.post_min_target == flag]
@@ -868,7 +883,7 @@ def f08():
                      (" -- in the expected direction (failing cells have the higher IQR)" if r["auc"] > 0.5 else
                       " -- but in the INVERSE direction (failing cells have the LOWER IQR)"))
         verdict = strength
-        answer = (f"On the 90-cell grid the perturb_iqr of the routed method {verdict} failing cells "
+        answer = (f"On the {len(S)}-cell grid the perturb_iqr of the routed method {verdict} failing cells "
                   f"(skill >= 1 or negative improvement; n = {r['n_f']}) from succeeding ones (n = {r['n_s']}){direction}: "
                   f"AUC = {r['auc']:.3f} with a higher IQR read as 'failure', two-sided Mann-Whitney p = {r['p']:.3f}; "
                   f"ordering: {r['order']} (median IQR {r['med_f']:.4f} vs {r['med_s']:.4f}).")
@@ -891,12 +906,12 @@ def f08():
         answer += (" The two failure definitions select the same cells." if same else " The two failure definitions differ.")
         answer_lines.append(answer)
         fact("real data (v2) perturbation diagnostic", "does perturb_iqr of the routed method separate failing from succeeding cells?",
-             answer, "results/real_data/real_data_summary_v2.csv", "all 90 cells, perturb_iqr finite",
+             answer, "results/real_data/real_data_summary_v2.csv", f"all {len(S)} cells with a finite perturb_iqr",
              "AUC = Mann-Whitney U(fail, succ) / (n_fail * n_succ); failure = cascade_skill >= 1 or improvement < 0")
     frag("f08_real_perturb_diagnostic.tex", "llrrrrrrl", rows,
          ["results/real_data/real_data_summary_v2.csv (perturb_iqr = IQR of the routed method's prediction over 5 "
           "evaluations on 2 %-perturbed windows, crc32 seed per (dataset, depth))"],
-         "all 90 cells, then pre-minimum (target round <= argmin round of the recorded curve) and post-minimum targets, then by routed method; "
+         f"all {len(S)} cells with a finite perturb_iqr, then pre-minimum (target round <= argmin round of the recorded curve) and post-minimum targets, then by routed method; "
          "AUC = P(IQR_fail > IQR_succ) from the Mann-Whitney U statistic (ties count one half); p two-sided",
          "Real-data perturbation diagnostic: does the routed method's perturb_iqr separate failing cells from succeeding ones?",
          notes=answer_lines)
@@ -1092,7 +1107,8 @@ def _f10_rest():
                     f"{f3(float(r.med_skill))} & {int(r.n)} \\\\")
     frag("f10c_diagnostics_ensemble.tex", "lrrrr", rows,
          ["results/phase4/phase4_ensemble.csv (core regimes, headline stratum, capped excluded)"],
-         "all rows; phase2_proxy = the Phase-2 cascade evaluated inside Phase 4; diag_ensemble = perturb_IQR-weighted ensemble of the 9 methods",
+         f"all rows; phase2_proxy = the Phase-2 cascade evaluated inside Phase 4; diag_ensemble = perturb_IQR-weighted ensemble of the "
+         f"{len(PHASE2_POOL)}-method pool (eight accelerators plus the last observed value)",
          "Phase 4 selectors with the trivial references: error and skill at the headline stratum")
 
     CF = read("phase4", "phase4_cascade_filter.csv")
@@ -1106,7 +1122,7 @@ def _f10_rest():
          "results/phase4/phase4_cascade_filter.csv", "all rows", "mean_error column")
     frag("f10d_diagnostics_filter.tex", "lrrr", rows,
          ["results/phase4/phase4_cascade_filter.csv (core regimes, headline stratum)"],
-         "all rows; a cell whose routed prediction has perturb_IQR above the threshold falls back to the current value",
+         "all rows; a cell whose routed prediction has perturb_IQR above the threshold falls back to the last observed value (last_value)",
          "Phase 4: the perturb_IQR screen applied to the Phase-2 cascade")
 
 
@@ -1541,7 +1557,7 @@ def named_facts():
     fact(sec, "criterion", f"{ARTIFACT['criterion']}; floor RANK_MIN_VALID = {ARTIFACT.get('rank_min_valid')} (config.RANK_MIN_VALID = {C.RANK_MIN_VALID}); "
          "no composite score enters the exclusion",
          "results/phase1/dangerous_methods.json", "criterion, rank_min_valid", "valid_rate = mean over uncapped core cells of the per-cell valid rate (equal cell weights)")
-    fact(sec, "identical to the legacy hard-coded set?", f"{'YES' if DANGEROUS == LEGACY else 'NO'}: +{sorted(DANGEROUS - LEGACY)} -{sorted(LEGACY - DANGEROUS)}",
+    fact(sec, "identical to the legacy hard-coded set?", f"{'YES' if SAME_AS_LEGACY else 'NO'}: +{ADDED_VS_LEGACY} -{REMOVED_VS_LEGACY}",
          "results/phase1/dangerous_methods.json vs src/config.py LEGACY_DANGEROUS_METHODS", "-", "set difference")
     tab = pd.DataFrame(ARTIFACT["table"]).sort_values(["valid_rate", "method"])
     fact(sec, "pooled valid rate of each excluded method (cat_rate, median error alongside)",
@@ -1583,12 +1599,18 @@ def named_facts():
     # richardson_3 by depth: committed aggregate when present (Prompt 5A), else the raw file
     sec = "richardson_3 validity by depth"
     vpath = os.path.join(RES, "phase5a", "phase5a_validity_by_depth.csv")
+    p1_depth = int(C.PHASE1["full"]["obs_idx"])
+    r3_at_p1_depth = "not recomputed (phase5a_validity_by_depth.csv absent)"
     if os.path.exists(vpath):
         V = pd.read_csv(vpath)
         r3 = V[V.method == "richardson_3"].groupby("obs_idx").apply(lambda g: (g.valid_rate * g.n).sum() / g.n.sum())
         fact(sec, "richardson_3 valid rate by observation depth (committed aggregate)",
              ", ".join(f"obs {int(d)}: {v:.3f}" for d, v in r3.items()),
              "results/phase5a/phase5a_validity_by_depth.csv", "method == richardson_3", "n-weighted mean of valid_rate over noise levels per obs_idx")
+        if p1_depth in set(int(d) for d in r3.index):
+            r3_at_p1_depth = f"{100 * float(r3.loc[p1_depth]):.0f} % valid (phase5a_validity_by_depth.csv)"
+        else:
+            r3_at_p1_depth = f"not recomputed (obs_idx {p1_depth} is not in phase5a_validity_by_depth.csv)"
         low = (V[(V.is_trivial == 0) & (V.obs_idx == V.obs_idx.min())].groupby("method")
                .apply(lambda g: (g.valid_rate * g.n).sum() / g.n.sum()).sort_values().head(8))
         fact(sec, f"least valid accelerators at obs {int(V.obs_idx.min())} (committed aggregate)",
@@ -1621,7 +1643,7 @@ def named_facts():
         fact(sec, "richardson_3 valid rate by observation depth (Phase 5a, all regimes, strata and noise levels)",
              ", ".join(f"obs {int(d)}: {v:.3f}" for d, v in by.items()),
              "results/phase5a/phase5a_raw.csv (git-ignored; regenerated by scripts/run_phase5a.py --full)",
-             "method == richardson_3", "mean(valid) per obs_idx; the 2026-09-21 run gives 0.481 / 0.583 / 0.981 / 0.999")
+             "method == richardson_3", "mean(valid) per obs_idx")
         byn = r3.groupby("noise").valid.mean()
         fact(sec, "richardson_3 valid rate by noise (Phase 5a)", ", ".join(f"sigma={n:g}: {v:.3f}" for n, v in byn.items()),
              "results/phase5a/phase5a_raw.csv", "method == richardson_3", "mean(valid) per noise")
@@ -1648,11 +1670,11 @@ def named_facts():
              "results/phase5a/phase5a_raw.csv", f"method == rational_fit, target_g == {HEADLINE_G}, is_holdout == 0, capped == 0",
              "count(skill < 1), count(skill > 1)")
     else:
-        fact(sec, "richardson_3 valid rate by observation depth (Phase 5a)", "not recomputed (raw file absent); the 2026-09-21 full run gave obs 30: 0.481, 60: 0.583, 90: 0.981, 120: 0.999",
+        fact(sec, "richardson_3 valid rate by observation depth (Phase 5a)", "not recomputed (raw file absent)",
              "results/phase5a/phase5a_raw.csv (git-ignored)", "method == richardson_3", "mean(valid) per obs_idx")
-    fact(sec, "why the artifact does not flag richardson_3", f"the dangerous set is derived at obs_idx = {C.PHASE1['full']['obs_idx']} only, where richardson_3 is 98 % valid; "
+    fact(sec, "why the artifact does not flag richardson_3", f"the excluded set is derived at obs_idx = {p1_depth} only, where richardson_3 is {r3_at_p1_depth}; "
          "its 7-parameter curve_fit (src/accelerators.py, _fit_richardson, n_terms = 3, maxfev = 3000) does not converge on 30-60-point windows and returns NaN",
-         "src/accelerators.py; src/config.py PHASE1", "-", "-")
+         "src/accelerators.py; src/config.py PHASE1; results/phase5a/phase5a_validity_by_depth.csv", "-", "n-weighted valid_rate of richardson_3 at the Phase-1 depth")
 
     p1 = os.path.join(RES, "phase1", "phase1_records.csv")
     if not ARGS.no_raw and os.path.exists(p1):
@@ -1684,7 +1706,7 @@ def named_facts():
     fact(sec, f"{len(PHASE2_POOL)}-method Phase 2/3/4 pool (eight accelerators + last_value)", ", ".join(PHASE2_POOL) + " (weniger_d2 replaced by levin_t2, to which the corrected weniger_d2 is identical; the pool is defined once in src.pipeline.PHASE2_POOL)",
          "src/pipeline.py::PHASE2_POOL", "-", "-")
     fact(sec, "L_hat consumers (accelerators whose output depends on the assumed asymptote)",
-         "log_linear, richardson_1, richardson_2, richardson_3, single_exp_fit, double_exp_fit, rational_fit, log_fit, stability_weighted, median_ensemble (10; measured on the 96 audit windows)",
+         ", ".join(LHAT_CONSUMERS) + f" ({len(LHAT_CONSUMERS)}; measured on the audit windows of tests/test_input_dependence.py)",
          "tests/test_input_dependence.py; phases/phase5b.py::LHAT_CONSUMERS", "output differs between L_hat = 0 and 0.5 * min(window) on >= 1 window", "-")
 
     # win rates vs each fixed trivial for the top-10 accelerators per stratum, core and held-out
@@ -1703,8 +1725,19 @@ def named_facts():
     # pipeline provenance
     sec = "pipeline provenance"
     fact(sec, "results commit", RESULTS_HEAD, "git log -1 -- results", "-", "-")
-    fact(sec, "full run", "2026-09-21 11:38 to 17:00, 19,302 s; Phase 1 1,729 s, Phase 2 876 s, Phase 4 2,079 s, Phase 5a 9,223 s (--jobs 7, 5 perturbation trials), Phase 5b 5,375 s",
-         "console log of the 2026-09-21 full run of reproduce_all.py (8 cores, --jobs 7)", "-", "-")
+    mpath = os.path.join(RES, "run_manifest.json")
+    if os.path.exists(mpath):
+        with open(mpath, encoding="utf-8") as fh:
+            M = json.load(fh)
+        head = M.get("git_head", {})
+        steps = "; ".join(f"{name} {secs:,.0f} s" for name, secs in M.get("steps", {}).items())
+        fact(sec, "run (results/run_manifest.json)",
+             f"mode {M.get('mode')}; code {head.get('short')} ({head.get('full')}); started {M.get('started')}, finished {M.get('finished')}; "
+             f"jobs {M.get('jobs')}; total {M.get('total_seconds', 0):,.0f} s; steps: {steps}",
+             "results/run_manifest.json", "-", "written by reproduce_all.py at the end of the run")
+    else:
+        fact(sec, "run (results/run_manifest.json)", "manifest absent", "results/run_manifest.json", "-",
+             "written by reproduce_all.py at the end of the run")
     from reproduce_all import plan
     rows = plan("full")
     fact(sec, "evaluation counts (central), derived from the config grids",
@@ -1737,7 +1770,11 @@ def write_facts(answer_lines):
         f.write("- **richardson_3 validity by depth**: see section *richardson_3 validity by depth* "
                 "and the Phase-1-depth-only scope of the exclusion derivation under *dangerous set*.\n")
         f.write("- **sigma = 0 cancellation NaNs**: section *sigma = 0 cancellation NaNs*.\n")
-        f.write("- **The dangerous set is IDENTICAL to the legacy eight under the redesign**: section *dangerous set*.\n")
+        if SAME_AS_LEGACY:
+            f.write("- **The excluded set equals the eight methods excluded under the previous criterion**: section *dangerous set*.\n")
+        else:
+            f.write(f"- **The excluded set differs from the previous eight: added {ADDED_VS_LEGACY}, removed {REMOVED_VS_LEGACY}**: "
+                    "section *dangerous set*.\n")
         f.write("- **Capped-cell inventory**: section *capped cells* and fragment `f11_capped_block.tex`.\n")
         f.write("- **Oracle vs best deployable trivial vs best method, per stratum, core and held-out**: section *trivial baseline* and fragment `f01_trivial_baseline.tex`.\n")
         if answer_lines:

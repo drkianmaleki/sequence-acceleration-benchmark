@@ -23,6 +23,9 @@ in the required order:
     tables    scripts/make_paper_tables.py  ->  paper_fragments/*.tex + FACTS.md
     terciles  scripts/analyze_by_ltrue.py   ->  results/phase1/phase1_by_Ltrue.csv, f13, its FACTS section
               (after the tables step, because it replaces its own section of FACTS.md)
+    manifest  results/run_manifest.json: mode, git head, start / end, worker count, per-step
+              and total wall seconds, the evaluation plan of the mode, library versions
+              (written at the end of every run; the committed copy is the full run's)
 
 The excluded-method set is derived from Phase-1 output into
 results/phase1/dangerous_methods.json; phases 2-5 refuse to run without
@@ -32,10 +35,8 @@ failure is reported in the summary table and the remaining steps still run.
 
 Usage
 -----
-    python reproduce_all.py                # full run (previous roster, measured 2026-09-21:
-                                           # 4.4 h on 8 cores; Phase 1 31 min, Phase 2 16 min,
-                                           # Phase 4 30 min, Phase 5a 2.5 h, Phase 5b 38 min
-                                           # including the since-removed CAT_MULT sweep)
+    python reproduce_all.py                # full run (hours; the wall time of the last full run
+                                           # is in results/run_manifest.json and README.md)
     python reproduce_all.py --quick        # 2 seeds, 2 regimes per group, 2 noise
                                            # levels: every phase end to end (~2-3 min)
     python reproduce_all.py --plan         # print the evaluation counts per phase
@@ -50,7 +51,10 @@ regenerate the full set rather than mixing output from different commits.
 """
 
 import argparse
+import datetime as _dt
+import json
 import os
+import platform
 import subprocess
 import sys
 import time
@@ -58,6 +62,8 @@ import time
 _ROOT = os.path.dirname(os.path.abspath(__file__))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
+
+MANIFEST = os.path.join("results", "run_manifest.json")   # written at the end of every run (quick or full)
 
 
 # (label, script, takes_mode_flag)
@@ -97,9 +103,13 @@ def plan(mode: str) -> list:
     from phases.phase4 import PHASE4_METHODS, EVAL_METHODS as P4_EVAL
     from phases.phase5a import PERTURB_METHODS as P5A_PERTURB
 
+    from tests.test_accelerators import TEST_CASES
+    from src.trivial import SKILL_REFERENCE_METHODS
+
     rows = []
-    # Phase 0: the accelerator roster x 4 analytic cases
-    rows.append(("Phase 0", len(ACCEL_METHODS) * 4, f"{len(ACCEL_METHODS)} accelerators x 4 analytic cases (trivials excluded)"))
+    # Phase 0: the accelerator roster x the analytic cases of the harness
+    rows.append(("Phase 0", len(ACCEL_METHODS) * len(TEST_CASES),
+                 f"{len(ACCEL_METHODS)} accelerators x {len(TEST_CASES)} analytic cases (trivials excluded)"))
 
     c = C.PHASE1[mode]
     r = resolve_regimes(c["core_regimes"], c["holdout_regimes"], True)
@@ -142,10 +152,11 @@ def plan(mode: str) -> list:
     c = C.PHASE5B[mode]
     r = resolve_regimes(c["core_regimes"], c["holdout_regimes"], True)
     base = len(c["noise_list"]) * c["n_seeds"] * len(r) * len(c["gap_fractions"])
-    from phases.phase5b import SWEEP1_METHODS
-    s1 = len(c["assumed_modes"]) * base * 2
-    s1b = len(c["assumed_modes"]) * base * (len(SWEEP1_METHODS) + 3)
-    s2 = len(c["window_lengths"]) * base * 2
+    from phases.phase5b import CASCADE_EVAL_METHODS, SWEEP1_METHODS
+    n_extra_refs = len(set(SKILL_REFERENCE_METHODS) - set(SWEEP1_METHODS))   # trivial references sweep 1b adds
+    s1 = len(c["assumed_modes"]) * base * len(CASCADE_EVAL_METHODS)
+    s1b = len(c["assumed_modes"]) * base * (len(SWEEP1_METHODS) + n_extra_refs)
+    s2 = len(c["window_lengths"]) * base * len(CASCADE_EVAL_METHODS)
     rows.append(("Phase 5b", s1 + s1b + s2, f"sweep1a {s1:,} + sweep1b {s1b:,} + sweep2 {s2:,} "
                                            f"({len(r)} regimes, {len(c['gap_fractions'])} strata)"))
 
@@ -171,6 +182,56 @@ def print_plan():
         print("  " + "-" * 74)
         print(f"  {'TOTAL (central)':<22} {total:>12,}")
         print()
+
+
+def _git_head() -> dict:
+    """Full and short hash of the checked-out commit ("unknown" outside a git checkout)."""
+    out = {}
+    for key, args in (("full", ["rev-parse", "HEAD"]), ("short", ["rev-parse", "--short", "HEAD"])):
+        try:
+            out[key] = subprocess.check_output(["git"] + args, cwd=_ROOT, stderr=subprocess.DEVNULL).decode().strip()
+        except Exception:
+            out[key] = "unknown"
+    return out
+
+
+def _versions() -> dict:
+    """Python and the numerical libraries the run depends on ("not installed" when absent)."""
+    out = {"python": platform.python_version()}
+    for name in ("numpy", "scipy", "pandas", "sklearn", "xgboost"):
+        try:
+            out[name] = __import__(name).__version__
+        except Exception:
+            out[name] = "not installed"
+    return out
+
+
+def write_manifest(mode: str, outcomes: list, started: str, finished: str, jobs: int) -> str:
+    """
+    results/run_manifest.json: the provenance of the run that produced the
+    results tree -- mode, git head, start and end time, the worker count the
+    parallel steps used, every step's wall time in order, the total, the
+    evaluation plan of that mode and the library versions.  The committed
+    copy is the one of the full run; a quick run overwrites it in a
+    worktree only.
+    """
+    path = os.path.join(_ROOT, MANIFEST)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    payload = {
+        "mode": mode,
+        "git_head": _git_head(),
+        "started": started,
+        "finished": finished,
+        "jobs": jobs,
+        "steps": {label: round(elapsed, 1) for label, _ok, elapsed in outcomes},
+        "failed_steps": [label for label, ok, _ in outcomes if not ok],
+        "total_seconds": round(sum(elapsed for _, _, elapsed in outcomes), 1),
+        "plan": [{"step": label, "evaluations": n, "note": note} for label, n, note in plan(mode)],
+        "versions": _versions(),
+    }
+    with open(path, "w", encoding="utf-8", newline="\n") as fh:
+        json.dump(payload, fh, indent=2)
+    return path
 
 
 def run_step(label: str, cmd: list, step: int, total: int):
@@ -212,6 +273,7 @@ def main():
 
     outcomes = []
     t_start = time.time()
+    started = _dt.datetime.now().isoformat(timespec="seconds")
     for i, (label, script, takes_mode) in enumerate(steps, 1):
         cmd = [sys.executable, script] + ([mode_flag] if takes_mode else [])
         ok, elapsed = run_step(label, cmd, i, len(steps))
@@ -219,6 +281,12 @@ def main():
         if not ok and script.endswith(("run_phase1.py", "derive_dangerous.py")):
             print("  Stopping: later phases depend on this step.")
             break
+    finished = _dt.datetime.now().isoformat(timespec="seconds")
+
+    # The parallel steps (Phase 5a, Phase 0b) run with their scripts' default
+    # worker count; record it with the run.
+    from phases.phase5a import default_jobs
+    manifest = write_manifest("quick" if args.quick else "full", outcomes, started, finished, default_jobs())
 
     print("\n" + "=" * 72)
     print(f"  PIPELINE SUMMARY  [{mode}]")
@@ -229,6 +297,7 @@ def main():
         print(f"  {i:>2}  {label:<48} {'OK' if ok else 'FAILED':<8} {elapsed:>7.0f}s")
     print("  " + "-" * 70)
     print(f"  {'':>2}  {'total':<48} {'':<8} {time.time() - t_start:>7.0f}s")
+    print(f"  Manifest: {os.path.relpath(manifest, _ROOT)}")
     failures = [label for label, ok, _ in outcomes if not ok]
     if not failures and len(outcomes) == len(steps):
         print("  All steps completed successfully.  Results are in results/")
