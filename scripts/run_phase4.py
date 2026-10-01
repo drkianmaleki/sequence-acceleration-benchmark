@@ -127,12 +127,14 @@ def main():
                   f"{row['med_error']:>10.6f} {row['win_rate_vs_last']:>9.4f}")
 
     if not df_ens.empty:
-        print('\n  Selector mean error and skill (vs best-of-four trivial reference):')
-        print(f"  {'Selector':<22} {'Mean error':>12} {'Median':>10} {'Skill':>8}")
-        print('  ' + '─' * 58)
+        print('\n  Selector error and skill (errors conditional on validity, read with the validity rate; '
+              'skill vs the best-of-four trivial reference):')
+        print(f"  {'Selector':<22} {'valid':>7} {'n_valid/n_total':>16} {'Mean error':>12} {'Median':>10} {'Skill':>8}")
+        print('  ' + '─' * 82)
         for _, row in df_ens.sort_values('mean_error').iterrows():
-            print(f"  {row['selector']:<22} {row['mean_error']:>12.6f} "
-                  f"{row['median_error']:>10.6f} {row['med_skill']:>8.3f}")
+            print(f"  {row['selector']:<22} {row['valid_rate']:>7.4f} "
+                  f"{f'{int(row['n_valid'])}/{int(row['n_total'])}':>16} {row['mean_error']:>12.6f} "
+                  f"{row['med_error']:>10.6f} {row['med_skill']:>8.3f}")
 
     print('\n  perturb_IQR vs error correlation (richardson_1, by obs_idx):')
     r1_piqr = (df_rel[(df_rel['method'] == 'richardson_1')

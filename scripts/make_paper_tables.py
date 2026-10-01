@@ -455,7 +455,7 @@ def f03():
                  f"is_trivial == 0, target_g == {g}, is_holdout == {h}, capped == 0",
                  "mean over (method, regime, noise) cells of [med_skill < 1]")
     frag("f03_skill_summary.tex", "lrl" + "r" * 6, rows,
-         ["results/phase1/phase1_aggregated.csv (per (method, regime, noise, g) cell: median skill over 30 seeds)"],
+         [f"results/phase1/phase1_aggregated.csv (per (method, regime, noise, g) cell: median skill over {int(AGG.n_total.max())} seeds)"],
          "capped == 0, is_oracle == 0; a cell counts when its median-seed skill is < 1 (NaN median skill counts as not < 1)",
          "Skill summary: fraction of (method x regime x noise) cells whose median skill is below 1 (the method beat the "
          "hindsight best-of-four deployable trivial (strict) on the median seed), per family, per stratum, core vs held-out",
@@ -1112,16 +1112,24 @@ def f10():
 
 def _f10_rest():
     E4 = read("phase4", "phase4_ensemble.csv")
-    rows = [r"Selector & mean err & med.\ err & med.\ skill & $n$ \\", r"\midrule"]
+    rows = [r"Selector & $\rhoV$ & $n_v/n$ & mean err & med.\ err & med.\ skill & win vs last \\", r"\midrule"]
     for _, r in E4.iterrows():
         lab = mth(r.selector) if r.is_trivial else esc(r.selector)
-        rows.append(f"{lab}{' (trivial)' if r.is_trivial else ''} & {f4(float(r.mean_error))} & {f4(float(r.median_error))} & "
-                    f"{f3(float(r.med_skill))} & {int(r.n)} \\\\")
-    frag("f10c_diagnostics_ensemble.tex", "lrrrr", rows,
-         ["results/phase4/phase4_ensemble.csv (core regimes, headline stratum, capped excluded)"],
-         f"all rows; phase2_proxy = the Phase-2 cascade evaluated inside Phase 4; diag_ensemble = perturb_IQR-weighted ensemble of the "
-         f"{len(PHASE2_POOL)}-method pool (eight accelerators plus the last observed value)",
-         "Phase 4 selectors with the trivial references: error and skill at the headline stratum")
+        rows.append(f"{lab}{' (trivial)' if r.is_trivial else ''} & {f3(float(r.valid_rate))} & {int(r.n_valid)}/{int(r.n_total)} & "
+                    f"{f4(float(r.mean_error))} & {f4(float(r.med_error))} & {f3(float(r.med_skill))} & {f3(float(r.win_rate_vs_last))} \\\\")
+        fact("diagnostics (Phase 4)", f"{r.selector} at g={gname(float(r.target_g))}: validity rate; n_valid/n_total; mean error; median error (conditional on validity); med. skill; win rate vs last",
+             f"{r.valid_rate:.4f}; {int(r.n_valid)}/{int(r.n_total)}; {r.mean_error:.6f}; {r.med_error:.6f}; {r.med_skill:.4f}; {r.win_rate_vs_last:.4f}",
+             "results/phase4/phase4_ensemble.csv", f"selector == {r.selector}, target_g == {gname(float(r.target_g))}",
+             "src.panels.error_panel over the selector's records (an invalid choice stays invalid); med_skill = hindsight best-of-four (strict), median over the valid records")
+    frag("f10c_diagnostics_ensemble.tex", "lrrrrrr", rows,
+         ["results/phase4/phase4_ensemble.csv (core regimes, headline stratum, capped excluded; src.panels.error_panel over each selector's records)"],
+         f"all rows; a selector's record on a window is the record of the method it chose or the combined value, an invalid choice stays invalid; "
+         f"rho_V = validity rate over all windows, n_v/n = n_valid/n_total; mean err and med. err over the valid records only (conditional on "
+         f"validity); phase2_proxy = the lower error of richardson_1 and rational_fit (a hindsight proxy of the Phase-2 cascade); diag_ensemble = "
+         f"perturb_IQR-weighted ensemble of the {len(PHASE2_POOL)}-method pool (eight accelerators plus the last observed value), weights "
+         f"1/(perturb_IQR + eps) over the paired perturbations",
+         "Phase 4 selectors with the trivial references at the headline stratum: validity rate and n_valid/n_total next to the error and skill, "
+         "conditional on validity; validity rate alongside")
 
     CF = read("phase4", "phase4_cascade_filter.csv")
     rows = [r"Screen & $\rhoV$ & $n_v/n$ & med.\ err & mean err & win vs last \\", r"\midrule"]
@@ -1603,7 +1611,7 @@ def named_facts():
         s = A[A.family == fam]
         by = s.groupby("noise").valid_rate.mean()
         fact(sec, f"{fam}: invalid rate by noise (Phase 1, all cells)", ", ".join(f"sigma={n:g}: {100 * (1 - v):.2f}%" for n, v in by.items()),
-             "results/phase1/phase1_aggregated.csv", f"family == {fam}, is_oracle == 0 (core + held-out, capped included; 30 seeds per cell)",
+             "results/phase1/phase1_aggregated.csv", f"family == {fam}, is_oracle == 0 (core + held-out, capped included; {int(AGG.n_total.max())} seeds per cell)",
              "100 * (1 - mean over cells of valid_rate) per noise level")
     s = A[A.family.isin(CLASSICAL_FAMILIES)]
     by = s.groupby("noise").valid_rate.mean()
@@ -1682,7 +1690,7 @@ def named_facts():
              ", ".join(f"obs {int(d)}: {100 * (1 - v):.3f}%" for d, v in nd.groupby('obs_idx').valid.mean().items()),
              "results/phase5a/phase5a_raw.csv", "method not dangerous, not the oracle", "per obs_idx")
         cl = nd[nd.method.isin(CLASSICAL)]
-        fact("sigma = 0 cancellation NaNs", f"the {len(CLASSICAL)} classical variants: invalid rate by noise (Phase 5a, four depths)",
+        fact("sigma = 0 cancellation NaNs", f"the {len(CLASSICAL)} classical variants: invalid rate by noise (Phase 5a, {df.obs_idx.nunique()} depths)",
              ", ".join(f"sigma={n:g}: {100 * (1 - v):.3f}%" for n, v in cl.groupby('noise').valid.mean().items()),
              "results/phase5a/phase5a_raw.csv", f"family in the {len(CLASSICAL_FAMILIES)} classical families", "per noise")
         rf = df[(df.method == "rational_fit") & (df.target_g == HEADLINE_G) & (df.is_holdout == 0) & (df.capped == 0)]

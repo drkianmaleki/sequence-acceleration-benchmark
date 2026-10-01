@@ -30,13 +30,14 @@ relative difference.  Otherwise the script
     window since Prompt R8b Part B (one factor array per window shared by
     every method), so perturb_iqr is EXPECTED to differ from a snapshot taken
     before that change while estimate, error and shift_iqr are not;
-  * compares phase5a/phase5a_ensemble.csv and phase5a_ensemble_holdout.csv
-    selector by selector on mean_error, med_error and n_valid (a snapshot
-    from before Prompt R8e Part C carries median_error and n, which are
-    renamed first; rows of selectors without a valid record, which that
-    older summary omitted, are reported, not counted as mismatches).  The
-    selectors fall into three classes by what their formula in
-    phases/phase5a.py::_compute_ensembles reads (``selector_class``):
+  * compares phase5a/phase5a_ensemble.csv, phase5a_ensemble_holdout.csv and
+    phase4/phase4_ensemble.csv selector by selector on mean_error, med_error
+    and n_valid (a snapshot from before Prompt R8e Part C / R8f carries
+    median_error and n, which are renamed first; rows of selectors without a
+    valid record, which the older Phase 5a summary omitted, are reported, not
+    counted as mismatches).  The selectors fall into three classes by what
+    their formula (phases/phase5a.py::_compute_ensembles,
+    phases/phase4.py::ensemble_comparison) reads (``selector_class``):
       - fixed: fixed name lists -- the trivial comparators, the fixed single
         methods, the Phase-2 cascade and the small-pool oracle / ensembles
         over src.pipeline.PHASE2_POOL; these must be identical;
@@ -117,7 +118,13 @@ def _equal(a: pd.Series, b: pd.Series) -> np.ndarray:
 
 
 FIXED_SELECTORS = {"fixed_rational", "fixed_richardson", "phase2_cascade",
-                   "constant_assumed", "constant_oracle", "window_mean", "window_min", "last_value"}
+                   "constant_assumed", "constant_oracle", "window_mean", "window_min", "last_value",
+                   # Phase 4's table: the oracle over the fixed pool and the two-method proxy
+                   "oracle", "phase2_proxy"}
+P4_ENS_KEYS = ["target_g", "selector"]
+SELECTOR_TABLES = (("phase5a", "phase5a_ensemble.csv", ENS_KEYS),
+                   ("phase5a", "phase5a_ensemble_holdout.csv", ENS_KEYS),
+                   ("phase4", "phase4_ensemble.csv", P4_ENS_KEYS))
 _SIZED = re.compile(r"(oracle|equal_ensemble|diag_ensemble|capped_diag)_(\d+)")
 
 
@@ -190,11 +197,12 @@ def compare_selectors(before_dir: str, after_dir: str, roster_same: bool, artifa
     roster/artifact-dependent selectors must be identical only when both hold.
     """
     strict_roster = roster_same and artifact_same is True
-    for fname in ("phase5a_ensemble.csv", "phase5a_ensemble_holdout.csv"):
-        pb, pa = os.path.join(before_dir, "phase5a", fname), os.path.join(after_dir, "phase5a", fname)
+    for sub_dir, fname, keys in SELECTOR_TABLES:
+        pb, pa = os.path.join(before_dir, sub_dir, fname), os.path.join(after_dir, sub_dir, fname)
         if not (os.path.exists(pb) and os.path.exists(pa)):
             problem(f"{fname} missing in one of the trees")
             continue
+        isel = keys.index("selector")
         b, a = _ens_frame(pb, fname), _ens_frame(pa, fname)
         shared = sorted(set(b["selector"]) & set(a["selector"]))
         classes = {s: selector_class(s) for s in shared}
@@ -203,17 +211,17 @@ def compare_selectors(before_dir: str, after_dir: str, roster_same: bool, artifa
         diag = [s for s in shared if classes[s].startswith("diagnostic")]
         only_after = sorted(set(a["selector"]) - set(b["selector"]))
         only_before = sorted(set(b["selector"]) - set(a["selector"]))
-        merged = b.merge(a, on=ENS_KEYS, how="inner", suffixes=("_b", "_a"))
-        kb = {k for k in map(tuple, b[ENS_KEYS].to_numpy()) if k[2] in shared}
-        ka = {k for k in map(tuple, a[ENS_KEYS].to_numpy()) if k[2] in shared}
+        merged = b.merge(a, on=keys, how="inner", suffixes=("_b", "_a"))
+        kb = {k for k in map(tuple, b[keys].to_numpy()) if k[isel] in shared}
+        ka = {k for k in map(tuple, a[keys].to_numpy()) if k[isel] in shared}
         # a selector without a valid record on a slice was omitted by the summary before R8e
         # Part C and keeps its row (n_valid == 0) since; such rows only in AFTER are expected
         omitted = set()
         if "n_valid" in a.columns:
-            zero = a.set_index(ENS_KEYS)["n_valid"]
+            zero = a.set_index(keys)["n_valid"]
             omitted = {k for k in ka - kb if int(zero.loc[k]) == 0}
         if kb - ka or (ka - kb) - omitted:
-            problem(f"{fname}: (target_g, regime_set, selector) key sets differ for the shared selectors "
+            problem(f"{fname}: {tuple(keys)} key sets differ for the shared selectors "
                     f"({len(kb - ka)} only in BEFORE, {len((ka - kb) - omitted)} only in AFTER)")
         if omitted:
             print(f"  {fname}: {len(omitted)} row(s) only in AFTER with n_valid == 0 (selectors without a valid record on that "
@@ -232,7 +240,7 @@ def compare_selectors(before_dir: str, after_dir: str, roster_same: bool, artifa
             ok = _equal(sub[c + "_b"], sub[c + "_a"])
             if not ok.all():
                 n_bad += int((~ok).sum())
-                bad = sub.loc[~ok, ENS_KEYS + [c + "_b", c + "_a"]].head(5)
+                bad = sub.loc[~ok, keys + [c + "_b", c + "_a"]].head(5)
                 problem(f"{fname}: {int((~ok).sum())} of {len(sub)} fixed-list selector rows differ in {c}; first rows:\n{bad.to_string()}")
         print(f"  {fname}: {len(non_diag)} fixed-list selectors, "
               f"{len(sub):,} rows compared on {ENS_COLS}: {'IDENTICAL' if n_bad == 0 else f'{n_bad} differing values'}")

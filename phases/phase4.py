@@ -443,11 +443,29 @@ def cascade_with_filter(df: pd.DataFrame,
 def ensemble_comparison(df: pd.DataFrame, out_dir: str,
                         default_g: Optional[float] = None) -> pd.DataFrame:
     """
-    Compare selectors using true_val stored in records, at the headline
-    stratum.  Ensemble: weight each method by 1/(perturb_IQR + eps).  The
-    four trivial references are reported as fixed selectors, and every
-    selector gets a median skill against the hindsight best-of-four reference
-    (strict) plus med_skill_vs_* / win_rate_vs_* against each trivial.
+    The selector / ensemble table of Phase 4 at the headline stratum: a
+    descriptive panel (src.panels.error_panel) per selector over the windows
+    of the core regimes.  A selector's record on a window is the record of
+    the method it chose, or the value of the combination:
+
+        oracle            lowest error among the pool members (hindsight)
+        fixed_rational / fixed_richardson   one method everywhere
+        phase2_proxy      the lower error of richardson_1 and rational_fit
+                          (a hindsight proxy of the two-rule cascade)
+        diag_ensemble     the perturbation-weighted ensemble: weights
+                          1 / (perturb_IQR + eps) over the pool members with
+                          a finite estimate and diagnostic, the diagnostic
+                          taken from the paired perturbations of the window
+        the four deployable trivials as fixed reference selectors
+
+    An invalid prediction is an invalid record and is never replaced.  The
+    catastrophe flag follows the record rule (invalid, or error above
+    config.CAT_MULT times the window's last-value error curr_err); E_last is
+    the last_value comparator's error on the window.  The error statistics
+    are conditional on validity and are written next to valid_rate and
+    n_valid / n_total (the eleven PANEL_COLS), with med_skill (median over
+    the valid records of the hindsight best-of-four skill) and the
+    fixed-reference aggregates med_skill_vs_* / win_rate_vs_*.
     """
     eps = 0.01
     g   = _headline(df, default_g)
@@ -456,15 +474,18 @@ def ensemble_comparison(df: pd.DataFrame, out_dir: str,
     selectors = (['oracle', 'fixed_rational', 'fixed_richardson',
                   'phase2_proxy', 'diag_ensemble'] + REFERENCE_METHODS)
     errs = {s: [] for s in selectors}
-    refs = []
+    refs, currs, e_lasts = [], [], []
 
     for _, grp in sub.groupby(['regime', 'obs_idx', 'noise', 'seed']):
         grp_idx  = grp.set_index('method')
         true_val = float(grp['true_val'].iloc[0])
         refs.append(float(grp['ref_error'].iloc[0]))
+        currs.append(float(grp['curr_err'].iloc[0]))
 
         def _e(m):
             return float(grp_idx.loc[m, 'error']) if m in grp_idx.index else float('nan')
+
+        e_lasts.append(_e('last_value'))
 
         best_err = float('inf')
         for m in PHASE4_METHODS:
@@ -496,23 +517,28 @@ def ensemble_comparison(df: pd.DataFrame, out_dir: str,
             errs[m].append(_e(m))
 
     refs = np.asarray(refs, dtype=float)
+    currs = np.asarray(currs, dtype=float)
+    e_lasts = np.asarray(e_lasts, dtype=float)
     ref_arrays = {tag: np.asarray(errs[name], dtype=float) for name, tag in REFERENCE_TAGS}
     summary_rows = []
     for sel in selectors:
         vals = np.asarray(errs[sel], dtype=float)
-        ok = np.isfinite(vals)
+        valid = np.isfinite(vals)
+        with np.errstate(invalid='ignore'):
+            cat = (~valid) | ((currs > 1e-12) & (vals > CFG_MOD.CAT_MULT * currs))
+        panel = error_panel(vals, valid, cat, e_lasts)
         sk = np.array([skill_score(v, r) for v, r in zip(vals, refs)], dtype=float)
         sk = sk[~np.isnan(sk)]
-        summary_rows.append({
-            'selector':     sel,
-            'target_g':     g,
-            'is_trivial':   int(sel in REFERENCE_METHODS),
-            'mean_error':   round(float(vals[ok].mean()),   6) if ok.any() else float('nan'),
-            'median_error': round(float(np.median(vals[ok])), 6) if ok.any() else float('nan'),
-            'med_skill':    round(float(np.median(sk)), 4) if sk.size else float('nan'),
-            'n':            int(ok.sum()),
-            **skill_vs_from_arrays(vals, ref_arrays),   # med_skill_vs_* / win_rate_vs_*
-        })
+        row = {'selector': sel, 'target_g': g, 'is_trivial': int(sel in REFERENCE_METHODS)}
+        for k in PANEL_COLS:
+            v = panel[k]
+            if isinstance(v, float) and math.isfinite(v):
+                v = round(v, 4) if k in RATE_COLS else (round(v, 6) if k in ERR_COLS else v)
+            row[k] = v
+        row['med_skill'] = round(float(np.median(sk)), 4) if sk.size else float('nan')
+        svs = skill_vs_from_arrays(vals, ref_arrays)          # med_skill_vs_* / win_rate_vs_*
+        row.update({k: v for k, v in svs.items() if k not in row})   # the panel's win_rate_vs_last stands
+        summary_rows.append(row)
 
     df_sum = pd.DataFrame(summary_rows)
     p = os.path.join(out_dir, 'phase4_ensemble.csv')
