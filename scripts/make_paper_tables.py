@@ -1766,18 +1766,18 @@ def named_facts():
 
     # pipeline provenance
     sec = "pipeline provenance"
-    M, problem = load_manifest(RES)
-    if problem is None:
+    M = load_manifest(RES)
+    if M is not None:
         head = M.get("git_head", {})
         steps = "; ".join(f"{name} {secs:,.0f} s" for name, secs in M.get("steps", {}).items())
+        total = M.get("total_seconds")     # null inside a run: the manifest's final rewrite sets it
         fact(sec, "run (results/run_manifest.json)",
-             f"mode {M.get('mode')}; code {head.get('short')} ({head.get('full')}); started {M.get('started')}, finished {M.get('finished')}; "
-             f"jobs {M.get('jobs')}; total {M.get('total_seconds', 0):,.0f} s; steps: {steps}",
+             f"mode {M.get('mode')}; code {head.get('short')} ({head.get('full')}); started {M.get('started')}, finished {M.get('finished') or 'in progress'}; "
+             f"jobs {M.get('jobs')}; total {'in progress' if total is None else f'{total:,.0f} s'}; steps: {steps}",
              "results/run_manifest.json", "-", "written by reproduce_all.py at the end of the run")
     else:
-        fact(sec, "run (results/run_manifest.json)",
-             "manifest absent" if M is None else f"manifest does not describe these results: it is of the run started {M.get('started')}; {problem}",
-             "results/run_manifest.json", "-", "written by reproduce_all.py at the end of the run")
+        fact(sec, "run (results/run_manifest.json)", "manifest absent", "results/run_manifest.json", "-",
+             "written by reproduce_all.py at the end of the run")
     from reproduce_all import plan
     rows = plan("full")
     fact(sec, "evaluation counts (central), derived from the config grids",

@@ -25,7 +25,8 @@ in the required order:
               (after the tables step, because it replaces its own section of FACTS.md)
     manifest  results/run_manifest.json: mode, git head, start / end, worker count, per-step
               and total wall seconds, the evaluation plan of the mode, library versions
-              (written at the end of every run; the committed copy is the full run's)
+              (written at the start of every run, again after every step and at the end, so
+              the generators inside the run read their own run; the committed copy is the full run's)
 
 The excluded-method set is derived from Phase-1 output into
 results/phase1/dangerous_methods.json; phases 2-5 refuse to run without
@@ -63,7 +64,7 @@ _ROOT = os.path.dirname(os.path.abspath(__file__))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-MANIFEST = os.path.join("results", "run_manifest.json")   # written at the end of every run (quick or full)
+MANIFEST = os.path.join("results", "run_manifest.json")   # written at the start, after every step and at the end of every run (quick or full)
 
 
 # (label, script, takes_mode_flag)
@@ -206,7 +207,7 @@ def _versions() -> dict:
     return out
 
 
-def write_manifest(mode: str, outcomes: list, started: str, finished: str, jobs: int) -> str:
+def write_manifest(mode: str, outcomes: list, started: str, jobs: int, finished: str = None, path: str = None) -> str:
     """
     results/run_manifest.json: the provenance of the run that produced the
     results tree -- mode, git head, start and end time, the worker count the
@@ -214,8 +215,16 @@ def write_manifest(mode: str, outcomes: list, started: str, finished: str, jobs:
     evaluation plan of that mode and the library versions.  The committed
     copy is the one of the full run; a quick run overwrites it in a
     worktree only.
+
+    main() writes it three ways: at the start (no outcomes: empty steps,
+    finished and total_seconds null), after every step (the steps so far, so
+    a run that crashes leaves a manifest that says how far it got) and at
+    the end (finished given: the total is set).  The steps inside the run
+    that read it (the table generators) therefore find their own run, with
+    the total still open.  The final file does not depend on the
+    intermediate writes.
     """
-    path = os.path.join(_ROOT, MANIFEST)
+    path = path or os.path.join(_ROOT, MANIFEST)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     payload = {
         "mode": mode,
@@ -225,7 +234,7 @@ def write_manifest(mode: str, outcomes: list, started: str, finished: str, jobs:
         "jobs": jobs,
         "steps": {label: round(elapsed, 1) for label, _ok, elapsed in outcomes},
         "failed_steps": [label for label, ok, _ in outcomes if not ok],
-        "total_seconds": round(sum(elapsed for _, _, elapsed in outcomes), 1),
+        "total_seconds": round(sum(elapsed for _, _, elapsed in outcomes), 1) if finished is not None else None,
         "plan": [{"step": label, "evaluations": n, "note": note} for label, n, note in plan(mode)],
         "versions": _versions(),
     }
@@ -271,22 +280,26 @@ def main():
           f"excluded-set re-derivation -> Phases 2-5 -> real data -> tables -> L_true terciles")
     print("  Output: results/<phase>/\n")
 
+    # The parallel steps (Phase 5a, Phase 0b) run with their scripts' default
+    # worker count; record it with the run.
+    from phases.phase5a import default_jobs
+    jobs = default_jobs()
+    manifest_mode = "quick" if args.quick else "full"
+
     outcomes = []
     t_start = time.time()
     started = _dt.datetime.now().isoformat(timespec="seconds")
+    write_manifest(manifest_mode, outcomes, started, jobs)
     for i, (label, script, takes_mode) in enumerate(steps, 1):
         cmd = [sys.executable, script] + ([mode_flag] if takes_mode else [])
         ok, elapsed = run_step(label, cmd, i, len(steps))
         outcomes.append((label, ok, elapsed))
+        write_manifest(manifest_mode, outcomes, started, jobs)
         if not ok and script.endswith(("run_phase1.py", "derive_dangerous.py")):
             print("  Stopping: later phases depend on this step.")
             break
     finished = _dt.datetime.now().isoformat(timespec="seconds")
-
-    # The parallel steps (Phase 5a, Phase 0b) run with their scripts' default
-    # worker count; record it with the run.
-    from phases.phase5a import default_jobs
-    manifest = write_manifest("quick" if args.quick else "full", outcomes, started, finished, default_jobs())
+    manifest = write_manifest(manifest_mode, outcomes, started, jobs, finished=finished)
 
     print("\n" + "=" * 72)
     print(f"  PIPELINE SUMMARY  [{mode}]")
