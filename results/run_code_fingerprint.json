@@ -56,7 +56,9 @@
       "sha256_at_run": "034fdcbb918305b55d49495df9c4aacabd5d97bc768334d475ec8bb6277b1f75"
     },
     "scripts/run_real_data.py": {
-      "sha256_at_run": "342e679389c3d1f6b3baca2f21c3621a6bba8463808f2d53bc4cb27d93c3ffe5"
+      "sha256_at_run": "342e679389c3d1f6b3baca2f21c3621a6bba8463808f2d53bc4cb27d93c3ffe5",
+      "sha256_now": "8d939635504def74fc0b09b24ca581fca28bdf7235e94482bad08f34eaab55d7",
+      "changed_after_run": "R9d Part B added the --roster-only option, run_roster() and the two roster output files (real_data_roster_v2.csv, real_data_roster_provenance.json) after the legacy outputs; the legacy files are produced by the same calls as at the run, which tests/test_real_roster.py::test_legacy_path_reproduces_the_committed_results_on_a_subset and the quick-run comparison (scripts/dev/compare_quick_runs.py) guarantee."
     },
     "src/__init__.py": {
       "sha256_at_run": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -98,7 +100,9 @@
       "sha256_at_run": "bd11c9a2991ac0e7c40c06bbb1ef1b0e5fdc723394594b2a873331d836a2129f"
     },
     "src/trajectories.py": {
-      "sha256_at_run": "1bc58b639c14c5265c8277c81864128893dbfd572ebd0dee6a4a0a5e35f75ed3"
+      "sha256_at_run": "1bc58b639c14c5265c8277c81864128893dbfd572ebd0dee6a4a0a5e35f75ed3",
+      "sha256_now": "ee6a71b11c6e6f07942794625beb8d1349ef0f2102261e1cd90a01df2874fec4",
+      "changed_after_run": "R9d Part B added ROSTER_REAL_METHODS, ROSTER_COLUMNS and evaluate_recorded_curves_roster (new names only, appended after the last function); every function that existed at the run is byte-identical, and tests/test_real_roster.py::test_legacy_path_reproduces_the_committed_results_on_a_subset pins evaluate_recorded_curves to the committed real_data_results_v2.csv."
     },
     "src/trivial.py": {
       "sha256_at_run": "ca7a48d9bee88fb1de4268bf60c228206b263cc5096fb20f577a7304673080f6"

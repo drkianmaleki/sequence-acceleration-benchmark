@@ -12,10 +12,23 @@ trivial comparators and skill included.  The original 18-cell results
 
     python scripts/run_real_data.py                 # re-evaluate recorded curves
     python scripts/run_real_data.py --quick          # same (accepted for the pipeline)
+    python scripts/run_real_data.py --roster-only    # only the roster evaluation (two files below)
     python scripts/run_real_data.py --retrain        # LEGACY: download + train
                                                      # (writes the 18-cell files)
 
 Output directory: results/real_data/
+
+Roster evaluation (R9d Part B; written after the files below, or alone with
+--roster-only)
+---------------
+    real_data_roster_v2.csv     one row per (dataset, obs_depth, target_round, method) for
+                                every method of src.trajectories.ROSTER_REAL_METHODS (every
+                                accelerator and the four deployable trivial predictors; no
+                                oracle), scored under the benchmark's own configuration and
+                                per-record definitions (evaluate_recorded_curves_roster)
+    real_data_roster_provenance.json   script, commit, tree state, timing, library versions
+                                (and whether they equal the run manifest's), the numerical
+                                configuration, datasets, cells, methods, rows
 
 New files
 ---------
@@ -67,13 +80,16 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 import src.config as CFG_MOD
-from src.trajectories import (FEATURE_COLS, REAL_DATA_METHODS, curve_minimum_table,
-                              evaluate_recorded_curves, process_curves, real_data_strata)
+from src.trajectories import (FEATURE_COLS, REAL_DATA_METHODS, ROSTER_REAL_METHODS, curve_minimum_table,
+                              evaluate_recorded_curves, evaluate_recorded_curves_roster,
+                              process_curves, real_data_strata)
 
 OUT_DIR      = os.path.join('results', 'real_data')
 PHASE2_FEATS = os.path.join('results', 'phase2', 'phase2_features.csv')
 ASSUMED_MODE = CFG_MOD.ASSUMED_L_MODE   # "zero": real curves have no oracle
 N_ROUNDS     = 500
+ROSTER_CSV   = 'real_data_roster_v2.csv'
+ROSTER_PROV  = 'real_data_roster_provenance.json'
 
 
 def n_evaluations(curves_csv: str = None) -> dict:
@@ -205,6 +221,98 @@ def print_summary_v2(df_long: pd.DataFrame, df_sum: pd.DataFrame):
     print()
 
 
+def _git_head() -> dict:
+    """Full and short hash of the checked-out commit ("unknown" outside a git checkout)."""
+    import subprocess
+    out = {}
+    for key, cmd in (('full', ['rev-parse', 'HEAD']), ('short', ['rev-parse', '--short', 'HEAD'])):
+        try:
+            out[key] = subprocess.check_output(['git'] + cmd, cwd=_ROOT, stderr=subprocess.DEVNULL).decode().strip()
+        except Exception:
+            out[key] = 'unknown'
+    return out
+
+
+def _tracked_tree_clean():
+    """True when `git status --porcelain --untracked-files=no` prints nothing (None outside git)."""
+    import subprocess
+    try:
+        out = subprocess.check_output(['git', 'status', '--porcelain', '--untracked-files=no'],
+                                      cwd=_ROOT, stderr=subprocess.DEVNULL).decode()
+        return out.strip() == ''
+    except Exception:
+        return None
+
+
+def run_roster(args, curves: dict) -> tuple:
+    """
+    The roster evaluation of the recorded curves (R9d Part B): every method of
+    ROSTER_REAL_METHODS under the benchmark's own configuration and scoring
+    (src.trajectories.evaluate_recorded_curves_roster), written to
+    real_data_roster_v2.csv with its own provenance file
+    real_data_roster_provenance.json.  Touches nothing else.
+    """
+    import datetime as _dt
+    import json
+    import time
+    from reproduce_all import _versions
+    from scripts.analyze_by_ltrue import load_manifest
+
+    cfg = CFG_MOD.REAL_DATA
+    os.makedirs(args.out_dir, exist_ok=True)
+    t0 = time.time()
+    started = _dt.datetime.now().isoformat(timespec='seconds')
+    head = _git_head()
+    clean = _tracked_tree_clean()
+    df = evaluate_recorded_curves_roster(curves, depths=cfg['depths'], targets=cfg['targets'],
+                                         window_len=cfg['window_len'], assumed_mode=ASSUMED_MODE)
+    finished = _dt.datetime.now().isoformat(timespec='seconds')
+    seconds = round(time.time() - t0, 1)
+
+    p_csv = os.path.join(args.out_dir, ROSTER_CSV)
+    df.to_csv(p_csv, index=False)
+    cells = int(df.drop_duplicates(['dataset', 'obs_depth', 'target_round']).shape[0]) if len(df) else 0
+    versions = _versions()
+    M = load_manifest(os.path.join(_ROOT, 'results'))
+    run_versions = (M or {}).get('versions')
+    prov = {
+        'script': 'scripts/run_real_data.py' + (' --roster-only' if getattr(args, 'roster_only', False) else ''),
+        'output': os.path.relpath(p_csv, _ROOT).replace(os.sep, '/'),
+        'git_head': head,
+        'tracked_tree_clean': clean,
+        'started': started,
+        'finished': finished,
+        'seconds': seconds,
+        'versions': versions,
+        'versions_equal_run_manifest': (versions == run_versions) if run_versions is not None else None,
+        'configuration': {
+            'RIDGE': CFG_MOD.RIDGE, 'DENOM_TOL': CFG_MOD.DENOM_TOL,
+            'MIN_VALID': CFG_MOD.MIN_VALID, 'MAX_VALID': CFG_MOD.MAX_VALID,
+            'CAT_MULT': CFG_MOD.CAT_MULT,
+            'window_len': cfg['window_len'], 'assumed_mode': ASSUMED_MODE,
+            'depths': list(cfg['depths']), 'targets': list(cfg['targets']),
+            'validity': 'src.evaluation.is_valid: finite and MIN_VALID <= prediction <= MAX_VALID '
+                        '(valid_strict = the legacy rule, finite and 0 <= prediction <= 2 * window max, recorded alongside)',
+        },
+        'datasets': sorted(curves),
+        'cells': cells,
+        'methods': len(ROSTER_REAL_METHODS),
+        'method_names': list(ROSTER_REAL_METHODS),
+        'rows': int(len(df)),
+        'note': ('This evaluation was added after the full run recorded in results/run_manifest.json'
+                 + (f" (started {M.get('started')}, code {M.get('git_head', {}).get('short')})" if M else '')
+                 + '; it applies the benchmark\'s own protocol (src.evaluation: build_cfg, is_valid, the per-record '
+                   'definitions of run_phase1) to the recorded curves and changes no file of that run.'),
+    }
+    p_prov = os.path.join(args.out_dir, ROSTER_PROV)
+    with open(p_prov, 'w', encoding='utf-8', newline='\n') as fh:
+        json.dump(prov, fh, indent=2)
+        fh.write('\n')
+    print(f'  Saved: {p_csv}  ({len(df)} rows = {cells} cells x {len(ROSTER_REAL_METHODS)} methods; {seconds} s)')
+    print(f'  Saved: {p_prov}')
+    return p_csv, p_prov
+
+
 def parse_args():
     p = argparse.ArgumentParser(description='Real-data experiment (redesign v2)')
     p.add_argument('--quick', action='store_true', help='accepted for pipeline uniformity')
@@ -212,6 +320,9 @@ def parse_args():
     p.add_argument('--retrain', action='store_true',
                    help='LEGACY path: download OpenML data, retrain XGBoost, write the '
                         '18-cell files (requires internet, xgboost, openml)')
+    p.add_argument('--roster-only', action='store_true',
+                   help='write only real_data_roster_v2.csv and real_data_roster_provenance.json '
+                        '(every method under the benchmark protocol); no legacy CSV, no figure')
     p.add_argument('--curves', default=os.path.join(_ROOT, CFG_MOD.REAL_DATA['curves_csv']))
     p.add_argument('--out-dir', default=OUT_DIR)
     return p.parse_args()
@@ -265,6 +376,27 @@ def main_reevaluate(args):
     fig_skill_heatmap(df_sum, args.out_dir)
     print_summary_v2(df_long, df_sum)
     print_strata_v2(df_min, df_strata, df_sum)
+    # R9d Part B: every method under the benchmark protocol, after the legacy outputs
+    print(f'  Roster evaluation: {len(ROSTER_REAL_METHODS)} methods x {counts["cells"]} cells '
+          f'under the benchmark configuration (src.evaluation)')
+    run_roster(args, curves)
+    print('=' * 72 + '\n')
+    return 0
+
+
+def main_roster_only(args):
+    """--roster-only: the two roster files and nothing else."""
+    if not os.path.exists(args.curves):
+        print(f'ERROR: {args.curves} not found; nothing to evaluate.')
+        return 1
+    curves = load_recorded_curves(args.curves)
+    print('=' * 72)
+    print('  REAL DATA — ROSTER EVALUATION OF THE RECORDED CURVES  (benchmark protocol)')
+    print('=' * 72)
+    print(f'  Curves     : {args.curves}')
+    print(f'  Methods    : {len(ROSTER_REAL_METHODS)}  (every accelerator + the four deployable trivials)')
+    print(f'  L_hat mode : {ASSUMED_MODE}')
+    run_roster(args, curves)
     print('=' * 72 + '\n')
     return 0
 
@@ -294,6 +426,8 @@ def main():
     args = parse_args()
     if args.retrain:
         return main_retrain(args)
+    if args.roster_only:
+        return main_roster_only(args)
     return main_reevaluate(args)
 
 

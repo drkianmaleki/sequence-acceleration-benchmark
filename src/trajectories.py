@@ -609,3 +609,142 @@ def evaluate_recorded_curves(
                 ))
 
     return pd.DataFrame(long_rows), pd.DataFrame(summary_rows)
+
+
+# ── Redesign v2, R9d Part B: the recorded curves under the benchmark's own protocol ──
+
+from src.pipeline import ACCEL_METHODS   # noqa: E402  (the accelerator roster; src.pipeline does not import this module)
+from src.trivial import REFERENCE_TAGS   # noqa: E402  (the (method, tag) pairs behind the skill_vs_* / win_vs_* columns)
+
+# The recorded-curve roster: every accelerator followed by the four deployable
+# trivial predictors.  The oracle is excluded: no asymptote is known on a
+# recorded curve.  The per-cell row count of real_data_roster_v2.csv is
+# len(ROSTER_REAL_METHODS).
+ROSTER_REAL_METHODS = [*ACCEL_METHODS, *SKILL_REFERENCE_METHODS]
+
+# Columns of the roster table, in this order (the eight fixed-reference
+# columns follow src.trivial.skill_vs_table, one skill / win pair per
+# deployable trivial).
+ROSTER_COLUMNS = [
+    'dataset', 'obs_depth', 'target_round', 'argmin_round', 'post_min_target',
+    'method', 'family', 'method_type', 'is_trivial',
+    'prediction_raw', 'valid', 'valid_strict', 'prediction', 'true_val', 'error',
+    'E_last', 'catastrophic', 'improve_ratio', 'ref_error', 'skill',
+    *[c for _, _tag in REFERENCE_TAGS for c in (f'skill_vs_{_tag}', f'win_vs_{_tag}')],
+    'window_max', 'L_hat', 'assumed_mode',
+]
+
+
+def evaluate_recorded_curves_roster(
+    curves:       dict,
+    depths:       list,
+    targets:      list,
+    window_len:   int = 60,
+    assumed_mode: str = None,
+) -> pd.DataFrame:
+    """
+    Every method of ROSTER_REAL_METHODS on the recorded curves, scored with
+    the benchmark's own configuration and per-record definitions.
+
+    Windows and indices are exactly those of evaluate_recorded_curves
+    (window = curve[start:depth], rounds start+1 ... depth, target
+    float(target), L_hat = assumed_asymptote(None, window, assumed_mode)).
+    Per cell the configuration is src.evaluation.build_cfg(target, L_hat)
+    (config.RIDGE, DENOM_TOL, MIN_VALID, MAX_VALID), not the legacy
+    _DEFAULT_CFG of apply_accelerator; every method is called as Phase 1
+    calls it (METHODS[m](...) in a try/except, an exception is NaN), and
+    every record follows the per-record definitions of the Phase-1 loop
+    (src.evaluation.run_phase1), with the same helpers and constants:
+
+        valid         = is_valid(est, cfg)  (finite and in [MIN_VALID, MAX_VALID])
+        error         = |est - true|  if valid else NaN
+        E_last        = the error of last_value
+        catastrophic  = (not valid) or (E_last > 1e-12 and error > CAT_MULT * E_last)
+        improve_ratio = E_last / error  if valid and error > 1e-12;  1.0 if valid otherwise;  NaN if invalid
+        ref_error, skill, skill_vs_* / win_vs_*  from best_reference_error, skill_score, skill_vs_table
+
+    ``prediction_raw`` is the method's return value (finite or NaN) before
+    any validity rule and ``prediction`` is NaN when invalid.
+    ``valid_strict`` = finite and 0 <= prediction_raw <= 2 * window_max, the
+    rule of the legacy recorded-curve path (apply_accelerator), recorded so
+    that both rules can be reported.
+
+    Returns one row per (dataset, obs_depth, target_round, method) with the
+    columns ROSTER_COLUMNS.
+    """
+    import math
+    from src.accelerators import METHODS
+    from src.evaluation import FAMILY, METHOD_TYPE, build_cfg, is_valid
+    from src.trivial import best_reference_error, skill_score, skill_vs_table
+
+    assumed_mode = resolve_mode(assumed_mode)
+    minima = curve_minimum_table(curves).set_index('dataset')
+    rows = []
+
+    for name, curve in curves.items():
+        curve    = np.asarray(curve, dtype=float)
+        n_rounds = len(curve)
+        argmin_round = int(minima.loc[name, 'argmin_round'])
+
+        for depth in depths:
+            if depth >= n_rounds:
+                continue
+            start  = max(0, depth - window_len)
+            window = curve[start:depth]
+            idxs   = np.arange(start + 1, depth + 1, dtype=float)
+            L_hat  = assumed_asymptote(None, window, assumed_mode)
+            window_max = float(np.max(window))
+
+            for target in targets:
+                if depth >= target or target > n_rounds:
+                    continue
+                true_val = float(curve[target - 1])
+                fx       = float(target)
+                cfg      = build_cfg(target, L_hat)
+
+                ests, errs = {}, {}
+                for m in ROSTER_REAL_METHODS:
+                    try:
+                        est = float(METHODS[m](window, idxs, fx, cfg))
+                    except Exception:
+                        est = float('nan')
+                    ests[m] = est
+                    errs[m] = (abs(est - true_val) if is_valid(est, cfg) else float('nan'))
+                ref_err  = best_reference_error(errs)
+                E_last   = errs['last_value']
+                post_min = int(target > argmin_round)
+
+                for m in ROSTER_REAL_METHODS:
+                    est, err = ests[m], errs[m]
+                    valid = math.isfinite(err)
+                    cat   = (not valid) or (E_last > 1e-12 and err > C.CAT_MULT * E_last)
+                    impv  = ((E_last / err) if (valid and err > 1e-12)
+                             else (1.0 if valid else float('nan')))
+                    strict = bool(math.isfinite(est) and 0.0 <= est <= 2.0 * window_max)
+                    row = {
+                        'dataset':         name,
+                        'obs_depth':       depth,
+                        'target_round':    target,
+                        'argmin_round':    argmin_round,
+                        'post_min_target': post_min,
+                        'method':          m,
+                        'family':          FAMILY.get(m, 'unknown'),
+                        'method_type':     METHOD_TYPE[m],
+                        'is_trivial':      int(m in SKILL_REFERENCE_METHODS),
+                        'prediction_raw':  est,
+                        'valid':           int(valid),
+                        'valid_strict':    int(strict),
+                        'prediction':      est if valid else float('nan'),
+                        'true_val':        true_val,
+                        'error':           err if valid else float('nan'),
+                        'E_last':          E_last,
+                        'catastrophic':    int(cat),
+                        'improve_ratio':   impv if math.isfinite(impv) else float('nan'),
+                        'ref_error':       ref_err,
+                        'skill':           skill_score(err, ref_err) if valid else float('nan'),
+                    }
+                    row.update(skill_vs_table(err if valid else float('nan'), errs))
+                    row.update(window_max=window_max, L_hat=L_hat, assumed_mode=assumed_mode)
+                    rows.append(row)
+
+    return pd.DataFrame(rows, columns=ROSTER_COLUMNS)

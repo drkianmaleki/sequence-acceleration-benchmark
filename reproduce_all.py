@@ -177,12 +177,17 @@ def plan(mode: str) -> list:
                                            f"({len(r)} regimes, {len(c['gap_fractions'])} strata)"))
 
     from src.datasets import DATASET_IDS
-    from src.trajectories import REAL_DATA_METHODS
+    from src.trajectories import REAL_DATA_METHODS, ROSTER_REAL_METHODS
     rd = C.REAL_DATA
     pairs = [(d, t) for d in rd["depths"] for t in rd["targets"] if d < t]
-    n_ds, n_m = len(DATASET_IDS), len(REAL_DATA_METHODS)
-    rows.append(("Real data", n_ds * len(pairs) * n_m,
-                 f"{n_ds} datasets x {len(pairs)} (depth, target) pairs x {n_m} methods"))
+    n_ds, n_m, n_r = len(DATASET_IDS), len(REAL_DATA_METHODS), len(ROSTER_REAL_METHODS)
+    cells = n_ds * len(pairs)
+    # two evaluations of the recorded curves: the reported methods (legacy path,
+    # real_data_results_v2.csv) and the roster under the benchmark protocol
+    # (real_data_roster_v2.csv)
+    rows.append(("Real data", cells * (n_m + n_r),
+                 f"{n_ds} datasets x {len(pairs)} (depth, target) pairs x ({n_m} reported methods "
+                 f"+ {n_r} roster methods: {cells * n_m:,} legacy + {cells * n_r:,} roster evaluations)"))
     return rows
 
 

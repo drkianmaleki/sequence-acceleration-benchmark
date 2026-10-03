@@ -23,8 +23,14 @@ mismatch.
 Path set (derived, not typed): every *.py under src/ and phases/; every step
 script of reproduce_all.STEPS that produces results (every step that is not
 in reproduce_all.GENERATOR_STEPS, the table generators); and every project
-module those step scripts import from outside src/ and phases/ (today
-tests/test_accelerators.py, imported by scripts/run_phase0_tests.py).
+module those step scripts import from outside src/ and phases/, transitively
+(today tests/test_accelerators.py, imported by scripts/run_phase0_tests.py,
+and tests/test_input_dependence.py, which it imports).  The infrastructure
+that produces no result -- the driver reproduce_all.py, the table generators
+of reproduce_all.GENERATOR_STEPS and this script -- is never in the path
+set, even when a step script imports a helper from it (scripts/run_real_data.py
+reads the library versions and the run manifest through reproduce_all._versions
+and scripts.analyze_by_ltrue.load_manifest for its provenance file).
 
 Hash: SHA-256 over the file bytes with CRLF normalised to LF, so a Windows
 checkout and the git blob agree.  Paths are stored relative to the
@@ -91,6 +97,13 @@ def _step_scripts():
     return [script for _, script, _ in STEPS if script not in GENERATOR_STEPS]
 
 
+def _infrastructure():
+    """The files that produce no result and are never in the path set: the driver,
+    the table generators and this script."""
+    from reproduce_all import GENERATOR_STEPS
+    return set(GENERATOR_STEPS) | {"reproduce_all.py", os.path.relpath(os.path.abspath(__file__), _ROOT).replace(os.sep, "/")}
+
+
 def _imported_modules(source: str):
     """Dotted names of every module a Python source imports (import X / from X import ...)."""
     mods = []
@@ -121,9 +134,11 @@ def _resolve_project_module(mod: str, exists):
 
 
 def _project_imports(start_paths, exists, read):
-    """Transitive closure of the project modules outside CODE_DIRS imported by start_paths."""
+    """Transitive closure of the project modules outside CODE_DIRS imported by
+    start_paths, the infrastructure files excepted."""
+    skip = _infrastructure()
     found, todo = [], list(start_paths)
-    seen = set(todo)
+    seen = set(todo) | skip
     while todo:
         p = todo.pop(0)
         for mod in _imported_modules(read(p)):

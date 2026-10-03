@@ -114,8 +114,10 @@ def test_committed_fingerprint_passes_on_the_working_tree():
     assert "src/evaluation.py" in paths and "phases/phase1.py" in paths and "src/__init__.py" in paths
     assert "scripts/run_phase1.py" in paths and "scripts/run_real_data.py" in paths
     assert "tests/test_accelerators.py" in paths                 # imported by scripts/run_phase0_tests.py
+    assert "tests/test_input_dependence.py" in paths             # imported by tests/test_accelerators.py
+    # the infrastructure is never in the set, although scripts/run_real_data.py imports helpers from it
     assert "scripts/make_paper_tables.py" not in paths and "scripts/analyze_by_ltrue.py" not in paths
-    assert "reproduce_all.py" not in paths
+    assert "reproduce_all.py" not in paths and "scripts/run_code_fingerprint.py" not in paths
     lines = []
     assert check_fingerprint(_ROOT, paths, fp, out=lines.append) == 0, "\n".join(lines)
     data = load_fingerprint(fp)
