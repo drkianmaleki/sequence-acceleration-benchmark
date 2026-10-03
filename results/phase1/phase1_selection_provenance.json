@@ -1,13 +1,13 @@
 {
   "script": "scripts/derive_selection.py",
   "git_head": {
-    "full": "08d51164075233ccca4e2513041bae78a5f093a1",
-    "short": "08d5116"
+    "full": "b4d551866d6dbddf860a6197b6ea972063ec3996",
+    "short": "b4d5518"
   },
   "tracked_tree_clean": true,
-  "started": "2026-10-03T15:58:20",
-  "finished": "2026-10-03T15:58:26",
-  "seconds": 5.8,
+  "started": "2026-10-03T18:14:05",
+  "finished": "2026-10-03T18:14:10",
+  "seconds": 5.3,
   "versions": {
     "python": "3.12.10",
     "numpy": "2.5.1",
@@ -243,6 +243,69 @@
       "med_error_last_phase1": 0.0934698426684626,
       "max_abs_diff_default": 0.0,
       "max_abs_diff_last": 0.0,
+      "agree": true
+    }
+  ],
+  "catastrophe_rate": "cat_rate_chosen = the share of a cell's trials whose chosen record on the final seed carries the Phase 1 catastrophic flag as recorded (the estimate is invalid, or its error exceeds CAT_MULT = 5 times the error of the last observed value on the same sequence), a trial without a choice counted as catastrophic in the same way as it counts as invalid; cat_rate_default = the share of the cell's trials on which rational_fit's record on the same final seed is catastrophic; the pooled table carries the means over the cells of both",
+  "phase1_cat_agreement": [
+    {
+      "regime_set": "core",
+      "target_g": 0.5,
+      "cells": 432,
+      "rows": 8,
+      "cat_rate_default_phase1": 0.0123,
+      "max_abs_diff_cells": 3.333333333332966e-05,
+      "max_abs_diff_pooled": 4.567901234567816e-05,
+      "agree": true
+    },
+    {
+      "regime_set": "core",
+      "target_g": 0.1,
+      "cells": 384,
+      "rows": 8,
+      "cat_rate_default_phase1": 0.009,
+      "max_abs_diff_cells": 3.333333333332966e-05,
+      "max_abs_diff_pooled": 2.7777777777779344e-05,
+      "agree": true
+    },
+    {
+      "regime_set": "core",
+      "target_g": 0.02,
+      "cells": 360,
+      "rows": 8,
+      "cat_rate_default_phase1": 0.0119,
+      "max_abs_diff_cells": 3.333333333332966e-05,
+      "max_abs_diff_pooled": 4.814814814814959e-05,
+      "agree": true
+    },
+    {
+      "regime_set": "holdout",
+      "target_g": 0.5,
+      "cells": 144,
+      "rows": 8,
+      "cat_rate_default_phase1": 0.0,
+      "max_abs_diff_cells": 0.0,
+      "max_abs_diff_pooled": 0.0,
+      "agree": true
+    },
+    {
+      "regime_set": "holdout",
+      "target_g": 0.1,
+      "cells": 120,
+      "rows": 8,
+      "cat_rate_default_phase1": 0.0022,
+      "max_abs_diff_cells": 3.333333333332966e-05,
+      "max_abs_diff_pooled": 2.2222222222222088e-05,
+      "agree": true
+    },
+    {
+      "regime_set": "holdout",
+      "target_g": 0.02,
+      "cells": 120,
+      "rows": 8,
+      "cat_rate_default_phase1": 0.0022,
+      "max_abs_diff_cells": 3.333333333332966e-05,
+      "max_abs_diff_pooled": 2.2222222222222088e-05,
       "agree": true
     }
   ],
