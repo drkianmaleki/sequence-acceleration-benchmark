@@ -22,7 +22,8 @@ files were at the run. Any change to `src/generators.py`,
 window in `src/config.py` invalidates every stored table, so regenerate the
 whole set rather than mixing output from different commits; a result added
 later must carry its own provenance file (the roster evaluation of the
-recorded curves does, `real_data/real_data_roster_provenance.json`), the
+recorded curves does, `real_data/real_data_roster_provenance.json`, and so
+does the selection analysis, `phase1/phase1_selection_provenance.json`), the
 file it changes must be recorded in the fingerprint with one sentence and the
 test that guarantees the old outputs, and
 `python scripts/run_code_fingerprint.py --check` must pass on the tree. The
@@ -55,6 +56,11 @@ committed. The ten `FACTS.md` rows that only the raw files can supply are
 computed once by `scripts/derive_raw_facts.py` into the committed
 `raw_facts.csv`, so the table generator reads no raw file and every table
 regenerates from the committed tree (`python scripts/check_tables.py`).
+The selection-by-trial aggregates `phase1/phase1_selection_cells.csv`,
+`phase1/phase1_selection_global.csv` and `phase1/phase1_selection_provenance.json`
+(`scripts/derive_selection.py`) are, like `raw_facts.csv`, derived from the
+git-ignored `phase1/phase1_records.csv` and committed; the analysis evaluates
+no method.
 
 ## Descriptive panel
 
@@ -91,6 +97,7 @@ and carry `rank` / `rank_eligible`; the below-floor methods form an
 | `phase1/phase1_aggregated.csv` | one row per (method, regime, noise, g): the descriptive panel of the seeds, `med_improve`, `med_skill` (hindsight best-of-four, strict), `med_skill_vs_*` / `win_rate_vs_*` against each deployable trivial |
 | `phase1/phase1_unranked.csv`, `phase1_capped.csv`, `phase1_horizons.csv`, `phase1_heatmap_g*.csv`, `phase1_heatmap_valid_g*.csv`, `phase1_regime_best.csv` | floor block, capped block, horizon search, method x regime median error and valid rate per stratum, per-regime best by skill and best by median error at the floor |
 | `phase1/phase1_by_Ltrue.csv` | Phase-1 results by L_true tercile (`scripts/analyze_by_ltrue.py`, the last pipeline step) |
+| `phase1/phase1_selection_cells.csv`, `phase1_selection_global.csv`, `phase1_selection_provenance.json` | choosing a method by trial on the Phase 1 records (`scripts/derive_selection.py`; derived from the git-ignored `phase1_records.csv`, evaluates no method): per uncapped (set, regime, noise, g) cell, candidate pool (lead = the leading methods, named = `rational_fit` and `single_exp_fit`, classical = the classical variants, all = every accelerator) and design (`one_pilot`: every ordered pair of seeds, the member with the lowest error on the pilot seed; `many_pilots`: every seed as the final run, the member with the lowest median error over the other seeds among those above the validity floor), the share of trials whose chosen record is valid, beats the default and beats the last value, how often the default itself is chosen, the median errors of the chosen method, the default and the last value and the median error ratio; the pooled table per set, stratum, noise class (and `all`), pool and design, whose `all` rows reproduce the pooled Phase 1 medians of the default and the last value (checked); the provenance file records the script, commit, tree state, timing, library versions, the records file's row count and SHA-256, the pools, the designs, cells and trials per design and the agreement check |
 | `phase1/dangerous_methods.json` | the excluded-method artifact read by Phases 2-5 (schema `dangerous_methods/v3`: pooled `valid_rate < RANK_MIN_VALID`; `dangerous` is the legacy implementation name) |
 | `phase2/phase2_sweep_aggregated.csv`, `phase2_features.csv`, `phase2_capped.csv` | per-cell descriptive panels of the Phase-2 pool, window features, capped block |
 | `phase2/phase2_richardson_targets_g*.csv`, `phase2_denominator_counts.csv` | per cell: `richardson_1`'s error normalised by the last-value error (`R_R_med`) and the log of its median error, with validity counts; per horizon the records and cells where the `E_last <= 1e-12` branch of the ratio fired |
@@ -114,6 +121,7 @@ headline numbers with provenance in `FACTS.md`; the raw-derived rows from
 followed by `python scripts/analyze_by_ltrue.py` (the tercile fragments and
 their FACTS section, from `phase1/phase1_by_Ltrue.csv` when the records
 file is absent) and `python scripts/build_tables_document.py`
-(`paper_fragments/all_tables.tex`); the four run as the last four steps of
+(`paper_fragments/all_tables.tex`); with `python scripts/derive_selection.py`
+(the selection aggregates, after a run) the five run as the last five steps of
 `reproduce_all.py`, and `python scripts/check_tables.py` regenerates all of
 it from the committed tree and compares.
