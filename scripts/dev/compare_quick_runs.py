@@ -59,7 +59,14 @@ relative difference.  Otherwise the script
     med_skill and win_rate_vs_last for the shared methods, and checks that the
     new panel columns of the AFTER table satisfy q25 <= med <= q75 <= p90 and
     n_valid <= n_total on every row;
-  * lists the methods only in AFTER and only in BEFORE.
+  * lists the methods only in AFTER and only in BEFORE;
+  * compares the recorded-curve outputs of the two trees (R9d):
+    real_data/real_data_results_v2.csv, real_data_strata_v2.csv and
+    real_data_curve_minima_v2.csv must be identical (every column, exact
+    equality, NaN == NaN), real_data_summary_v2.csv identical except its
+    git_head column; the roster file real_data_roster_v2.csv (every method
+    under the benchmark protocol, added by R9d) is reported as present in
+    AFTER only when BEFORE predates it, and compared when both trees have it.
 
 Exit status 0 when everything matches, 1 otherwise.  Any mismatch other than
 the expected perturb_iqr / diagnostic-selector differences means a shared
@@ -333,6 +340,58 @@ def compare_keyed(name: str, before: pd.DataFrame, after: pd.DataFrame,
     print(f"    methods only in BEFORE: {only_before}")
 
 
+REAL_IDENTICAL = ["real_data_results_v2.csv", "real_data_strata_v2.csv", "real_data_curve_minima_v2.csv"]
+REAL_SUMMARY = "real_data_summary_v2.csv"
+REAL_ROSTER = "real_data_roster_v2.csv"
+
+
+def _frames_equal(name: str, b: pd.DataFrame, a: pd.DataFrame, ignore=()) -> bool:
+    """Exact equality of two tables (NaN == NaN) on every column but ``ignore``; reports the first differences."""
+    cols_b, cols_a = [c for c in b.columns if c not in ignore], [c for c in a.columns if c not in ignore]
+    if cols_b != cols_a:
+        problem(f"{name}: columns differ (only in BEFORE {sorted(set(cols_b) - set(cols_a))}, only in AFTER {sorted(set(cols_a) - set(cols_b))})")
+        return False
+    if len(b) != len(a):
+        problem(f"{name}: {len(b)} rows in BEFORE, {len(a)} in AFTER")
+        return False
+    bad = 0
+    for c in cols_b:
+        ok = _equal(b[c].reset_index(drop=True), a[c].reset_index(drop=True))
+        if not ok.all():
+            bad += int((~ok).sum())
+            problem(f"{name}: {int((~ok).sum())} of {len(ok)} values differ in {c}")
+    return bad == 0
+
+
+def compare_real_data(before_dir: str, after_dir: str) -> None:
+    for fname in REAL_IDENTICAL + [REAL_SUMMARY]:
+        pb, pa = os.path.join(before_dir, "real_data", fname), os.path.join(after_dir, "real_data", fname)
+        if not (os.path.exists(pb) and os.path.exists(pa)):
+            problem(f"{fname} missing in one of the trees")
+            continue
+        ignore = ("git_head",) if fname == REAL_SUMMARY else ()
+        b, a = _read(pb), _read(pa)
+        same = _frames_equal(fname, b, a, ignore=ignore)
+        extra = ""
+        if fname == REAL_SUMMARY and "git_head" in b.columns and "git_head" in a.columns:
+            extra = (f"; git_head {b.git_head.iloc[0]} -> {a.git_head.iloc[0]}"
+                     + (" (identical)" if b.git_head.iloc[0] == a.git_head.iloc[0] else " (differs, as expected: the commit of the run)"))
+        print(f"  {fname}: {len(a):,} rows x {len(a.columns)} columns: {'IDENTICAL' if same else 'DIFFERS'}"
+              + (" (git_head ignored)" if ignore else "") + extra)
+    pb, pa = os.path.join(before_dir, "real_data", REAL_ROSTER), os.path.join(after_dir, "real_data", REAL_ROSTER)
+    if os.path.exists(pa) and not os.path.exists(pb):
+        a = _read(pa)
+        print(f"  {REAL_ROSTER}: present only in AFTER ({len(a):,} rows, {a.method.nunique()} methods; the roster evaluation added by R9d)")
+    elif os.path.exists(pa) and os.path.exists(pb):
+        b, a = _read(pb), _read(pa)
+        same = _frames_equal(REAL_ROSTER, b, a)
+        print(f"  {REAL_ROSTER}: present in both trees: {'IDENTICAL' if same else 'DIFFERS'}")
+    elif os.path.exists(pb):
+        problem(f"{REAL_ROSTER} present in BEFORE but missing in AFTER")
+    else:
+        print(f"  {REAL_ROSTER}: absent in both trees")
+
+
 def main(before_dir: str, after_dir: str) -> int:
     print(f"BEFORE: {before_dir}\nAFTER : {after_dir}\n")
 
@@ -413,6 +472,9 @@ def main(before_dir: str, after_dir: str) -> int:
         gone = [c for c in ("stability", "beats_rate") if c in aa.columns]
         if gone:
             problem(f"AFTER phase1_aggregated still carries {gone}")
+
+    # ── Recorded curves (real data) ────────────────────────────────────────────
+    compare_real_data(before_dir, after_dir)
 
     print()
     if PROBLEMS:

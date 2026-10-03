@@ -19,10 +19,16 @@ in the required order:
               evaluated in cpu_count() - 1 worker processes; byte-identical output
               for any job count, see scripts/run_phase5a.py --jobs)
     Phase 5b  sensitivity sweeps (assumed asymptote, window length)
-    real data re-evaluation of the recorded XGBoost curves on the (depth x target) grid
+    real data re-evaluation of the recorded XGBoost curves on the (depth x target) grid (the
+              reported methods, real_data_results_v2.csv) and the roster evaluation of every
+              method under the benchmark protocol (real_data_roster_v2.csv + its provenance file)
+    raw facts scripts/derive_raw_facts.py    ->  results/raw_facts.csv (the ten FACTS rows that
+              only the git-ignored raw files can supply, so the tables step reads no raw file)
     tables    scripts/make_paper_tables.py  ->  paper_fragments/*.tex + FACTS.md
-    terciles  scripts/analyze_by_ltrue.py   ->  results/phase1/phase1_by_Ltrue.csv, f13, its FACTS section
+    terciles  scripts/analyze_by_ltrue.py   ->  results/phase1/phase1_by_Ltrue.csv, f13 (one per stratum), its FACTS section
               (after the tables step, because it replaces its own section of FACTS.md)
+    document  scripts/build_tables_document.py  ->  paper_fragments/all_tables.tex (every fragment in one standalone document)
+    (scripts/check_tables.py regenerates the tables from the committed results/ and compares)
     manifest  results/run_manifest.json: mode, git head, start / end, worker count, per-step
               and total wall seconds, the evaluation plan of the mode, library versions
               (written at the start of every run, again after every step and at the end, so
@@ -88,15 +94,18 @@ STEPS = [
     ("Phase 5a — ensemble ablation",               "scripts/run_phase5a.py",      True),
     ("Phase 5b — sensitivity sweeps",              "scripts/run_phase5b.py",      True),
     ("Real data — recorded-curve re-evaluation",   "scripts/run_real_data.py",    True),
+    ("Raw-derived facts (raw files -> results/raw_facts.csv)", "scripts/derive_raw_facts.py", False),
     ("Paper tables and FACTS",                     "scripts/make_paper_tables.py", False),
     ("L_true terciles (FACTS section, f13)",       "scripts/analyze_by_ltrue.py",  False),
+    ("Standalone tables document (all_tables.tex)", "scripts/build_tables_document.py", False),
 ]
 
 # The table generators among the steps: they read results/ and write tables,
 # FACTS.md and documents, produce no result, and are therefore not in the path
 # set of the code fingerprint (scripts/run_code_fingerprint.py derives the path
 # set as STEPS minus this set).
-GENERATOR_STEPS = {"scripts/make_paper_tables.py", "scripts/analyze_by_ltrue.py"}
+GENERATOR_STEPS = {"scripts/derive_raw_facts.py", "scripts/make_paper_tables.py",
+                   "scripts/analyze_by_ltrue.py", "scripts/build_tables_document.py"}
 
 
 def parse_args():
@@ -297,7 +306,7 @@ def main():
     print(f"  Reproducing all results  [{mode} mode, redesign v2]")
     print("=" * 72)
     print(f"  {len(steps)} steps.  Order: Phase 0 -> Phase 1 -> Phase 0b (ladders) -> "
-          f"excluded-set re-derivation -> Phases 2-5 -> real data -> tables -> L_true terciles")
+          f"excluded-set re-derivation -> Phases 2-5 -> real data -> raw facts -> tables -> L_true terciles -> tables document")
     print("  Output: results/<phase>/\n")
 
     # The parallel steps (Phase 5a, Phase 0b) run with their scripts' default
