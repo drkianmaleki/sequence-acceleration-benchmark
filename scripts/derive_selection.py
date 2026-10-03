@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-derive_selection.py  (redesign v2, R9f Part A)
-==============================================
+derive_selection.py  (redesign v2, R9f Part A; R9h Part A: the catastrophe rate)
+================================================================================
 Choosing a method by trial, tested on the synthetic families of Phase 1:
 a method is chosen because it had the lowest error on one run of a problem
 (the pilot); how does that chosen method do on another run of the same
@@ -17,7 +17,7 @@ scripts/derive_raw_facts.py it turns the records into committed aggregates:
     results/phase1/phase1_selection_global.csv       one row per (set, target_g, noise class, pool, design)
     results/phase1/phase1_selection_provenance.json  script, commit, tree state, timing, versions, the records
                                                      file's row count and SHA-256, the pools, the designs,
-                                                     cells and trials per design, the Phase-1 agreement check
+                                                     cells and trials per design, the two Phase-1 agreement checks
 
     python scripts/derive_selection.py [--results results] [--extract PATH]
 
@@ -61,7 +61,16 @@ the cell's trials (over the trials where that method's record is valid);
 med_ratio_vs_default = median over the trials where both are valid and the
 default's error exceeds 1e-12 of chosen error / default error; top_chosen,
 top_chosen_share (the method chosen most often and its share of the trials
-with a choice; ties: registry order), n_distinct_chosen.
+with a choice; ties: registry order), n_distinct_chosen; and (R9h, appended
+after the columns above) cat_rate_chosen = the share of trials whose chosen
+record on the final seed is catastrophic, a trial without a choice counted
+as catastrophic in the same way as it counts as invalid, and
+cat_rate_default = the share of trials on which the default's record on the
+same final seed is catastrophic.  A record's catastrophic flag is the Phase 1
+flag as recorded (src.evaluation: the estimate is invalid, or its error
+exceeds CAT_MULT times the error of the last observed value on the same
+sequence); it is never recomputed here, and the script asserts that every
+invalid record carries it.
 
 Pooled table, one row per (set, target_g, noise class, pool, design), noise
 classes as in fragment f21 plus 'all': families, cells; the mean over the
@@ -70,7 +79,8 @@ the median over the cells of med_error_chosen, med_error_default,
 med_error_last, med_ratio_vs_default (cells without a value skipped);
 families_win_default_k / _n and families_win_last_k / _n = the number of
 families whose mean over their cells in the class of win_vs_default (of
-win_vs_last) exceeds 0.5, and the number of families.
+win_vs_last) exceeds 0.5, and the number of families; and (R9h, appended)
+the mean over the cells of cat_rate_chosen and of cat_rate_default.
 
 Internal check (every set and stratum, class 'all'): med_error_default
 equals med_error of the default in phase1_global.csv /
@@ -80,7 +90,13 @@ both designs every seed is the final seed of the same number of trials, so
 the cell medians over the trials' final seeds are the cell medians over
 seeds, and the pooled medians over cells must reproduce the Phase 1
 pooled table; a disagreement means the cell set or the aggregation differs
-from Phase 1, and the script then writes nothing and exits 2.
+from Phase 1, and the script then writes nothing and exits 2.  Second
+internal check (R9h), for the same reason: per cell, cat_rate_default
+equals cat_rate of the default for that cell in phase1_aggregated.csv, and
+at every set and stratum the 'all' rows' cat_rate_default equals cat_rate
+of the default in the pooled Phase 1 table, both to the four decimals at
+which those files store the rate (absolute difference at most 0.00005); a
+disagreement writes nothing and exits 2 in the same way.
 
 Floats are written at full precision (round-trip repr); rows in a fixed
 order; UTF-8, LF.  Pipeline step before the tables step (reproduce_all.py),
@@ -124,8 +140,10 @@ HEADLINE_G = float(C.HEADLINE_G)
 RANK_MIN_VALID = float(C.RANK_MIN_VALID)
 RATIO_EPS = 1e-12                               # the default's error must exceed this for a ratio
 CHECK_TOL = 1e-6                                # "to six decimals"
+CAT_CHECK_TOL = 5e-5 + 1e-12                    # "to four decimals": the Phase 1 tables store cat_rate at four decimals (+ float noise)
+CAT_MULT = float(C.CAT_MULT)                    # named in the provenance sentence only; the flag is never recomputed here
 RECORDS = os.path.join("phase1", "phase1_records.csv")
-RECORD_COLS = ["regime", "is_holdout", "noise", "seed", "target_g", "capped", "method", "valid", "error"]
+RECORD_COLS = ["regime", "is_holdout", "noise", "seed", "target_g", "capped", "method", "valid", "error", "catastrophic"]
 CELL_KEYS = ["is_holdout", "regime", "noise", "target_g"]
 SET_NAME = {0: "core", 1: "holdout"}
 OUT_CELLS = os.path.join("phase1", "phase1_selection_cells.csv")
@@ -134,11 +152,18 @@ OUT_PROV = os.path.join("phase1", "phase1_selection_provenance.json")
 CELL_COLUMNS = ["regime_set", "target_g", "regime", "noise", "noise_class", "pool", "design",
                 "n_seeds", "n_trials", "n_no_choice", "chosen_valid_rate", "win_vs_default", "default_chosen", "win_vs_last",
                 "med_error_chosen", "med_error_default", "med_error_last", "med_ratio_vs_default",
-                "top_chosen", "top_chosen_share", "n_distinct_chosen"]
+                "top_chosen", "top_chosen_share", "n_distinct_chosen",
+                "cat_rate_chosen", "cat_rate_default"]                   # R9h: appended after the R9f columns
 GLOBAL_COLUMNS = ["regime_set", "target_g", "noise_class", "pool", "design", "families", "cells",
                   "chosen_valid_rate", "win_vs_default", "default_chosen", "win_vs_last",
                   "med_error_chosen", "med_error_default", "med_error_last", "med_ratio_vs_default",
-                  "families_win_default_k", "families_win_default_n", "families_win_last_k", "families_win_last_n"]
+                  "families_win_default_k", "families_win_default_n", "families_win_last_k", "families_win_last_n",
+                  "cat_rate_chosen", "cat_rate_default"]                 # R9h: appended after the R9f columns
+CAT_NOTE = ("cat_rate_chosen = the share of a cell's trials whose chosen record on the final seed carries the Phase 1 catastrophic flag "
+            f"as recorded (the estimate is invalid, or its error exceeds CAT_MULT = {CAT_MULT:g} times the error of the last observed value "
+            "on the same sequence), a trial without a choice counted as catastrophic in the same way as it counts as invalid; "
+            f"cat_rate_default = the share of the cell's trials on which {DEFAULT_METHOD}'s record on the same final seed is catastrophic; "
+            "the pooled table carries the means over the cells of both")
 DESIGN_TEXT = {
     "one_pilot": "every ordered pair of distinct seeds (pilot, final); chosen = the pool member with the lowest error on the "
                  "pilot seed among those valid there (ties: registry order); its record on the final seed is taken as it is "
@@ -174,6 +199,15 @@ def error_matrix(cell_records, methods):
     E = np.array(err.to_numpy(dtype=float), dtype=float)          # a writable copy (pandas may hand back a read-only view)
     E[~(val.to_numpy(dtype=float) == 1)] = np.nan
     return E, seeds
+
+
+def catastrophe_matrix(cell_records, methods, seeds):
+    """cat[i, j] = True when method i's record on seed j carries the catastrophic flag as
+    recorded in the Phase 1 records (never recomputed); a missing record counts as
+    catastrophic, in the same way as it counts as invalid in error_matrix()."""
+    cat = cell_records.pivot(index="method", columns="seed", values="catastrophic").reindex(index=methods, columns=seeds)
+    K = np.array(cat.to_numpy(dtype=float), dtype=float)
+    return K != 0                                                  # NaN (missing) != 0 -> True
 
 
 # ── the choices ───────────────────────────────────────────────────────────────
@@ -231,23 +265,28 @@ def _median(v):
     return float(np.median(v)) if v.size else float("nan")
 
 
-def cell_stats(E_pool, members, e_default, e_last, trial_list):
+def cell_stats(E_pool, members, e_default, e_last, trial_list, K_pool, k_default):
     """The per-cell statistics of one (cell, pool, design); members = the pool's methods in
     the row order of E_pool; e_default / e_last = the default's and the last value's errors
-    per seed (NaN when invalid)."""
+    per seed (NaN when invalid); K_pool = the catastrophic flags of the pool's records in
+    the shape of E_pool and k_default = the default's flags per seed (catastrophe_matrix())."""
     n_s = E_pool.shape[1]
     n_t = len(trial_list)
     if n_t == 0:
         return dict(n_seeds=n_s, n_trials=0, n_no_choice=0, chosen_valid_rate=float("nan"), win_vs_default=float("nan"),
                     default_chosen=float("nan"), win_vs_last=float("nan"), med_error_chosen=float("nan"),
                     med_error_default=float("nan"), med_error_last=float("nan"), med_ratio_vs_default=float("nan"),
-                    top_chosen="", top_chosen_share=float("nan"), n_distinct_chosen=0)
+                    top_chosen="", top_chosen_share=float("nan"), n_distinct_chosen=0,
+                    cat_rate_chosen=float("nan"), cat_rate_default=float("nan"))
     finals = np.array([f for f, _ in trial_list], dtype=int)
     rows = np.array([c for _, c in trial_list], dtype=int)
     has = rows >= 0
     chosen_err = np.full(n_t, np.nan)
     chosen_err[has] = E_pool[rows[has], finals[has]]
     valid = np.isfinite(chosen_err)
+    cat_chosen = np.ones(n_t, dtype=bool)                          # a trial without a choice counts as catastrophic
+    cat_chosen[has] = np.asarray(K_pool, dtype=bool)[rows[has], finals[has]]
+    cat_default = np.asarray(k_default, dtype=bool)[finals]
     d, l = np.asarray(e_default, dtype=float)[finals], np.asarray(e_last, dtype=float)[finals]
     with np.errstate(invalid="ignore"):
         win_d = valid & (~np.isfinite(d) | (chosen_err < d))
@@ -270,7 +309,8 @@ def cell_stats(E_pool, members, e_default, e_last, trial_list):
                 default_chosen=float(is_default.mean()), win_vs_last=float(win_l.mean()),
                 med_error_chosen=_median(chosen_err[valid]), med_error_default=_median(d), med_error_last=_median(l),
                 med_ratio_vs_default=_median(ratio) if both.any() else float("nan"),
-                top_chosen=top, top_chosen_share=float(top_share), n_distinct_chosen=len(counts))
+                top_chosen=top, top_chosen_share=float(top_share), n_distinct_chosen=len(counts),
+                cat_rate_chosen=float(cat_chosen.mean()), cat_rate_default=float(cat_default.mean()))
 
 
 # ── the two tables ────────────────────────────────────────────────────────────
@@ -280,6 +320,9 @@ def derive_cells(records, agg, pools, designs=DESIGNS, min_valid=RANK_MIN_VALID)
     missing = sorted(set(m for p in pools.values() for m in p) - set(records.method.unique()))
     assert not missing, f"pool members absent from the records: {missing}"
     assert LAST in set(records.method.unique()) and DEFAULT_METHOD in set(records.method.unique())
+    # the recorded flag's own definition: an invalid record is catastrophic (so "invalid counts as catastrophic" is the flag as recorded)
+    not_flagged = records[(records.valid != 1) & (records.catastrophic != 1)]
+    assert not_flagged.empty, f"{len(not_flagged)} invalid records without the catastrophic flag; the first: {not_flagged.head(3).to_dict('records')}"
     idx = {m: i for i, m in enumerate(methods)}
     groups = {k: v for k, v in records.groupby(CELL_KEYS, sort=False)}
     rows = []
@@ -290,12 +333,15 @@ def derive_cells(records, agg, pools, designs=DESIGNS, min_valid=RANK_MIN_VALID)
             sub = groups.get(key)
         assert sub is not None, f"cell {key} of phase1_aggregated.csv has no records"
         E, seeds = error_matrix(sub, methods)
+        K = catastrophe_matrix(sub, methods, seeds)
         e_default, e_last = E[idx[DEFAULT_METHOD]], E[idx[LAST]]
+        k_default = K[idx[DEFAULT_METHOD]]
         for pool in POOL_NAMES:
             members = sorted(pools[pool], key=registry_index)
-            E_pool = E[[idx[m] for m in members]]
+            member_rows = [idx[m] for m in members]
+            E_pool, K_pool = E[member_rows], K[member_rows]
             for design in designs:
-                st = cell_stats(E_pool, members, e_default, e_last, trials(E_pool, design, min_valid))
+                st = cell_stats(E_pool, members, e_default, e_last, trials(E_pool, design, min_valid), K_pool, k_default)
                 rows.append(dict(regime_set=SET_NAME[hold], target_g=g, regime=regime, noise=noise,
                                  noise_class=noise_class(regime, noise), pool=pool, design=design, **st))
     return pd.DataFrame(rows, columns=CELL_COLUMNS)
@@ -330,7 +376,8 @@ def pooled(cells):
                             med_error_chosen=float(sub.med_error_chosen.median()), med_error_default=float(sub.med_error_default.median()),
                             med_error_last=float(sub.med_error_last.median()), med_ratio_vs_default=float(sub.med_ratio_vs_default.median()),
                             families_win_default_k=int((fam.win_vs_default > 0.5).sum()), families_win_default_n=int(len(fam)),
-                            families_win_last_k=int((fam.win_vs_last > 0.5).sum()), families_win_last_n=int(len(fam))))
+                            families_win_last_k=int((fam.win_vs_last > 0.5).sum()), families_win_last_n=int(len(fam)),
+                            cat_rate_chosen=float(sub.cat_rate_chosen.mean()), cat_rate_default=float(sub.cat_rate_default.mean())))
     return pd.DataFrame(rows, columns=GLOBAL_COLUMNS)
 
 
@@ -362,6 +409,48 @@ def check_against_phase1(glob, G_core, G_hold, tol=CHECK_TOL):
                                  med_error_default_phase1=ref_d, med_error_last_phase1=ref_l,
                                  max_abs_diff_default=d_max, max_abs_diff_last=l_max, agree=ok))
     assert not problems, "the selection tables disagree with the pooled Phase 1 tables:\n  " + "\n  ".join(problems)
+    return evidence
+
+
+def check_cat_against_phase1(cells, glob, agg, G_core, G_hold, tol=CAT_CHECK_TOL):
+    """The second internal check (R9h): per cell, cat_rate_default equals cat_rate of the
+    default for that cell in phase1_aggregated.csv (agg: CELL_KEYS, method, cat_rate), and
+    at every set and stratum the 'all' rows' cat_rate_default equals cat_rate of the default
+    in the pooled Phase 1 table, both to four decimals (the precision of those files).  In
+    both designs every seed is the final seed of the same number of trials, so the two must
+    agree.  Returns the evidence (one dict per set and stratum: the largest absolute
+    difference over the cells and over the pooled rows); raises AssertionError on a
+    disagreement or a cell without a Phase 1 row."""
+    ref_cells = {tuple(k): float(v) for k, v in agg[agg.method == DEFAULT_METHOD].set_index(CELL_KEYS).cat_rate.items()}
+    hold_of = {v: k for k, v in SET_NAME.items()}
+    evidence, problems = [], []
+    for rs, G in (("core", G_core), ("holdout", G_hold)):
+        for g in STRATA:
+            sub = cells[(cells.regime_set == rs) & (cells.target_g == g)]
+            if sub.empty:
+                continue
+            ref = np.array([ref_cells.get((hold_of[rs], r, float(n), float(g)), np.nan) for r, n in zip(sub.regime, sub.noise)], dtype=float)
+            ours = sub.cat_rate_default.to_numpy(dtype=float)
+            missing = int(np.isnan(ref).sum())
+            d_cells = np.abs(ours - ref)
+            cell_max = float(np.nanmax(d_cells)) if np.isfinite(d_cells).any() else float("nan")
+            ok = missing == 0 and cell_max <= tol
+            if not ok:
+                worst = sub.iloc[int(np.nanargmax(d_cells))] if np.isfinite(d_cells).any() else None
+                problems.append(f"{rs} g={g:g}: {missing} cell rows without a Phase 1 row; largest per-cell |cat_rate_default - cat_rate| {cell_max!r}"
+                                + (f" at {worst.regime} noise={worst.noise:g} pool={worst.pool} design={worst.design}" if worst is not None else ""))
+            Gr = G[(G.target_g == g) & (G.method == DEFAULT_METHOD)]
+            pooled_rows = glob[(glob.regime_set == rs) & (glob.target_g == g) & (glob.noise_class == NOISE_CLASS_ALL)]
+            ref_pool = float(Gr.cat_rate.iloc[0]) if not Gr.empty else float("nan")
+            pool_max = float((pooled_rows.cat_rate_default - ref_pool).abs().max()) if len(pooled_rows) else float("nan")
+            pool_ok = not Gr.empty and len(pooled_rows) > 0 and pool_max <= tol
+            if not pool_ok:
+                problems.append(f"{rs} g={g:g}: pooled 'all' rows' cat_rate_default vs the Phase 1 cat_rate of {DEFAULT_METHOD} ({ref_pool!r}): "
+                                f"largest |difference| {pool_max!r} over {len(pooled_rows)} rows")
+            evidence.append(dict(regime_set=rs, target_g=g, cells=int(len(sub)), rows=int(len(pooled_rows)),
+                                 cat_rate_default_phase1=ref_pool, max_abs_diff_cells=cell_max, max_abs_diff_pooled=pool_max,
+                                 agree=bool(ok and pool_ok)))
+    assert not problems, "the catastrophe rate of the default disagrees with the Phase 1 tables:\n  " + "\n  ".join(problems)
     return evidence
 
 
@@ -426,19 +515,24 @@ def main(argv=None):
         print(f"  pool {name:<9} ({len(pools[name]):>2}): {', '.join(pools[name])}")
     records = pd.read_csv(rec_path, usecols=RECORD_COLS)
     agg = pd.read_csv(os.path.join(results, "phase1", "phase1_aggregated.csv"),
-                      usecols=CELL_KEYS + ["method", "capped"])
+                      usecols=CELL_KEYS + ["method", "capped", "cat_rate"])
     n_rows, sha = len(records), sha256_file(rec_path)
     print(f"  records: {n_rows:,} rows, sha256 {sha}")
     cells = derive_cells(records, agg, pools)
     glob = pooled(cells)
     try:
         evidence = check_against_phase1(glob, G_core, G_hold)
+        cat_evidence = check_cat_against_phase1(cells, glob, agg, G_core, G_hold)
     except AssertionError as exc:
         print(f"  INTERNAL CHECK FAILED -- nothing written\n  {exc}")
         return 2
     for e in evidence:
         print(f"  check {e['regime_set']:<7} g={e['target_g']:<5g} {e['families']} families, {e['cells']} cells: "
               f"|d default| {e['max_abs_diff_default']:.2e}, |d last| {e['max_abs_diff_last']:.2e}: {'agree' if e['agree'] else 'DISAGREE'}")
+    for e in cat_evidence:
+        print(f"  check {e['regime_set']:<7} g={e['target_g']:<5g} cat_rate of {DEFAULT_METHOD}: {e['cells']} cell rows |d| {e['max_abs_diff_cells']:.2e}, "
+              f"{e['rows']} pooled rows |d| {e['max_abs_diff_pooled']:.2e} (Phase 1 {e['cat_rate_default_phase1']:.4f}): "
+              f"{'agree' if e['agree'] else 'DISAGREE'}")
     finished = _dt.datetime.now().isoformat(timespec="seconds")
     seconds = round(time.time() - t0, 1)
     one_pool = cells[cells.pool == POOL_NAMES[0]]
@@ -464,6 +558,8 @@ def main(argv=None):
         "cells_by_set_and_stratum": [dict(regime_set=e["regime_set"], target_g=e["target_g"], families=e["families"], cells=e["cells"])
                                      for e in evidence],
         "phase1_agreement": evidence,
+        "catastrophe_rate": CAT_NOTE,
+        "phase1_cat_agreement": cat_evidence,
         "rows": {"cells": int(len(cells)), "global": int(len(glob))},
         "note": NOTE,
     }

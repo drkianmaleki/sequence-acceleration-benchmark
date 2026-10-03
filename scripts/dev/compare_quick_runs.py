@@ -68,9 +68,12 @@ relative difference.  Otherwise the script
     under the benchmark protocol, added by R9d) is reported as present in
     AFTER only when BEFORE predates it, and compared when both trees have it;
   * compares the selection-by-trial aggregates (R9f, scripts/derive_selection.py):
-    phase1/phase1_selection_cells.csv and phase1_selection_global.csv must be
-    identical when both trees have them (every column, exact equality,
-    NaN == NaN) and are reported as present in AFTER only when BEFORE
+    phase1/phase1_selection_cells.csv and phase1_selection_global.csv, when
+    both trees have them, must be identical on every column that both have
+    (exact equality, NaN == NaN, the same row count); the columns present
+    only in AFTER are reported by name and are not a mismatch (R9h appended
+    cat_rate_chosen and cat_rate_default), a column present only in BEFORE
+    is one; the files are reported as present in AFTER only when BEFORE
     predates them.
 
 Exit status 0 when everything matches, 1 otherwise.  Any mismatch other than
@@ -401,7 +404,9 @@ SELECTION_FILES = ["phase1_selection_cells.csv", "phase1_selection_global.csv"]
 
 
 def compare_selection(before_dir: str, after_dir: str) -> None:
-    """The selection-by-trial aggregates (R9f): identical when both trees have them."""
+    """The selection-by-trial aggregates (R9f): when both trees have them, every column that
+    both have must be identical; the columns only in AFTER are reported by name (R9h appended
+    two), a column only in BEFORE is a mismatch."""
     for fname in SELECTION_FILES:
         pb, pa = os.path.join(before_dir, "phase1", fname), os.path.join(after_dir, "phase1", fname)
         if os.path.exists(pa) and not os.path.exists(pb):
@@ -409,8 +414,17 @@ def compare_selection(before_dir: str, after_dir: str) -> None:
             print(f"  {fname}: present only in AFTER ({len(a):,} rows; the selection analysis added by R9f)")
         elif os.path.exists(pa) and os.path.exists(pb):
             b, a = _read(pb), _read(pa)
-            same = _frames_equal(fname, b, a)
-            print(f"  {fname}: present in both trees ({len(a):,} rows): {'IDENTICAL' if same else 'DIFFERS'}")
+            shared = [c for c in b.columns if c in a.columns]
+            only_after = [c for c in a.columns if c not in b.columns]
+            only_before = [c for c in b.columns if c not in a.columns]
+            if only_before:
+                problem(f"{fname}: columns present only in BEFORE: {only_before}")
+            same_order = [c for c in a.columns if c in shared] == shared
+            same = _frames_equal(fname, b[shared], a[shared]) and not only_before
+            print(f"  {fname}: present in both trees ({len(b):,} rows BEFORE, {len(a):,} AFTER): {len(shared)} shared columns "
+                  f"{'IDENTICAL' if same else 'DIFFERS'}" + ("" if same_order else " (the shared columns are in a different order in AFTER)"))
+            print(f"    columns only in AFTER : {only_after}")
+            print(f"    columns only in BEFORE: {only_before}")
         elif os.path.exists(pb):
             problem(f"{fname} present in BEFORE but missing in AFTER")
         else:
