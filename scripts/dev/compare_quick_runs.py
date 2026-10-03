@@ -66,7 +66,12 @@ relative difference.  Otherwise the script
     equality, NaN == NaN), real_data_summary_v2.csv identical except its
     git_head column; the roster file real_data_roster_v2.csv (every method
     under the benchmark protocol, added by R9d) is reported as present in
-    AFTER only when BEFORE predates it, and compared when both trees have it.
+    AFTER only when BEFORE predates it, and compared when both trees have it;
+  * compares the selection-by-trial aggregates (R9f, scripts/derive_selection.py):
+    phase1/phase1_selection_cells.csv and phase1_selection_global.csv must be
+    identical when both trees have them (every column, exact equality,
+    NaN == NaN) and are reported as present in AFTER only when BEFORE
+    predates them.
 
 Exit status 0 when everything matches, 1 otherwise.  Any mismatch other than
 the expected perturb_iqr / diagnostic-selector differences means a shared
@@ -392,6 +397,26 @@ def compare_real_data(before_dir: str, after_dir: str) -> None:
         print(f"  {REAL_ROSTER}: absent in both trees")
 
 
+SELECTION_FILES = ["phase1_selection_cells.csv", "phase1_selection_global.csv"]
+
+
+def compare_selection(before_dir: str, after_dir: str) -> None:
+    """The selection-by-trial aggregates (R9f): identical when both trees have them."""
+    for fname in SELECTION_FILES:
+        pb, pa = os.path.join(before_dir, "phase1", fname), os.path.join(after_dir, "phase1", fname)
+        if os.path.exists(pa) and not os.path.exists(pb):
+            a = _read(pa)
+            print(f"  {fname}: present only in AFTER ({len(a):,} rows; the selection analysis added by R9f)")
+        elif os.path.exists(pa) and os.path.exists(pb):
+            b, a = _read(pb), _read(pa)
+            same = _frames_equal(fname, b, a)
+            print(f"  {fname}: present in both trees ({len(a):,} rows): {'IDENTICAL' if same else 'DIFFERS'}")
+        elif os.path.exists(pb):
+            problem(f"{fname} present in BEFORE but missing in AFTER")
+        else:
+            print(f"  {fname}: absent in both trees")
+
+
 def main(before_dir: str, after_dir: str) -> int:
     print(f"BEFORE: {before_dir}\nAFTER : {after_dir}\n")
 
@@ -475,6 +500,9 @@ def main(before_dir: str, after_dir: str) -> int:
 
     # ── Recorded curves (real data) ────────────────────────────────────────────
     compare_real_data(before_dir, after_dir)
+
+    # ── Selection by trial (R9f) ──────────────────────────────────────────────
+    compare_selection(before_dir, after_dir)
 
     print()
     if PROBLEMS:
