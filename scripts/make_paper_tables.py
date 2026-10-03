@@ -57,11 +57,25 @@ Fragments (paper_fragments/, one tabular per file, booktabs, no \\begin{table})
   f04b_classical_noop_holdout.tex   f04 on the held-out families
   f21_noop_by_noise.tex             the classical no-op by noise class (noise-free / intrinsic noise only / sigma), per set and stratum
   f21b_noop_by_noise_variants_{core,holdout}.tex   every classical variant's MI and win rate in each noise class, headline stratum
-  f22_per_family_g{0.5,0.1,0.02}.tex   rational_fit family by family: last value, rational_fit, the best rank-eligible accelerator
+  f22_per_family_g{0.5,0.1,0.02}.tex   rational_fit and single_exp_fit family by family: last value, rational_fit, single_exp_fit, the best rank-eligible accelerator
   f23_family_head_to_head.tex       rational_fit against every other leading method and the last value, families and cells won
   f24_leading_fits.tex              the leading methods side by side: core, held-out, L_hat sensitivity, recorded curves
   f25_real_roster.tex               every method on the recorded curves (real_data_roster_v2.csv), pre- / post-minimum
   f26_real_classical.tex            the classical variants on the recorded curves: MI, wins, validity per split
+  f27_selection_one_pilot.tex       choosing a method by trial on the synthetic families, design one_pilot (phase1_selection_global.csv,
+                                    scripts/derive_selection.py): per set, noise class and candidate pool, the chosen method against the
+                                    default and the last value
+  f27b_selection_many_pilots.tex    the same for the design many_pilots
+  f28_selection_recorded.tex        choosing a method by trial on the recorded curves (pre-minimum cells): leave one depth out, leave one
+                                    dataset out, per candidate pool
+  f29_real_named_by_dataset.tex     rational_fit and single_exp_fit on the recorded curves per dataset and pooled, before / after the minimum
+  f30_real_final_loss_by_depth.tex  the datasets whose minimum is at the final recorded round: error as a share of the final loss by depth,
+                                    last value / rational_fit / single_exp_fit
+
+The definitions shared with scripts/derive_selection.py -- the noise class of
+a cell, the classical variants, the leading-method rule LEAD, DEFAULT_METHOD
+and CONSERVATIVE_METHOD, the candidate pools -- are imported from
+scripts/selection_defs.py and not re-implemented here.
 
 Printed text follows the paper's terminology: method families through
 FAMILY_LABEL, ladder orders in math mode, "curve family" (never "regime"),
@@ -90,9 +104,7 @@ if _ROOT not in sys.path:
 
 import src.config as C                                    # noqa: E402
 from src.evaluation import FAMILY, METHOD_TYPE            # noqa: E402  (the registry's family and type maps)
-from src.generators import _INTRINSIC_NOISE_GENERATORS    # noqa: E402  (the families with their own noise at sigma = 0)
 from src.pipeline import ACCEL_METHODS, PHASE2_POOL, TRIVIAL_NON_ORACLE, resolve_regimes   # noqa: E402
-from src.trajectories import REAL_EVAL_METHODS, ROSTER_REAL_METHODS   # noqa: E402
 from src.trivial import ORACLE_METHODS, SKILL_REFERENCE_METHODS  # noqa: E402
 from phases.phase5a import (ORACLE_SMALL, EQUAL_SMALL, DIAG_SMALL,  # noqa: E402
                             N_SMALL as N_POOL_SMALL,
@@ -100,12 +112,15 @@ from phases.phase5a import (ORACLE_SMALL, EQUAL_SMALL, DIAG_SMALL,  # noqa: E402
                             ABL_THRESHOLD_VS_EQUAL, ABL_DIAG_VS_EQUAL, ABL_WEIGHTING_SMALL)
 from phases.phase5b import LHAT_CONSUMERS                 # noqa: E402
 from scripts.analyze_by_ltrue import load_manifest, provenance, write_fragment_index   # noqa: E402  (the header of every generated file; the index)
+from scripts.selection_defs import (CLASSICAL, CLASSICAL_FAMILIES, CONSERVATIVE_METHOD, DEFAULT_METHOD,   # noqa: E402
+                                    INTRINSIC_NOISE, NOISE_CLASS_ALL, POOL_NAMES, candidate_pools, lead_rule,
+                                    leading_methods, noise_class, noise_class_label, noise_class_order,
+                                    rank_accelerators, registry_index)
 
 STRATA = list(C.HORIZON_GAP_FRACTIONS)          # [0.5, 0.1, 0.02]
 HEADLINE_G = float(C.HEADLINE_G)                # 0.1
 ORACLE = "constant_oracle"
 DEPLOYABLE = list(SKILL_REFERENCE_METHODS)      # constant_assumed, last_value, window_mean, window_min
-CLASSICAL_FAMILIES = ("shanks", "wynn_eps", "wynn_rho", "levin", "brezinski", "anderson")   # the classical (limit-estimating) families; their member count is derived below
 NOOP_BAND = (0.9, 1.1)                          # median improvement factor within +/-10 % of 1
 SKILL_NOOP = 0.9                                # median skill >= 0.9: no better than 10 % over the best trivial
 WIN_BAND = (0.4, 0.6)                           # win rate vs last_value within a coin flip +/- 0.1
@@ -118,38 +133,12 @@ FAMILY_ORDER = ["richardson", "parametric", "pade", "neville", "baseline", "ense
 TYPE_MACRO = {"trajectory": r"\TE", "limit": r"\LE"}
 REAL_DATASETS = ["adult", "bank_marketing", "covertype", "higgs", "jannis", "miniboone"]
 
-# ── Shared definitions (R9d Part C, section 5.1) ─────────────────────────────
-# Noise class of a (regime, noise) cell: 'noise-free' when sigma = 0 and the
-# family has no intrinsic noise; 'intrinsic' when sigma = 0 and the family is
-# one of the intrinsic-noise generators (two core families carry their own
-# noise at sigma = 0, so "sigma = 0" is not "noise-free"); 'sigma=<level>'
-# otherwise.
-INTRINSIC_NOISE = tuple(_INTRINSIC_NOISE_GENERATORS)
-
-
-def noise_class(regime, noise):
-    if float(noise) == 0.0:
-        return "intrinsic" if regime in INTRINSIC_NOISE else "noise-free"
-    return f"sigma={float(noise):g}"
-
-
-def noise_class_order(key):
-    """noise-free, then intrinsic noise only, then sigma ascending."""
-    if key == "noise-free":
-        return (0, 0.0)
-    if key == "intrinsic":
-        return (1, 0.0)
-    return (2, float(key.split("=", 1)[1]))
-
-
-def noise_class_label(key, tex=True):
-    """The printed label of a noise class (TeX by default; plain text for FACTS rows)."""
-    if key == "noise-free":
-        return "noise-free"
-    if key == "intrinsic":
-        return "intrinsic noise only"
-    level = key.split("=", 1)[1]
-    return rf"$\sigma = {level}$" if tex else f"sigma={level}"
+# ── Shared definitions (R9d Part C, section 5.1; R9f: scripts/selection_defs.py) ──
+# The noise class of a (regime, noise) cell (noise_class, noise_class_order,
+# noise_class_label, INTRINSIC_NOISE), the classical variants (CLASSICAL), the
+# leading-method rule (LEAD_TOP_*, rank_accelerators, leading_methods, lead_rule),
+# DEFAULT_METHOD, CONSERVATIVE_METHOD and the candidate pools are imported above
+# from scripts.selection_defs, which scripts/derive_selection.py shares.
 
 
 # Printed method-family names: one map used by every fragment that prints a
@@ -185,13 +174,13 @@ def order_label(s):
     return esc(s)
 
 
-# The leading methods (LEAD), derived at the headline stratum from the
-# rank-eligible accelerators: the union of the LEAD_TOP_CORE lowest median
-# errors on the core set, the LEAD_TOP_HOLD lowest on the held-out set, the
-# LEAD_TOP_WIN highest win rates against the last value on the core set, and
-# the two methods of the recorded-curve path (REAL_EVAL_METHODS); ordered by
-# core rank, then held-out rank.  Built once the ranks are known (below).
-LEAD_TOP_CORE, LEAD_TOP_HOLD, LEAD_TOP_WIN = 10, 5, 3
+# The leading methods (LEAD, scripts.selection_defs.leading_methods), derived at
+# the headline stratum from the rank-eligible accelerators: the union of the
+# LEAD_TOP_CORE lowest median errors on the core set, the LEAD_TOP_HOLD lowest
+# on the held-out set, the LEAD_TOP_WIN highest win rates against the last
+# value on the core set, and the two methods of the recorded-curve path
+# (REAL_EVAL_METHODS); ordered by core rank, then held-out rank.  Built once
+# the ranks are known (below).
 
 
 # ── CLI ──────────────────────────────────────────────────────────────────────
@@ -328,13 +317,8 @@ TYP = G_CORE.drop_duplicates("method").set_index("method")["method_type"].to_dic
 assert set(ACCEL_METHODS) == set(G_CORE[G_CORE.is_trivial == 0].method), "accelerator roster mismatch"
 N_ACC = len(ACCEL_METHODS)          # the roster size; never hard-coded below
 assert len(DEPLOYABLE) == len(SKILL_REFERENCE_METHODS)
-# The classical variants: the limit-estimating members of the classical families, from the
-# registry's family and type maps; the count is derived, and the type filter must keep every
-# member of those families (they are all limit estimators).
-CLASSICAL = sorted([m for m in ACCEL_METHODS if FAMILY[m] in CLASSICAL_FAMILIES and METHOD_TYPE[m] == "limit"],
-                   key=lambda m: (CLASSICAL_FAMILIES.index(FAMILY[m]), m))
-assert len(CLASSICAL) == sum(1 for m in ACCEL_METHODS if FAMILY[m] in CLASSICAL_FAMILIES), \
-    "a member of a classical family is not a limit estimator"
+# The classical variants (CLASSICAL, scripts.selection_defs): the limit-estimating members of the
+# classical families, from the registry's family and type maps; the count is derived.
 assert all(FAM[m] == FAMILY[m] for m in CLASSICAL), "family labels of phase1_global.csv differ from the registry"
 
 SRC_G = ["results/phase1/phase1_global.csv (core regimes, all three strata, capped cells excluded)",
@@ -345,19 +329,10 @@ def dag(m):
     return r"$\dagger$" if m in DANGEROUS else ""
 
 
-def rank_accelerators(G):
-    """Rank among the accelerators only (N_ACC), per stratum, med_error ascending,
-    over rank-eligible rows (valid_rate >= RANK_MIN_VALID, finite metric)."""
-    out = {}
-    for g in STRATA:
-        s = G[(G.target_g == g) & (G.is_trivial == 0) & (G.rank_eligible == 1)]
-        s = s.sort_values(["med_error", "method"])
-        out[g] = {m: i + 1 for i, m in enumerate(s.method)}
-    return out
-
-
-RANK_CORE = rank_accelerators(G_CORE)
-RANK_HOLD = rank_accelerators(G_HOLD)
+# Rank among the accelerators only (N_ACC), per stratum, med_error ascending, over the
+# rank-eligible rows (scripts.selection_defs.rank_accelerators).
+RANK_CORE = rank_accelerators(G_CORE, STRATA)
+RANK_HOLD = rank_accelerators(G_HOLD, STRATA)
 
 
 def row_of(G, g, m):
@@ -365,21 +340,9 @@ def row_of(G, g, m):
     return s.iloc[0] if len(s) else None
 
 
-def leading_methods():
-    """LEAD: see the definition above LEAD_TOP_CORE."""
-    rc = sorted(RANK_CORE[HEADLINE_G], key=RANK_CORE[HEADLINE_G].get)
-    rh = sorted(RANK_HOLD[HEADLINE_G], key=RANK_HOLD[HEADLINE_G].get)
-    sg = G_CORE[(G_CORE.target_g == HEADLINE_G) & (G_CORE.is_trivial == 0) & (G_CORE.rank_eligible == 1)]
-    top_win = list(sg.sort_values(["win_rate_vs_last", "method"], ascending=[False, True]).method[:LEAD_TOP_WIN])
-    members = list(dict.fromkeys(rc[:LEAD_TOP_CORE] + rh[:LEAD_TOP_HOLD] + top_win + list(REAL_EVAL_METHODS)))
-    members.sort(key=lambda m: (RANK_CORE[HEADLINE_G].get(m, math.inf), RANK_HOLD[HEADLINE_G].get(m, math.inf), m))
-    return members
-
-
-LEAD = leading_methods()
-LEAD_RULE = (f"the union of the {LEAD_TOP_CORE} lowest core median errors, the {LEAD_TOP_HOLD} lowest held-out median errors, "
-             f"the {LEAD_TOP_WIN} highest core win rates against the last value (rank-eligible accelerators at g = {gname(HEADLINE_G)}) "
-             f"and the recorded-curve methods {', '.join(REAL_EVAL_METHODS)}; ordered by core rank, then held-out rank")
+LEAD = leading_methods(G_CORE, RANK_CORE, RANK_HOLD, HEADLINE_G)
+LEAD_RULE = lead_rule(HEADLINE_G)
+POOLS = candidate_pools(LEAD)                   # the four candidate pools of the selection analysis (f27, f27b, f28)
 
 
 # Family-level statistics (per regime and method, uncapped cells only): median
@@ -2080,6 +2043,20 @@ def named_facts():
              f"RIDGE {cfg.get('RIDGE')}, DENOM_TOL {cfg.get('DENOM_TOL')}, validity [{cfg.get('MIN_VALID')}, {cfg.get('MAX_VALID')}], CAT_MULT {cfg.get('CAT_MULT')}, "
              f"window {cfg.get('window_len')}, L_hat mode {cfg.get('assumed_mode')}",
              "results/real_data/real_data_roster_provenance.json", "-", "header fields; written by scripts/run_real_data.py --roster-only")
+    sp = os.path.join(RES, "phase1", "phase1_selection_provenance.json")
+    if os.path.exists(sp):
+        with open(sp, encoding="utf-8") as fh:
+            P = json.load(fh)
+        fact(sec, "selection by trial on the Phase 1 records (results/phase1/phase1_selection_provenance.json)",
+             f"ran separately after the full run: {P.get('script')} at code {P.get('git_head', {}).get('short')} ({P.get('git_head', {}).get('full')}), "
+             f"tracked tree clean {P.get('tracked_tree_clean')}; started {P.get('started')}, finished {P.get('finished')}, {P.get('seconds')} s; "
+             f"library versions equal the run manifest's: {P.get('versions_equal_run_manifest')}; records {P.get('records_rows'):,} rows, sha256 {P.get('records_sha256')}; "
+             f"cells per design {P.get('cells')}, trials per design {P.get('trials')}; pools: " + "; ".join(f"{k} ({len(v)}) {', '.join(v)}" for k, v in P.get("pools", {}).items())
+             + f"; {P.get('note')}",
+             "results/phase1/phase1_selection_provenance.json", "-", "header fields; written by scripts/derive_selection.py")
+    fact(sec, "design constants", f"L_true log-uniform on {C.L_TRUE_RANGE} per (regime, seed); L_hat mode {C.ASSUMED_L_MODE}; strata g = {STRATA} (headline {HEADLINE_G}); "
+         f"n_obs = {C.OBS_IDX}, window {C.WINDOW_LEN}; horizon cap {C.HORIZON_N_CAP}; rank floor valid_rate >= {C.RANK_MIN_VALID} "
+         f"(also the exclusion criterion of the dangerous artifact); CAT_MULT {C.CAT_MULT}; no composite score", "src/config.py", "-", "-")
 
     # effective sample: the families and cells entering the pooled statistics, per set and stratum
     sec = "effective sample"
@@ -2150,9 +2127,6 @@ def facts_ladders_under_noise():
                  value,
                  "results/phase0b/order_ladders_panels.csv", f"regime_set == {rs}, noise == {sigma:g}, family in {fams}",
                  f"count(med_error < {NOOP_BAND[0]} * med_error of trivial:last_value); count(win_rate_vs_last > {WIN_BAND[1]}); argmin med_error (uncapped cells, conditional on validity)")
-    fact(sec, "design constants", f"L_true log-uniform on {C.L_TRUE_RANGE} per (regime, seed); L_hat mode {C.ASSUMED_L_MODE}; strata g = {STRATA} (headline {HEADLINE_G}); "
-         f"n_obs = {C.OBS_IDX}, window {C.WINDOW_LEN}; horizon cap {C.HORIZON_N_CAP}; rank floor valid_rate >= {C.RANK_MIN_VALID} "
-         f"(also the exclusion criterion of the dangerous artifact); CAT_MULT {C.CAT_MULT}; no composite score", "src/config.py", "-", "-")
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -2302,56 +2276,69 @@ def f21b():
 
 
 def f22():
-    """rational_fit family by family, one fragment per stratum."""
-    sec = "per family (rational_fit)"
+    """rational_fit and single_exp_fit family by family, one fragment per stratum."""
+    sec = "per family (rational_fit, single_exp_fit)"
+    NAMED = (DEFAULT_METHOD, CONSERVATIVE_METHOD)
     for g in STRATA:
-        rows = [r"Set & curve family & cells & last value & \multicolumn{4}{c}{\meth{rational\_fit}} & \multicolumn{2}{c}{best rank-eligible accelerator} \\",
-                r"\cmidrule(lr){5-8}\cmidrule(lr){9-10}",
-                r" & & & med.\ err & med.\ err & win vs last & $\rhoV$ & $\rhoC$ & method & med.\ err \\", r"\midrule"]
+        rows = [rf"Set & curve family & cells & last value & \multicolumn{{4}}{{c}}{{{mth(DEFAULT_METHOD)}}} & \multicolumn{{2}}{{c}}{{{mth(CONSERVATIVE_METHOD)}}} & "
+                r"\multicolumn{2}{c}{best rank-eligible accelerator} \\",
+                r"\cmidrule(lr){5-8}\cmidrule(lr){9-10}\cmidrule(lr){11-12}",
+                r" & & & med.\ err & med.\ err & win vs last & $\rhoV$ & $\rhoC$ & med.\ err & win vs last & method & med.\ err \\", r"\midrule"]
         foot = []
         for hold, setlab, RK in ((0, "core", RANK_CORE), (1, "held-out", RANK_HOLD)):
             T = FAMILY_TABLES[(g, hold)]
             eligible = sorted(RK[g], key=RK[g].get)
-            n_win, losers, worse, n_unc = 0, [], [], 0
+            n_unc = 0
+            stat = {m: dict(n_win=0, losers=[], worse=[]) for m in NAMED}
             for reg in SET_REGIMES[hold]:
-                if reg not in T.index.get_level_values("regime") or "rational_fit" not in T.loc[reg].index:
-                    rows.append(f"{setlab} & {tt(reg)} & 0 & capped & capped & capped & capped & capped & capped & capped \\\\")
+                if reg not in T.index.get_level_values("regime") or DEFAULT_METHOD not in T.loc[reg].index:
+                    rows.append(f"{setlab} & {tt(reg)} & 0 & " + " & ".join(["capped"] * 9) + r" \\")
                     continue
                 sub = T.loc[reg]
-                last, rf = sub.loc["last_value"], sub.loc["rational_fit"]
+                last, rf = sub.loc["last_value"], sub.loc[DEFAULT_METHOD]
+                se = sub.loc[CONSERVATIVE_METHOD] if CONSERVATIVE_METHOD in sub.index else None
                 cand = sub.loc[[m for m in eligible if m in sub.index]].reset_index().dropna(subset=["med_error"])
                 best = cand.sort_values(["med_error", "method"]).iloc[0] if len(cand) else None
                 n_unc += 1
-                if rf.win > 0.5:
-                    n_win += 1
-                else:
-                    losers.append((reg, float(rf.win)))
-                if rf.med_error > last.med_error:
-                    worse.append((reg, float(rf.med_error), float(last.med_error)))
+                for m, r in ((DEFAULT_METHOD, rf), (CONSERVATIVE_METHOD, se)):
+                    if r is None:
+                        continue
+                    if r.win > 0.5:
+                        stat[m]["n_win"] += 1
+                    else:
+                        stat[m]["losers"].append((reg, float(r.win)))
+                    if r.med_error > last.med_error:
+                        stat[m]["worse"].append((reg, float(r.med_error), float(last.med_error)))
+                se_cells = f"{f4(float(se.med_error))} & {f3(float(se.win))}" if se is not None else "-- & --"
                 rows.append(f"{setlab} & {tt(reg)} & {int(rf.n)} & {f4(float(last.med_error))} & {f4(float(rf.med_error))} & {f3(float(rf.win))} & "
-                            f"{f3(float(rf.valid))} & {f3(float(rf.cat_rate))} & " + (f"{mth(best.method)} & {f4(float(best.med_error))}" if best is not None else "-- & --") + r" \\")
+                            f"{f3(float(rf.valid))} & {f3(float(rf.cat_rate))} & {se_cells} & "
+                            + (f"{mth(best.method)} & {f4(float(best.med_error))}" if best is not None else "-- & --") + r" \\")
             rows.append(r"\addlinespace[2pt]")
-            foot.append((setlab, hold, n_unc, n_win, losers, worse))
+            foot.append((setlab, hold, n_unc, stat))
         rows.pop()
         rows.append(r"\midrule")
-        for setlab, hold, n_unc, n_win, losers, worse in foot:
-            rows.append(rf"\multicolumn{{10}}{{l}}{{{setlab}: \meth{{rational\_fit}} wins against the last value on more than half of the cells in "
-                        rf"{n_win} of {n_unc} uncapped families" + ("; not in " + ", ".join(f"{tt(r)} ({w:.3f})" for r, w in losers) if losers else "")
-                        + "; its median error exceeds the last value's in " + (", ".join(f"{tt(r)} ({e:.4f} vs {l:.4f})" for r, e, l in worse) if worse else "no family") + r"} \\")
-            fact(sec, f"g={gname(g)} {setlab}: uncapped families where rational_fit's family win rate vs last_value exceeds 0.5; the families where it does not (win rate); "
-                      "the families where its family median error exceeds the last value's (both)",
-                 f"{n_win} of {n_unc}; " + (", ".join(f"{r} {w:.3f}" for r, w in losers) if losers else "none") + "; "
-                 + (", ".join(f"{r} {e:.4f} vs {l:.4f}" for r, e, l in worse) if worse else "none"),
-                 "results/phase1/phase1_aggregated.csv", f"is_holdout == {hold}, target_g == {g}, capped == 0, method in (rational_fit, last_value)",
-                 "per family: win = mean over the family's cells of win_rate_vs_last; median error = median over cells of med_error")
-        frag(f"f22_per_family_g{gname(g)}.tex", "llrr" + "rrrr" + "lr", rows,
+        for setlab, hold, n_unc, stat in foot:
+            for m in NAMED:
+                n_win, losers, worse = stat[m]["n_win"], stat[m]["losers"], stat[m]["worse"]
+                rows.append(rf"\multicolumn{{12}}{{l}}{{{setlab}, {mth(m)}: its win rate against the last value exceeds 0.5 in {n_win} of {n_unc} uncapped families"
+                            + ("; not in " + ", ".join(f"{tt(r)} ({w:.3f})" for r, w in losers) if losers else "")
+                            + "; its median error exceeds the last value's in " + (", ".join(f"{tt(r)} ({e:.4f} vs {l:.4f})" for r, e, l in worse) if worse else "no family") + r"} \\")
+                fact(sec, f"g={gname(g)} {setlab}: uncapped families where {m}'s family win rate vs last_value exceeds 0.5; the families where it does not (win rate); "
+                          "the families where its family median error exceeds the last value's (both)",
+                     f"{n_win} of {n_unc}; " + (", ".join(f"{r} {w:.3f}" for r, w in losers) if losers else "none") + "; "
+                     + (", ".join(f"{r} {e:.4f} vs {l:.4f}" for r, e, l in worse) if worse else "none"),
+                     "results/phase1/phase1_aggregated.csv", f"is_holdout == {hold}, target_g == {g}, capped == 0, method in ({m}, last_value)",
+                     "per family: win = mean over the family's cells of win_rate_vs_last; median error = median over cells of med_error")
+        frag(f"f22_per_family_g{gname(g)}.tex", "llrr" + "rrrr" + "rr" + "lr", rows,
              ["results/phase1/phase1_aggregated.csv (per (method, regime, noise, g) cell; capped == 0)",
               "results/phase1/phase1_global.csv, results/phase1/phase1_global_holdout.csv (rank_eligible == 1: the candidates of the last two columns)"],
              f"target_g == {gname(g)}; one row per curve family (core, then held-out); cells = the family's uncapped (noise) cells; {FAMILY_STAT_NOTE}; "
+             f"{CONSERVATIVE_METHOD} = the conservative alternative the paper names (median error and win rate vs the last value, the same statistics); "
              "best rank-eligible accelerator = the lowest family median error among the accelerators that are rank-eligible in the pooled table of that set "
-             "and stratum (ties by method name); a family with no uncapped cell prints 'capped'",
-             f"rational_fit family by family at g = {gname(g)}: the last value, rational_fit (median error, win rate, validity, catastrophe rate) and the "
-             "best rank-eligible accelerator per curve family, with the families where the default loses")
+             "and stratum (ties by method name); a family with no uncapped cell prints 'capped'; the footers give, per set and named method, the uncapped "
+             "families where its win rate against the last value exceeds 0.5 (the family win rate = mean over the family's cells of the per-cell win rate)",
+             f"rational_fit and single_exp_fit family by family at g = {gname(g)}: the last value, rational_fit (median error, win rate, validity, catastrophe rate), "
+             "single_exp_fit (median error, win rate) and the best rank-eligible accelerator per curve family, with the families where each named method loses")
 
 
 def f23():
@@ -2608,18 +2595,354 @@ def f26():
          extra=roster_header(prov))
 
 
+
+# ═════════════════════════════════════════════════════════════════════════════
+# R9f Part B: choosing a method by trial (f27, f27b, f28) and the named methods
+# on the recorded curves (f29, f30)
+# ═════════════════════════════════════════════════════════════════════════════
+POOL_LABEL = {"lead": lambda n: f"the leading fits ({n})", "named": lambda n: "the two named methods",
+              "classical": lambda n: f"the classical variants ({n})", "all": lambda n: f"all accelerators ({n})"}
+DESIGN_LABEL = {"one_pilot": "one pilot run", "many_pilots": "many pilot runs"}
+LAST = "last_value"
+
+
+def pool_label(name):
+    try:
+        return POOL_LABEL[name](len(POOLS[name]))
+    except KeyError:
+        raise KeyError(f"no printed label for the candidate pool {name!r}; add it to POOL_LABEL") from None
+
+
+def selection_tables():
+    """phase1_selection_global.csv and its provenance (None, None when absent).  The pools
+    recorded in the provenance must equal the current definitions (scripts.selection_defs),
+    otherwise the committed aggregate is stale: rerun scripts/derive_selection.py."""
+    path = os.path.join(RES, "phase1", "phase1_selection_global.csv")
+    if not os.path.exists(path):
+        return None, None
+    S = pd.read_csv(path, float_precision="round_trip")
+    prov = None
+    pp = os.path.join(RES, "phase1", "phase1_selection_provenance.json")
+    if os.path.exists(pp):
+        with open(pp, encoding="utf-8") as fh:
+            prov = json.load(fh)
+        for name in POOL_NAMES:
+            assert prov["pools"].get(name) == POOLS[name], \
+                f"the committed selection pool {name!r} differs from the current definition; rerun scripts/derive_selection.py"
+    return S, prov
+
+
+def selection_header(prov):
+    """The extra comment line of the selection-based fragments."""
+    if prov is None:
+        return ["selection: results/phase1/phase1_selection_provenance.json absent"]
+    return [f"selection: results/phase1/phase1_selection_provenance.json (analysis started {prov.get('started')} on code "
+            f"{prov.get('git_head', {}).get('short')} from {prov.get('records_rows'):,} records; cells per design {prov.get('cells')}, "
+            f"trials per design {prov.get('trials')}; added after the full run, evaluates no method)"]
+
+
+def _kn(k, n):
+    return f"{int(k)}/{int(n)}"
+
+
+def _f27(design, name):
+    S, prov = selection_tables()
+    if S is None:
+        print(f"  (phase1_selection_global.csv absent: fragment {name} skipped; produced by scripts/derive_selection.py)")
+        return
+    S = S[S.design == design]
+    sec = "selection by trial (synthetic families)"
+    design_text = (prov or {}).get("designs", {}).get(design, design)
+    head = [r"Set & noise class & candidate pool & families & chosen valid & win vs default & default chosen & win vs last & "
+            r"\multicolumn{2}{c}{families with win rate $> 0.5$} & \multicolumn{3}{c}{median error} & ratio to default \\",
+            r"\cmidrule(lr){9-10}\cmidrule(lr){11-13}",
+            r" & & & & & & & & vs default & vs last & chosen & default & last value & \\", r"\midrule"]
+    rows = list(head)
+    cols = ["chosen_valid_rate", "win_vs_default", "default_chosen", "win_vs_last"]
+
+    def emit_fact(r, g, setlab):
+        cls = noise_class_label(r.noise_class, tex=False)
+        fact(sec, f"{design}, {setlab} g={gname(g)} {cls}, pool {r.pool}: families / cells / chosen valid / win vs default / default chosen / win vs last / "
+                  "families with win rate > 0.5 vs default, vs last (k/n) / median error chosen, default, last value / median ratio to the default",
+             f"{int(r.families)} / {int(r.cells)} / {r.chosen_valid_rate:.3f} / {r.win_vs_default:.3f} / {r.default_chosen:.3f} / {r.win_vs_last:.3f} / "
+             f"{_kn(r.families_win_default_k, r.families_win_default_n)}, {_kn(r.families_win_last_k, r.families_win_last_n)} / "
+             f"{r.med_error_chosen:.4f}, {r.med_error_default:.4f}, {r.med_error_last:.4f} / {r.med_ratio_vs_default:.3f}",
+             "results/phase1/phase1_selection_global.csv",
+             f"design == {design}, regime_set == {r.regime_set}, target_g == {g}, noise_class == {r.noise_class}, pool == {r.pool}",
+             "means over the class's cells of the per-cell shares; medians over the cells of the per-cell medians (scripts/derive_selection.py)")
+
+    for rs, setlab in (("core", "core"), ("holdout", "held-out")):
+        Sg = S[(S.regime_set == rs) & (S.target_g == HEADLINE_G)]
+        if Sg.empty:
+            continue
+        classes = sorted(Sg.noise_class.unique(), key=noise_class_order)
+        first_set = True
+        for cls in classes:
+            Sc = Sg[Sg.noise_class == cls]
+            for i, pool in enumerate([p for p in POOL_NAMES if p in set(Sc.pool)]):
+                r = Sc[Sc.pool == pool].iloc[0]
+                rows.append(f"{setlab if first_set else ''} & {noise_class_label(cls) if i == 0 else ''} & {pool_label(pool)} & {int(r.families)} & "
+                            + " & ".join(f3(float(r[c])) for c in cols) + f" & {_kn(r.families_win_default_k, r.families_win_default_n)} & "
+                            f"{_kn(r.families_win_last_k, r.families_win_last_n)} & {f4(float(r.med_error_chosen))} & {f4(float(r.med_error_default))} & "
+                            f"{f4(float(r.med_error_last))} & {f3(float(r.med_ratio_vs_default))} \\\\")
+                first_set = False
+                emit_fact(r, HEADLINE_G, setlab)
+            rows.append(r"\addlinespace[2pt]")
+        if rs == "core":
+            rows.append(r"\midrule")
+    while rows and rows[-1] in (r"\addlinespace[2pt]", r"\midrule"):
+        rows.pop()
+    for g in [g for g in STRATA if g != HEADLINE_G]:
+        for rs, setlab in (("core", "core"), ("holdout", "held-out")):
+            Sg = S[(S.regime_set == rs) & (S.target_g == g) & (S.noise_class == NOISE_CLASS_ALL)]
+            for pool in [p for p in POOL_NAMES if p in set(Sg.pool)]:
+                emit_fact(Sg[Sg.pool == pool].iloc[0], g, setlab)
+    frag(name, "lll" + "r" * 11, rows,
+         ["results/phase1/phase1_selection_global.csv (scripts/derive_selection.py on the git-ignored phase1_records.csv: the (family, noise, g) cells "
+          "with capped == 0, all seeds; one row per set, stratum, noise class, candidate pool and design)"],
+         f"design == {design} ({design_text}); target_g == {gname(HEADLINE_G)}; {NOISE_CLASS_DEF}; 'all cells' pools the classes; candidate pools: "
+         f"the leading fits = LEAD ({LEAD_RULE}: {', '.join(POOLS['lead'])}), the two named methods = {DEFAULT_METHOD} (the default) and "
+         f"{CONSERVATIVE_METHOD}, the classical variants = the {len(POOLS['classical'])} members of the families {CLASSICAL_FAMILIES}, all accelerators = "
+         f"the {len(POOLS['all'])} accelerators of the registry; a trial = one (pilot, final) choice on one cell; chosen valid = mean over the class's cells "
+         f"of the share of trials whose chosen record is valid on the final run; win vs default (vs last) = mean over cells of the share of trials where "
+         f"the chosen record is valid and its error is strictly below {DEFAULT_METHOD}'s (the last value's) on the same final run (an invalid chosen record "
+         f"never wins; a valid one wins against an invalid reference); default chosen = mean over cells of the share of trials where the chosen method is "
+         f"{DEFAULT_METHOD} itself (never a strict win); families with win rate > 0.5 = the families whose mean over their cells of the win share exceeds "
+         f"0.5, k/n; median error = median over the class's cells of the cell median over the trials (chosen: over the trials where it is valid; default "
+         f"and last value: over the final runs of the trials, so the 'all cells' values reproduce the pooled Phase 1 medians); ratio to default = median "
+         f"over cells of the cell median of chosen error / {DEFAULT_METHOD} error over the trials where both are valid",
+         f"Choosing a method by trial on the synthetic families, design {DESIGN_LABEL[design]} ({design}), headline stratum: per set, noise class and "
+         f"candidate pool, how often the method chosen on the pilot run(s) is valid on the final run, beats the default and the last value there, and "
+         f"the median errors of the chosen method, the default and the last value",
+         extra=selection_header(prov))
+
+
+def f27():
+    _f27("one_pilot", "f27_selection_one_pilot.tex")
+    _f27("many_pilots", "f27b_selection_many_pilots.tex")
+
+
+def _score(sub, m):
+    """A method's score on a set of recorded-curve cells: the median of skill_vs_last over the
+    cells, an invalid record counted as +infinity (NaN when the method has no record there)."""
+    s = sub[sub.method == m]
+    if s.empty:
+        return float("nan")
+    v = np.where(s.valid.to_numpy() == 1, s.skill_vs_last.to_numpy(dtype=float), np.inf)
+    return float(np.median(v))
+
+
+def _choose(sub, members):
+    """The member with the lowest score on the cells (ties: registry order); (method, score)."""
+    best = None
+    for m in sorted(members, key=registry_index):
+        sc = _score(sub, m)
+        if best is None or sc < best[1]:
+            best = (m, sc)
+    return best
+
+
+def fscore(v):
+    """A score: finite -> 3 decimals; +infinity (the median record invalid) -> the infinity sign."""
+    if v is None or (isinstance(v, float) and math.isnan(v)):
+        return "--"
+    return r"$\infty$" if math.isinf(v) else f"{v:.3f}"
+
+
+def f28():
+    """Choosing a method by trial on the recorded curves (pre-minimum cells)."""
+    R, prov = roster_table()
+    if R is None:
+        print("  (real_data_roster_v2.csv absent: fragment f28 skipped)")
+        return
+    pre = R[R.post_min_target == 0]
+    datasets = [d for d in REAL_DATASETS if d in set(pre.dataset)] + sorted(set(pre.dataset) - set(REAL_DATASETS))
+    designs = [("depth", "same curve, leave one depth out"), ("dataset", "another dataset, leave one dataset out")]
+    sec = "selection by trial (recorded curves)"
+    folds = {}
+    for pool in POOL_NAMES:
+        members = POOLS[pool]
+        fd = []
+        for d in datasets:
+            sd = pre[pre.dataset == d]
+            for ob in sorted(sd.obs_depth.unique()):
+                train, test = sd[sd.obs_depth != ob], sd[sd.obs_depth == ob]
+                if train.empty:
+                    continue
+                m, _ = _choose(train, members)
+                fd.append(dict(dataset=d, depth=int(ob), chosen=m, chosen_score=_score(test, m), default_score=_score(test, DEFAULT_METHOD)))
+        folds[("depth", pool)] = fd
+        fs = []
+        for d in datasets:
+            train, test = pre[pre.dataset != d], pre[pre.dataset == d]
+            if train.empty:
+                continue
+            m, _ = _choose(train, members)
+            fs.append(dict(dataset=d, depth=None, chosen=m, chosen_score=_score(test, m), default_score=_score(test, DEFAULT_METHOD)))
+        folds[("dataset", pool)] = fs
+    head = [r"Design & candidate pool & folds & \multicolumn{3}{c}{chosen score vs default's} & chosen $< 1$ & \multicolumn{2}{c}{median score over folds} & methods chosen \\",
+            r"\cmidrule(lr){4-6}\cmidrule(lr){8-9}",
+            r" & & & below & equal & above & & chosen & default & \\", r"\midrule"]
+    rows = list(head)
+    for key, dlabel in designs:
+        for i, pool in enumerate(POOL_NAMES):
+            fd = folds[(key, pool)]
+            n = len(fd)
+            cs = np.array([f["chosen_score"] for f in fd], dtype=float)
+            ds = np.array([f["default_score"] for f in fd], dtype=float)
+            below, equal, above = int((cs < ds).sum()), int((cs == ds).sum()), int((cs > ds).sum())
+            beats_last = int((cs < 1.0).sum())
+            counts = {}
+            for f in fd:
+                counts[f["chosen"]] = counts.get(f["chosen"], 0) + 1
+            chosen_txt = ", ".join(f"{mth(m)} ({k})" for m, k in sorted(counts.items(), key=lambda kv: (-kv[1], registry_index(kv[0]))))
+            med_c = float(np.median(cs)) if n else float("nan")
+            med_d = float(np.median(ds)) if n else float("nan")
+            rows.append(f"{dlabel if i == 0 else ''} & {pool_label(pool)} & {n} & {below} & {equal} & {above} & {beats_last} & {fscore(med_c)} & {fscore(med_d)} & {chosen_txt} \\\\")
+            fact(sec, f"{dlabel}, pool {pool}: folds; folds with the chosen score below / equal to / above the default's; folds with the chosen score below 1; "
+                      "median over folds of the chosen score and of the default's; methods chosen (counts)",
+                 f"{n}; {below} / {equal} / {above}; {beats_last}; {med_c:.4f} / {med_d:.4f}; " + ", ".join(f"{m} {k}" for m, k in sorted(counts.items(), key=lambda kv: (-kv[1], registry_index(kv[0])))),
+                 "results/real_data/real_data_roster_v2.csv", f"post_min_target == 0; design {key}; pool {pool} ({len(POOLS[pool])} members)",
+                 "score = median of skill_vs_last over the cells, an invalid record counted as +inf; chosen = argmin score on the training cells (ties: registry order)")
+            for d in datasets:
+                fds = [f for f in fd if f["dataset"] == d]
+                if not fds:
+                    continue
+                if key == "depth":
+                    val = "; ".join(f"depth {f['depth']}: {f['chosen']} (chosen {f['chosen_score']:.4f}, default {f['default_score']:.4f})" for f in fds)
+                else:
+                    f = fds[0]
+                    val = f"{f['chosen']} (chosen {f['chosen_score']:.4f}, default {f['default_score']:.4f})"
+                fact(sec, f"{dlabel}, pool {pool}, {d}: the chosen method(s) with the chosen and the default's score on the left-out cells", val,
+                     "results/real_data/real_data_roster_v2.csv", f"post_min_target == 0, dataset == {d}; design {key}; pool {pool}",
+                     "chosen on the pre-minimum cells of the other depths of the dataset (depth design) / of the other datasets (dataset design); scored on the left-out cells")
+        if key == designs[0][0]:
+            rows.append(r"\midrule")
+    n_pre = int(pre.drop_duplicates(["dataset", "obs_depth", "target_round"]).shape[0])
+    frag("f28_selection_recorded.tex", "llrrrrrrrl", rows,
+         ["results/real_data/real_data_roster_v2.csv (the recorded curves, every method under the benchmark protocol)"],
+         f"post_min_target == 0 (the {n_pre} cells before the curve minimum, datasets {', '.join(datasets)}); a method's score on a set of cells = the median of "
+         f"skill_vs_last (error / the last value's error) over those cells with an invalid record counted as +infinity; same curve, leave one depth out = for "
+         f"each dataset and observation depth, the chosen method is the pool member with the lowest score on the pre-minimum cells of the other depths of that "
+         f"dataset (ties: registry order), evaluated by its score on the left-out depth's pre-minimum cells next to {DEFAULT_METHOD}'s score there; another "
+         f"dataset, leave one dataset out = chosen on the pre-minimum cells of the other datasets, evaluated on the left-out dataset; below / equal / above = "
+         f"folds where the chosen score is below / equal to / above the default's; chosen < 1 = folds where the chosen method beats the last value at the "
+         f"median; candidate pools as in f27 (lead: {', '.join(POOLS['lead'])}; named: {DEFAULT_METHOD}, {CONSERVATIVE_METHOD}; classical: the "
+         f"{len(POOLS['classical'])} variants; all: {len(POOLS['all'])} accelerators)",
+         "Choosing a method by trial on the recorded curves, cells before the minimum: leave one depth out and leave one dataset out, per candidate pool, "
+         "the chosen method's score against the default's and against the last value",
+         extra=roster_header(prov))
+
+
+def f29():
+    """rational_fit and single_exp_fit on the recorded curves, per dataset and pooled, before and after the minimum."""
+    R, prov = roster_table()
+    if R is None:
+        print("  (real_data_roster_v2.csv absent: fragment f29 skipped)")
+        return
+    NAMED = (DEFAULT_METHOD, CONSERVATIVE_METHOD)
+    datasets = [d for d in REAL_DATASETS if d in set(R.dataset)] + sorted(set(R.dataset) - set(REAL_DATASETS))
+    head = [r"Dataset & \multicolumn{2}{c}{cells} & " + " & ".join(rf"\multicolumn{{4}}{{c}}{{{mth(m)}}}" for m in NAMED) + r" \\",
+            r"\cmidrule(lr){2-3}\cmidrule(lr){4-7}\cmidrule(lr){8-11}",
+            r" & before & after & wins before & ratio before & wins after & ratio after & wins before & ratio before & wins after & ratio after \\", r"\midrule"]
+    rows = list(head)
+    sec = "named methods on the recorded curves"
+    for d in datasets + ["pooled"]:
+        sub = R if d == "pooled" else R[R.dataset == d]
+        n_split = {flag: int(sub[sub.post_min_target == flag].drop_duplicates(["dataset", "obs_depth", "target_round"]).shape[0]) for flag in (0, 1)}
+        cells_, parts = [str(n_split[0]), str(n_split[1])], []
+        for m in NAMED:
+            for flag, lab in ((0, "before"), (1, "after")):
+                b = _real_block(sub[(sub.method == m) & (sub.post_min_target == flag)])
+                if b["n"] == 0:
+                    cells_ += ["--", "--"]
+                    parts.append(f"{m} {lab}: no cell")
+                else:
+                    cells_ += [f"{b['win']}/{b['n']}", f3(b["ratio"])]
+                    parts.append(f"{m} {lab}: wins {b['win']}/{b['n']}, ratio {b['ratio']:.4f} ({b['valid']}/{b['n']} valid)")
+        if d == "pooled":
+            rows.append(r"\midrule")
+        rows.append(f"{tt(d) if d != 'pooled' else chr(92) + 'textbf{pooled}'} & " + " & ".join(cells_) + r" \\")
+        fact(sec, f"{d}: cells before / after the minimum; per named method, before and after: wins vs the last value (k/n) and the median of skill_vs_last over the valid cells",
+             f"{n_split[0]} / {n_split[1]}; " + "; ".join(parts), "results/real_data/real_data_roster_v2.csv",
+             ("all datasets" if d == "pooled" else f"dataset == {d}") + f", method in {NAMED}, post_min_target 0 / 1",
+             "wins = count(win_vs_last == 1); ratio = median over the valid rows of skill_vs_last (error / the last value's error)")
+    frag("f29_real_named_by_dataset.tex", "l" + "rr" + "rrrr" * len(NAMED), rows,
+         ["results/real_data/real_data_roster_v2.csv (the recorded curves, every method under the benchmark protocol)"],
+         f"method in {NAMED}; one row per dataset and a pooled row; before / after = post_min_target 0 / 1 (target round beyond the recorded curve's argmin); "
+         "cells = (depth, target) cells of the split; wins = cells with win_vs_last == 1 (k/n; an invalid record never wins); ratio = median over the valid "
+         "cells of skill_vs_last (the method's error / the last value's); a split with no cell prints --",
+         "The two named methods on the recorded curves, per dataset and pooled: cells, wins against the last value and the median error ratio before and "
+         "after the curve minimum",
+         extra=roster_header(prov))
+
+
+def f30():
+    """The datasets whose curve minimum is at the final recorded round: error as a share of the final loss by observation depth."""
+    R, prov = roster_table()
+    if R is None:
+        print("  (real_data_roster_v2.csv absent: fragment f30 skipped)")
+        return
+    t_max = int(R.target_round.max())
+    curves = read("real_data", "real_data_curves.csv")
+    assert len(curves) == t_max, (len(curves), t_max)        # the largest target round is the final recorded round (rounds are 1-based, len(curves) of them)
+    ds = [d for d in REAL_DATASETS if d in set(R[R.argmin_round == t_max].dataset)] + sorted(set(R[R.argmin_round == t_max].dataset) - set(REAL_DATASETS))
+    if not ds:
+        print("  (no recorded curve has its minimum at the final round: fragment f30 skipped)")
+        return
+    METHODS = (LAST, DEFAULT_METHOD, CONSERVATIVE_METHOD)
+    sub = R[R.dataset.isin(ds) & (R.target_round == t_max) & R.method.isin(METHODS)]
+    depths = sorted(sub.obs_depth.unique())
+    head = [r"$\nobs$ & share of rounds observed & " + " & ".join(rf"\multicolumn{{2}}{{c}}{{{mth(m)}}}" for m in METHODS) + r" \\",
+            "".join(rf"\cmidrule(lr){{{3 + 2 * i}-{4 + 2 * i}}}" for i in range(len(METHODS))),
+            r" & & " + " & ".join("median & max" for _ in METHODS) + r" \\", r"\midrule"]
+    rows = list(head)
+    sec = "final loss by depth (recorded curves)"
+    for ob in depths:
+        s = sub[sub.obs_depth == ob]
+        cells_, parts = [f"{100 * ob / t_max:.0f}\\%"], []
+        for m in METHODS:
+            sm = s[s.method == m]
+            ok = sm[sm.valid == 1]
+            rel = 100 * ok.error / ok.true_val
+            med, mx = (float(rel.median()), float(rel.max())) if len(ok) else (float("nan"), float("nan"))
+            suffix = f" ({len(ok)}/{len(sm)} valid)" if len(ok) < len(sm) else ""
+            cells_ += [(f"{med:.2f}\\%" if math.isfinite(med) else "--") + suffix, (f"{mx:.2f}\\%" if math.isfinite(mx) else "--") + suffix]
+            parts.append(f"{m}: median {med:.3f} %, max {mx:.3f} %" + (f" ({len(ok)}/{len(sm)} valid)" if len(ok) < len(sm) else ""))
+        rows.append(f"{int(ob)} & " + " & ".join(cells_) + r" \\")
+        fact(sec, f"depth {int(ob)} (share of rounds observed {100 * ob / t_max:.1f} %): median and max over the datasets of 100 x error / true_val, per method",
+             "; ".join(parts), "results/real_data/real_data_roster_v2.csv",
+             f"dataset in ({', '.join(ds)}) (argmin_round == {t_max}, the final recorded round), target_round == {t_max}, obs_depth == {int(ob)}, method in {METHODS}, valid == 1",
+             "100 * error / true_val per dataset; median and max over the datasets")
+    rows.append(r"\midrule")
+    rows.append(rf"\multicolumn{{{2 + 2 * len(METHODS)}}}{{l}}{{datasets whose minimum is at the final recorded round ({t_max}): " + ", ".join(tt(d) for d in ds)
+                + f"; target = round {t_max}; share of rounds observed = $\\nobs / {t_max}$" + r"} \\")
+    frag("f30_real_final_loss_by_depth.tex", "lr" + "rr" * len(METHODS), rows,
+         ["results/real_data/real_data_roster_v2.csv (the recorded curves, every method under the benchmark protocol)",
+          "results/real_data/real_data_curves.csv (the recorded curves: the final round)"],
+         f"datasets whose curve minimum is at the final recorded round ({', '.join(ds)}: argmin_round == {t_max} == the largest target round == the last "
+         f"recorded round); target_round == {t_max}; one row per observation depth; share of rounds observed = depth / {t_max}; per method the median and "
+         f"the maximum over those {len(ds)} datasets of 100 x error / true_val (the recorded loss at the target round), over the valid records; when a record "
+         "is invalid the count of valid ones is printed beside the value",
+         f"Final loss by observation depth on the {len(ds)} recorded curves whose minimum is at the final round ({', '.join(ds)}): the error of the last value, "
+         f"{DEFAULT_METHOD} and {CONSERVATIVE_METHOD} as a percentage of the final loss, median and maximum over the datasets",
+         extra=roster_header(prov))
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # FACTS.md and the fragment index
 # ═════════════════════════════════════════════════════════════════════════════
 def write_facts(answer_lines):
     order = ["roster", "trivial baseline", "ranking", "family bootstrap (§5.4)", "skill summary", "classical no-op",
-             "classical no-op by noise class", "per family (rational_fit)", "family head-to-head (rational_fit)", "leading fits",
+             "classical no-op by noise class", "per family (rational_fit, single_exp_fit)", "family head-to-head (rational_fit)", "leading fits",
+             "selection by trial (synthetic families)",
              "order ladders (Phase 0b)", "order ladders under noise (Phase 0b)", "generalisation", "dangerous set",
              "richardson_3 validity by depth", "sigma = 0 cancellation NaNs", "invalid rates", "capped cells", "effective sample",
              "sweep 1 (assumed asymptote)", "Richardson failure (§7.1, Phase 2)", "selectors (Phase 3)",
              "regime classifier (§7.2)", "ensembles (Phase 5a)", "diagnostics (Phase 4)",
              "real data (v2)", "real data fixed methods (§8)", "real data (v2) perturbation diagnostic",
              "recorded curves, roster", "recorded curves, classical variants",
+             "selection by trial (recorded curves)", "named methods on the recorded curves", "final loss by depth (recorded curves)",
              "real data (legacy 18-cell run)", "pipeline provenance"]
     secs = list(dict.fromkeys(order + [f["section"] for f in FACTS]))
     with open(ARGS.facts, "w", encoding="utf-8", newline="\n") as f:
@@ -2666,11 +2989,13 @@ def main():
     print(f"  {PROV}; dangerous = {sorted(DANGEROUS)}")
     print(f"  raw-derived facts: {'results/raw_facts.csv (' + str(len(RAW_FACTS)) + ' rows)' if RAW_FACTS is not None else 'results/raw_facts.csv absent'}")
     print(f"  LEAD = {LEAD}")
+    print(f"  pools: " + "; ".join(f"{k} ({len(v)})" for k, v in POOLS.items()))
     f01(); f02(); f03(); f04(); f04b(); f05(); f05b(); f06(); f07()
     answer = f08()
     f09(); f10(); f11(); f12()
     f14(); f15(); f16(); f18(); f19(); f20()
     f21(); f21b(); f22(); f23(); f24(); f25(); f26()
+    f27(); f28(); f29(); f30()
     facts_phase2(); facts_phase3(); facts_classifier()
     facts_lhat_invariance_full_precision()
     named_facts()
