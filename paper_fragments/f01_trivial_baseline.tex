@@ -6,11 +6,11 @@
 % note   : the Prompt-4 'pooled median error below the best single trivial' count was dropped (Report-5A review): it compared pooled medians of different cells; the win rates are per-cell statements
 \begin{tabular}{lrrrrrrrrrrrr}
 \toprule
-Stratum / row & \multicolumn{6}{c}{core (18 regimes)} & \multicolumn{6}{c}{held-out (6 regimes)} \\
+Stratum / row & \multicolumn{6}{c}{core} & \multicolumn{6}{c}{held-out} \\
 \cmidrule(lr){2-7}\cmidrule(lr){8-13}
  & med.\ err & win vs $\hat L$ & skill vs $\hat L$ & win vs last & skill vs last & strict skill & med.\ err & win vs $\hat L$ & skill vs $\hat L$ & win vs last & skill vs last & strict skill \\
 \midrule
-\multicolumn{13}{l}{\textit{$g = 0.5$}} \\
+\multicolumn{13}{l}{\textit{$g = 0.5$} (core 18 families, 54 cells; held-out 6 families, 18 cells)} \\
 predict $\hat L$ (\meth{constant\_assumed}) & 0.1094 & -- & -- & 0.040 & 1.973 & 2.313 & 0.0951 & -- & -- & 0.000 & 1.961 & 1.989 \\
 \meth{last\_value} & 0.0690 & 0.961 & 0.507 & -- & -- & 1.021 & 0.0391 & 1.000 & 0.510 & -- & -- & 1.000 \\
 \meth{window\_mean} & 0.1066 & 0.611 & 0.838 & 0.197 & 1.706 & 1.792 & 0.0982 & 0.561 & 0.974 & 0.000 & 1.766 & 1.905 \\
@@ -22,7 +22,7 @@ best accelerator, held-out rank 1: \meth{rational\_fit} & 0.0159 & 0.952 & 0.145
 median accelerator (52) & 0.0494 & 0.891 & 0.452 & 0.557 & 0.999 & 1.043 & 0.0296 & 0.926 & 0.415 & 0.585 & 0.998 & 1.023 \\
 accelerators with win rate $> 0.5$ / strict skill $< 1$ & & 46/52 & & 30/52 & & 18/52 & & 47/52 & & 35/52 & & 22/52 \\
 \midrule
-\multicolumn{13}{l}{\textit{$g = 0.1$} (headline)} \\
+\multicolumn{13}{l}{\textit{$g = 0.1$} (headline; core 16 families, 48 cells; held-out 5 families, 15 cells)} \\
 predict $\hat L$ (\meth{constant\_assumed}) & 0.0620 & -- & -- & 0.524 & 0.682 & 1.000 & 0.0561 & -- & -- & 0.569 & 0.627 & 1.000 \\
 \meth{last\_value} & 0.1030 & 0.476 & 1.488 & -- & -- & 1.570 & 0.0862 & 0.431 & 1.616 & -- & -- & 1.632 \\
 \meth{window\_mean} & 0.1463 & 0.381 & 2.071 & 0.158 & 1.427 & 2.733 & 0.1952 & 0.287 & 2.671 & 0.000 & 1.455 & 2.671 \\
@@ -34,7 +34,7 @@ best accelerator, held-out rank 1: \meth{rational\_fit} & 0.0296 & 0.787 & 0.328
 median accelerator (52) & 0.0477 & 0.548 & 0.924 & 0.602 & 1.000 & 1.529 & 0.0476 & 0.537 & 1.353 & 0.657 & 0.994 & 1.458 \\
 accelerators with win rate $> 0.5$ / strict skill $< 1$ & & 39/52 & & 32/52 & & 10/52 & & 35/52 & & 36/52 & & 15/52 \\
 \midrule
-\multicolumn{13}{l}{\textit{$g = 0.02$}} \\
+\multicolumn{13}{l}{\textit{$g = 0.02$} (core 15 families, 45 cells; held-out 5 families, 15 cells)} \\
 predict $\hat L$ (\meth{constant\_assumed}) & 0.0541 & -- & -- & 0.544 & 0.558 & 1.000 & 0.0545 & -- & -- & 0.611 & 0.499 & 1.000 \\
 \meth{last\_value} & 0.0970 & 0.456 & 1.871 & -- & -- & 1.873 & 0.0935 & 0.389 & 2.042 & -- & -- & 2.042 \\
 \meth{window\_mean} & 0.1749 & 0.353 & 2.682 & 0.102 & 1.398 & 2.782 & 0.2077 & 0.267 & 3.468 & 0.000 & 1.418 & 3.468 \\

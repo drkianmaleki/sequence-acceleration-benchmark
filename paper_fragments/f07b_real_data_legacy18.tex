@@ -4,7 +4,7 @@
 % filter : all 18 rows; bold = cascade worse than the last observed value
 \begin{tabular}{lrlrrrr}
 \toprule
-Dataset & $\nobs$ & routed & predicted & cascade err & current err & improv. \\
+Dataset & $\nobs$ & routed & predicted & cascade err & last-value err & improv. \\
 \midrule
 \texttt{adult} & 30 & \meth{richardson\_1} & 0.2314 & 0.0415 & 0.0611 & $+32.0$\% \\
 \texttt{adult} & 60 & \meth{richardson\_1} & 0.2134 & \textbf{0.0595} & 0.0248 & $-139.6$\% \\
