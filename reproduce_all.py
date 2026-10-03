@@ -27,6 +27,9 @@ in the required order:
               and total wall seconds, the evaluation plan of the mode, library versions
               (written at the start of every run, again after every step and at the end, so
               the generators inside the run read their own run; the committed copy is the full run's)
+    fingerprint  results/run_code_fingerprint.json (full mode only): the SHA-256 of every code file
+              that produces a result, hashed from the tree at the start of the run
+              (scripts/run_code_fingerprint.py; see the provenance rule below)
 
 The excluded-method set is derived from Phase-1 output into
 results/phase1/dangerous_methods.json; phases 2-5 refuse to run without
@@ -47,8 +50,14 @@ Afterwards:
     python scripts/check_dangerous.py      # artifact still matches Phase 1
 
 Per-phase grids live in src/config.py (PHASE1 ... PHASE5B, REAL_DATA).
-Results are only meaningful alongside the commit that produced them, so
-regenerate the full set rather than mixing output from different commits.
+
+Provenance rule.  Results belong to the run recorded in
+results/run_manifest.json.  results/run_code_fingerprint.json records the
+code of that run: in full mode the driver hashes every code file of the
+fingerprint's path set from the tree at the start of the run, next to the
+first manifest write (scripts/run_code_fingerprint.py).  A result added
+later must carry its own provenance file, and the fingerprint check
+(`python scripts/run_code_fingerprint.py --check`) must pass on the tree.
 """
 
 import argparse
@@ -82,6 +91,12 @@ STEPS = [
     ("Paper tables and FACTS",                     "scripts/make_paper_tables.py", False),
     ("L_true terciles (FACTS section, f13)",       "scripts/analyze_by_ltrue.py",  False),
 ]
+
+# The table generators among the steps: they read results/ and write tables,
+# FACTS.md and documents, produce no result, and are therefore not in the path
+# set of the code fingerprint (scripts/run_code_fingerprint.py derives the path
+# set as STEPS minus this set).
+GENERATOR_STEPS = {"scripts/make_paper_tables.py", "scripts/analyze_by_ltrue.py"}
 
 
 def parse_args():
@@ -290,6 +305,12 @@ def main():
     t_start = time.time()
     started = _dt.datetime.now().isoformat(timespec="seconds")
     write_manifest(manifest_mode, outcomes, started, jobs)
+    if manifest_mode == "full":
+        # The code fingerprint of this run: the path set hashed from the tree as it
+        # stands now, next to the manifest's first write (full mode only; a quick
+        # run in a worktree never overwrites the committed fingerprint).
+        from scripts.run_code_fingerprint import write_from_tree
+        print(f"  Code fingerprint: {os.path.relpath(write_from_tree(_ROOT), _ROOT)}")
     for i, (label, script, takes_mode) in enumerate(steps, 1):
         cmd = [sys.executable, script] + ([mode_flag] if takes_mode else [])
         ok, elapsed = run_step(label, cmd, i, len(steps))

@@ -1,0 +1,113 @@
+{
+  "purpose": "Hashes of every code file that produced the results in this directory, as the files were at the run recorded in run_manifest.json; a file changed or added after the run carries sha256_now and changed_after_run, and `python scripts/run_code_fingerprint.py --check` must pass on the tree.",
+  "run": {
+    "started": "2026-10-01T22:16:39",
+    "git_head": "d82fd2698b6afb5be5da590259ee9b3095ebcaee",
+    "mode": "full"
+  },
+  "algorithm": "sha256 over the file bytes with CRLF normalised to LF; paths relative to the repository root with forward slashes, sorted; the path set = every *.py under src/ and phases/, every result-producing step script of reproduce_all.STEPS and every project module those scripts import from outside src/ and phases/",
+  "files": {
+    "phases/__init__.py": {
+      "sha256_at_run": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "phases/phase1.py": {
+      "sha256_at_run": "9a29f0abb7d633d4865c9273dea6686bee6b844715759307798178489bbf7992"
+    },
+    "phases/phase2.py": {
+      "sha256_at_run": "11bbdba55bb19d88066fa2b8f9378266fdcf4505e076961ace3ff8a0cbca3054"
+    },
+    "phases/phase3.py": {
+      "sha256_at_run": "94544c8818b753701daac15bb0188a82eec62aada8003da982cd9e0c6c47ec98"
+    },
+    "phases/phase4.py": {
+      "sha256_at_run": "76c0b0bcacb5c1714df808c221df58dc71fd057ee9abd57470593a7b4a07070b"
+    },
+    "phases/phase5a.py": {
+      "sha256_at_run": "bd5c067cf43931269056d637fc33730803236ef3db040cd86c9b63e95614c303"
+    },
+    "phases/phase5b.py": {
+      "sha256_at_run": "f6dee37ced564b52ae89dddc5881aca088b31a4421c0a8787fb4535768770756"
+    },
+    "scripts/derive_dangerous.py": {
+      "sha256_at_run": "dbe3e3e164fb75ea765ebc9b1d90f39b3884c0688be6a001275c6ea880446fce"
+    },
+    "scripts/order_ladders.py": {
+      "sha256_at_run": "170f9bea20976e2a147a915da448f475ab63cc946d021c90d900fc2b61bcf5e3"
+    },
+    "scripts/run_phase0_tests.py": {
+      "sha256_at_run": "a50c25f4c8528150b7ae50f63cd3b9c9f88f3c0d415b243731c60e3e40b3cdeb"
+    },
+    "scripts/run_phase1.py": {
+      "sha256_at_run": "f089dad5fba779dc4fed5b76d6ce5159947c94946858e2b01d1e073ebabc5c9e"
+    },
+    "scripts/run_phase2.py": {
+      "sha256_at_run": "a96d0995e68eec2a19b560d537081d6671f78765f7fe72d6af43fd5ca00b638f"
+    },
+    "scripts/run_phase3.py": {
+      "sha256_at_run": "379092d85b76f76a3861d1be9adce68c5f92229520dc6e4b6a29b7c9cec19ee3"
+    },
+    "scripts/run_phase4.py": {
+      "sha256_at_run": "6b9d6bab8a20f1d5f09728ffaa4f4fba021fca30bf72ff58aded9f59cd2fa569"
+    },
+    "scripts/run_phase5a.py": {
+      "sha256_at_run": "ee46b18cc9db99cd239607e82df71fa5d71c0b1ecc353320762f414bb1135b5c"
+    },
+    "scripts/run_phase5b.py": {
+      "sha256_at_run": "034fdcbb918305b55d49495df9c4aacabd5d97bc768334d475ec8bb6277b1f75"
+    },
+    "scripts/run_real_data.py": {
+      "sha256_at_run": "342e679389c3d1f6b3baca2f21c3621a6bba8463808f2d53bc4cb27d93c3ffe5"
+    },
+    "src/__init__.py": {
+      "sha256_at_run": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "src/accelerators.py": {
+      "sha256_at_run": "bef1dcc9e6927b6ba69c1589add08f304180d41fd29e3a823cd186639009a8a7"
+    },
+    "src/asymptote.py": {
+      "sha256_at_run": "ee8865e3c5cabd5864261aa80a81d002a334aa463d4d7f77aefbd152a58f0608"
+    },
+    "src/config.py": {
+      "sha256_at_run": "46902427f50f6d4c5c150aafb59438821b32626267dfe543cb58180a0e2426f8"
+    },
+    "src/dangerous.py": {
+      "sha256_at_run": "7f7a0d25ca36f70fdb34bee0088d59fae6248f3d87646a4011fd8747033d0c41"
+    },
+    "src/datasets.py": {
+      "sha256_at_run": "3f1ba319c1b09bfe21178556029f5c8bff3f62d9844e74dbfe21f5ac975dc638"
+    },
+    "src/diagnostics.py": {
+      "sha256_at_run": "c1f646846e566813f379e603eed1ff377d2d7b3f6f9156e5377e9c3d51c06450"
+    },
+    "src/evaluation.py": {
+      "sha256_at_run": "a9dcaadbdab543545bf530ee8bc9415db20f0a4eb7530c3ce3ac9592fceeb308"
+    },
+    "src/generators.py": {
+      "sha256_at_run": "26e69bac297410d6d675895b7cdc84275f0dd3016b02064fe9c6daa698a2364e"
+    },
+    "src/horizons.py": {
+      "sha256_at_run": "a64b8f3d79401f1c7badb5b869607b06880a1206f1de2d3a4a88ac5a6cd2749f"
+    },
+    "src/panels.py": {
+      "sha256_at_run": "829e8adb2a13a3b94f2fd031ed4976fd5c843ecf3a6010242164de57367dd85b"
+    },
+    "src/pipeline.py": {
+      "sha256_at_run": "91b25b07526f2017bddaa82a077cef210949fe6c2da5e3536be068a21fd8ba95"
+    },
+    "src/plots.py": {
+      "sha256_at_run": "bd11c9a2991ac0e7c40c06bbb1ef1b0e5fdc723394594b2a873331d836a2129f"
+    },
+    "src/trajectories.py": {
+      "sha256_at_run": "1bc58b639c14c5265c8277c81864128893dbfd572ebd0dee6a4a0a5e35f75ed3"
+    },
+    "src/trivial.py": {
+      "sha256_at_run": "ca7a48d9bee88fb1de4268bf60c228206b263cc5096fb20f577a7304673080f6"
+    },
+    "tests/test_accelerators.py": {
+      "sha256_at_run": "ea4d2ed1d834a876e13a72de5070df77d8b626f48c686d02fb5cd3a7362122e5"
+    },
+    "tests/test_input_dependence.py": {
+      "sha256_at_run": "d70777197ea4cda8032339bce597375277d2c02f4057eca5d7a99102ff8626b8"
+    }
+  }
+}
