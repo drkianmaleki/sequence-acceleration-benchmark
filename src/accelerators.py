@@ -1,7 +1,15 @@
 """
 accelerators.py
 ===============
-All 51 sequence-acceleration methods organised by family.
+The evaluated sequence-acceleration methods, organised in families.  The
+accelerator roster is every entry of METHODS that is not a trivial comparator
+(src.pipeline.ACCEL_METHODS; its size is len(ACCEL_METHODS), never a literal);
+the trivial comparators of redesign v2 (src/trivial.py) are registered
+alongside so that every table shows them, and METHOD_NAMES lists everything
+registered.  The Weniger delta pair (weniger_d1 / weniger_d2) was
+retired from the roster in Prompt 5B: after the Prompt-5A correction it is
+numerically identical to levin_t1 / levin_t2 (tests/test_accelerators.py
+asserts the identity); the implementation is kept under RETIRED_METHODS.
 
 Each accelerator has the unified signature:
     method(seq, indices, future_x, cfg) -> float
@@ -11,6 +19,7 @@ where
     indices  : corresponding integer indices (same length as seq)
     future_x : int, the far-future index to predict
     cfg      : dict with at least keys 'ridge', 'L_inf', 'denom_tol'
+               ('L_inf' is the ASSUMED asymptote L_hat; there is no default)
 
 Return value is the scalar prediction, or np.nan on failure.
 
@@ -42,6 +51,7 @@ import numpy as np
 from typing import List
 from scipy.optimize import curve_fit
 from scipy.special import comb as sp_comb
+from scipy.special import poch as sp_poch
 
 # ── Internal helpers ───────────────────────────────────────────────────────────
 
@@ -58,6 +68,21 @@ def _to_arrays(seq, indices):
     return np.asarray(seq, dtype=float), np.asarray(indices, dtype=float)
 
 
+def _assumed_L(cfg: dict) -> float:
+    """The ASSUMED asymptote L_hat handed to the method under cfg['L_inf'].
+
+    Redesign v2: there is no default.  The rejected design silently fell back
+    to 0.01, which was also the true shared asymptote; a missing key now
+    fails loudly.  L_hat comes from src.asymptote.assumed_asymptote(); methods
+    never receive L_true except in the labelled oracle mode.
+    """
+    try:
+        return float(cfg["L_inf"])
+    except KeyError:
+        raise KeyError("cfg['L_inf'] (the assumed asymptote L_hat) is required; "
+                       "build cfg via src.evaluation.build_cfg or set it explicitly")
+
+
 def _normalise_x(x_raw: np.ndarray, future_x: float):
     """Map x_raw to [0,1] and scale future_x accordingly."""
     x0, x1 = x_raw[0], x_raw[-1]
@@ -70,11 +95,6 @@ def _normalise_x(x_raw: np.ndarray, future_x: float):
 # =============================================================================
 # FAMILY 1 — Baselines
 # =============================================================================
-
-def accel_current_value(seq, indices, future_x: float, cfg: dict) -> float:
-    """Last observed value — the hard baseline every method must beat."""
-    return float(seq[-1])
-
 
 def accel_linear(seq, indices, future_x: float, cfg: dict) -> float:
     """Linear extrapolation: fit s = a + b*n and evaluate at future_x."""
@@ -94,7 +114,7 @@ def accel_log_linear(seq, indices, future_x: float, cfg: dict) -> float:
     Fits log(s - L_est) vs log(n) and returns L + exp(fit) at future_x.
     """
     y, x = _to_arrays(seq, indices)
-    L_est = cfg.get("L_inf", 0.01)
+    L_est = _assumed_L(cfg)
     shifted = y - L_est
     if np.any(shifted <= 0):
         return np.nan
@@ -142,7 +162,7 @@ def _fit_richardson(x: np.ndarray, y: np.ndarray, n_terms: int,
     """
     Fit s(n) = L + c1/n^a1 [+ c2/n^a2 [+ c3/n^a3]] by nonlinear LS.
     """
-    L0 = cfg.get("L_inf", 0.01)
+    L0 = _assumed_L(cfg)
     x_safe = np.maximum(x, 1.0)
 
     if n_terms == 1:
@@ -198,7 +218,7 @@ def _richardson_fixed(seq, indices, future_x: float, cfg: dict,
                       alpha: float) -> float:
     """Richardson with fixed exponent: fits L + c/n^alpha by linear LS."""
     y, x = _to_arrays(seq, indices)
-    L0 = cfg.get("L_inf", 0.01)
+    L0 = _assumed_L(cfg)
     x_s = np.maximum(x, 1.0)
     phi = 1.0 / x_s ** alpha
     A = np.column_stack([np.ones_like(phi), phi])
@@ -246,7 +266,7 @@ def _parametric_fit(seq, indices, future_x: float, cfg: dict,
 
 def accel_single_exp_fit(seq, indices, future_x: float, cfg: dict) -> float:
     """Fit L + A*exp(-lambda*n) by nonlinear LS."""
-    L0 = cfg.get("L_inf", 0.01)
+    L0 = _assumed_L(cfg)
     def model(n, L, A, lam): return L + A * np.exp(-lam * n)
     return _parametric_fit(seq, indices, future_x, cfg, model,
                            p0=[L0, 0.5, 0.05],
@@ -255,7 +275,7 @@ def accel_single_exp_fit(seq, indices, future_x: float, cfg: dict) -> float:
 
 def accel_double_exp_fit(seq, indices, future_x: float, cfg: dict) -> float:
     """Fit L + A1*exp(-l1*n) + A2*exp(-l2*n) by nonlinear LS."""
-    L0 = cfg.get("L_inf", 0.01)
+    L0 = _assumed_L(cfg)
     def model(n, L, A1, l1, A2, l2):
         return L + A1 * np.exp(-l1 * n) + A2 * np.exp(-l2 * n)
     return _parametric_fit(seq, indices, future_x, cfg, model,
@@ -265,7 +285,7 @@ def accel_double_exp_fit(seq, indices, future_x: float, cfg: dict) -> float:
 
 def accel_rational_fit(seq, indices, future_x: float, cfg: dict) -> float:
     """Fit L + A/(1 + B*n) by nonlinear LS."""
-    L0 = cfg.get("L_inf", 0.01)
+    L0 = _assumed_L(cfg)
     def model(n, L, A, B): return L + A / (1.0 + B * n)
     return _parametric_fit(seq, indices, future_x, cfg, model,
                            p0=[L0, 0.5, 0.05],
@@ -274,7 +294,7 @@ def accel_rational_fit(seq, indices, future_x: float, cfg: dict) -> float:
 
 def accel_log_fit(seq, indices, future_x: float, cfg: dict) -> float:
     """Fit L + A/log(n + e) by nonlinear LS."""
-    L0 = cfg.get("L_inf", 0.01)
+    L0 = _assumed_L(cfg)
     def model(n, L, A): return L + A / np.log(n + np.e)
     return _parametric_fit(seq, indices, future_x, cfg, model,
                            p0=[L0, 0.5],
@@ -545,6 +565,22 @@ def accel_pade_32(seq, indices, future_x: float, cfg: dict) -> float:
     """Pade [3,2]  [BRZ91]."""
     return _pade_fit(seq, indices, future_x, 3, 2, cfg)
 
+def accel_pade_33(seq, indices, future_x: float, cfg: dict) -> float:
+    """Pade [3,3]  [BRZ91]."""
+    return _pade_fit(seq, indices, future_x, 3, 3, cfg)
+
+def accel_pade_34(seq, indices, future_x: float, cfg: dict) -> float:
+    """Pade [3,4]  [BRZ91]."""
+    return _pade_fit(seq, indices, future_x, 3, 4, cfg)
+
+def accel_pade_44(seq, indices, future_x: float, cfg: dict) -> float:
+    """Pade [4,4]  [BRZ91]."""
+    return _pade_fit(seq, indices, future_x, 4, 4, cfg)
+
+def accel_pade_45(seq, indices, future_x: float, cfg: dict) -> float:
+    """Pade [4,5]  [BRZ91]."""
+    return _pade_fit(seq, indices, future_x, 4, 5, cfg)
+
 
 # =============================================================================
 # FAMILY 8 — Levin Transforms  [LE73, WE89]
@@ -564,10 +600,19 @@ def _levin_transform(seq, indices, order: int, variant: str,
 
     with  beta(j,k) = (n0+j+1)^{k-1}  for k > 1, else 1.0
 
-    Remainder estimates (variants):
-        't': w_n = Delta(s_n) = s_{n+1} - s_n
-        'u': w_n = (n+1) * Delta(s_n)
+    Remainder estimates (variants; the names are this codebase's, the
+    correspondence to Weniger 1989 is given so the two families can be compared):
+        't': w_n = Delta(s_n) = s_{n+1} - s_n     the FORWARD-difference remainder
+             (Weniger's d~-type, eq. (7.3-6) with the difference taken forward;
+             not the backward difference s_n - s_{n-1} of Levin's original t)
+        'u': w_n = (n+1) * Delta(s_n)              Levin's u-type with the same
+             forward difference
         'v': w_n = Delta(s_n)*Delta(s_{n+1}) / (Delta(s_{n+1}) - Delta(s_n))
+             the ratio-of-differences (v-type) form
+    With the power weight beta(j,k) = (n0+j+1)^(k-1) the 't' variant of order
+    k <= 2 coincides with Weniger's delta transformation of the same order
+    (whose Pochhammer weight (n0+j+1)_(k-1) equals the power for k <= 2);
+    see _weniger_delta.  Names unchanged; no numerical change was made.
 
     Point counts per variant:
         't', 'u': need = order + 2   (order+1 diffs from order+2 values)
@@ -678,9 +723,28 @@ def accel_levin_v2(seq, indices, future_x: float, cfg: dict) -> float:
 
 def _weniger_delta(seq, indices, order: int, tol: float = 1e-14) -> float:
     """
-    Weniger delta transformation.
-    Uses the sequence values themselves as remainder estimates: w_n = s_n.
-    Same formula as Levin with w_n = s_n.  [WE89]
+    Weniger delta transformation of order k (d-type remainder estimate)  [WE89].
+
+        delta_k = N_k / D_k,
+        N_k = sum_{j=0}^{k} (-1)^j C(k,j) (n0+j+1)_{k-1} s_{n+j} / w_{n+j}
+        D_k = sum_{j=0}^{k} (-1)^j C(k,j) (n0+j+1)_{k-1}         / w_{n+j}
+
+    with the remainder estimate  w_n = Delta(s_n) = s_{n+1} - s_n  and the
+    Pochhammer weight (x)_{k-1} = x (x+1) ... (x+k-2) (scipy.special.poch;
+    equal to the power x^{k-1} for k <= 2).  The last order+2 window values
+    supply the order+1 differences.  A remainder estimate below tol gives NaN.
+
+    Correction (2026-09, redesign v2 Prompt 5A): the previous implementation
+    used w_n = s_n, so s_n cancelled in coeff * s_n and the numerator reduced
+    to the k-th difference of a degree-(k-1) polynomial, identically zero
+    for k = 1, 2; weniger_d1 / weniger_d2 returned 0 for every input.
+
+    Retired from the roster (Prompt 5B): for k <= 2 the Pochhammer weight
+    equals the power weight of _levin_transform(..., 't'), which uses the same
+    forward-difference remainder, so the corrected weniger_d1 / weniger_d2 are
+    identical to levin_t1 / levin_t2 to machine precision
+    (tests/test_accelerators.py::test_weniger_equals_levin_t).  The function
+    and its two wrappers are kept (RETIRED_METHODS) and tested, not evaluated.
     """
     need = order + 2
     if len(seq) < need:
@@ -690,14 +754,18 @@ def _weniger_delta(seq, indices, order: int, tol: float = 1e-14) -> float:
     idx = np.asarray(indices[-need:], dtype=float)
     n0  = float(idx[0])
     k   = order
+    w   = np.diff(s)                    # d-type remainder estimates, length order+1
+
+    if len(w) < k + 1:
+        return np.nan
 
     N_num = 0.0
     D_num = 0.0
     for j in range(k + 1):
         sign  = (-1.0) ** j
         binom = float(sp_comb(k, j, exact=True))
-        beta  = (n0 + j + 1.0) ** (k - 1) if k > 1 else 1.0
-        wj    = s[j]
+        beta  = float(sp_poch(n0 + j + 1.0, k - 1))
+        wj    = w[j]
         if abs(wj) < tol:
             return np.nan
         coeff = sign * binom * beta / wj
@@ -959,6 +1027,9 @@ def accel_stability_weighted(seq, indices, future_x: float,
     """
     Stability-weighted average over the same pool as the median ensemble.
     Weight = 1 / (shift_IQR + epsilon); consistent methods get higher weight.
+    The weight is 1 / (window-shift IQR + 1e-6), a property of each pool
+    member's sensitivity to the window start; it has nothing to do with the
+    retired composite stability score S of the evaluation.
     """
     pool_fns = [
         accel_richardson_1, accel_shanks_1, accel_shanks_2, accel_shanks_3,
@@ -989,8 +1060,8 @@ def accel_best_shanks_wynn(seq, indices, future_x: float,
                            cfg: dict) -> float:
     """
     Runtime selector: return the Shanks or Wynn-epsilon estimate with
-    the smallest window-shift IQR.  Falls back to current_value if all
-    are invalid.
+    the smallest window-shift IQR.  Falls back to the last observed value
+    if all are invalid.
     """
     candidates = {
         "sh1": accel_shanks_1, "sh2": accel_shanks_2, "sh3": accel_shanks_3,
@@ -1019,7 +1090,6 @@ def accel_best_shanks_wynn(seq, indices, future_x: float,
 
 METHODS = {
     # Family 1 — Baselines
-    "current_value":      accel_current_value,
     "linear":             accel_linear,
     "log_linear":         accel_log_linear,
     "geom_avg_diff":      accel_geom_avg_diff,
@@ -1057,6 +1127,10 @@ METHODS = {
     "pade_23":            accel_pade_23,
     "pade_31":            accel_pade_31,
     "pade_32":            accel_pade_32,
+    "pade_33":            accel_pade_33,
+    "pade_34":            accel_pade_34,
+    "pade_44":            accel_pade_44,
+    "pade_45":            accel_pade_45,
     # Family 8 — Levin
     "levin_t1":           accel_levin_t1,
     "levin_t2":           accel_levin_t2,
@@ -1064,9 +1138,7 @@ METHODS = {
     "levin_u2":           accel_levin_u2,
     "levin_v1":           accel_levin_v1,
     "levin_v2":           accel_levin_v2,
-    # Family 9 — Weniger
-    "weniger_d1":         accel_weniger_d1,
-    "weniger_d2":         accel_weniger_d2,
+    # (Family 9, Weniger, retired in Prompt 5B: see RETIRED_METHODS below)
     # Family 10 — Brezinski Theta
     "brezinski_theta1":   accel_brezinski_theta1,
     "brezinski_theta2":   accel_brezinski_theta2,
@@ -1084,4 +1156,19 @@ METHODS = {
     "best_shanks_wynn":   accel_best_shanks_wynn,
 }
 
+# Family 14 — Trivial comparators (redesign v2, src/trivial.py), registered
+# as methods so every table shows them next to the accelerators.  The last
+# observed value is one of them (last_value); it is a comparator, not an
+# accelerator, and src.pipeline.ACCEL_METHODS excludes all of them.
+from src.trivial import TRIVIAL_METHODS as _TRIVIAL_METHODS, ORACLE_METHODS  # noqa: E402,F401
+
+METHODS.update(_TRIVIAL_METHODS)
+
 METHOD_NAMES = list(METHODS.keys())
+
+# Implemented, tested, not evaluated: the Weniger delta pair is numerically
+# identical to levin_t1 / levin_t2 for orders 1 and 2 (see _weniger_delta).
+RETIRED_METHODS = {
+    "weniger_d1": accel_weniger_d1,
+    "weniger_d2": accel_weniger_d2,
+}

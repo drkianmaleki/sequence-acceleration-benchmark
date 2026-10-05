@@ -1,0 +1,24 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the tested environment
+        run: pip install -r requirements-lock.txt
+      - name: Tests
+        run: pytest -q
+      - name: Code fingerprint of the reported run
+        run: python scripts/run_code_fingerprint.py --check
+      - name: Every table regenerates from the committed results
+        run: python scripts/check_tables.py
+      - name: The main-text tables build from the fragments
+        run: python scripts/build_paper_tables.py --selftest

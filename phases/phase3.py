@@ -1,81 +1,69 @@
 """
 phase3.py
 =========
-Phase 3 — Adaptive Selector Pipeline.
+Phase 3 — Adaptive Selector Pipeline (redesign v2, descriptive).
 
-Loads Phase 2 data (no new simulations) and builds, evaluates, and
-validates a complete adaptive method selector.
+Loads Phase 2 data (no new simulations) and evaluates a set of method
+selectors and a regime classifier.  The cascades' thresholds are fixed
+constants, so there is no cross-validation to run: the per-regime panel
+(phase3_regime_results.csv) is the per-family evidence, and the six held-out
+families of Phase 5a are the out-of-sample test.
 
-Three components
-----------------
-1. Selector comparison
-   Seven selectors ranging from fixed baselines to a full adaptive
-   cascade are evaluated on all Phase 2 grid points.
-   Metric: mean achieved stability across all (regime, obs_idx, noise,
-   horizon) combinations.
-
-2. Regime fingerprinting classifier
-   A simple decision-tree classifier predicts the convergence regime
-   from the six trajectory features.  Accuracy is reported per regime.
-   Confusable regime pairs are identified.
-
-3. Leave-one-regime-out cross-validation
-   The Phase 2 two-rule cascade and the Phase 3 enhanced cascade are
-   re-derived with one regime held out, then tested on that regime.
-   This measures whether the rules generalise beyond the regimes used
-   to set the thresholds.
-
-Selectors evaluated
+Selector evaluation
 -------------------
-fixed_current     always use current_value  (floor)
-fixed_richardson  always use richardson_1   (Phase 2 reference)
-fixed_rational    always use rational_fit   (short-horizon Phase 1 winner)
-fixed_single_exp  always use single_exp_fit (long-horizon Phase 1 winner)
+A selector assigns one method to each cell (regime, obs_idx, noise,
+target_g) from the cell's features (features averaged over the cell's seeds;
+the enhanced cascade also reads the cell's n_f).  It is evaluated per
+record: for every record of the cell, the chosen method's record from
+phase2_records.csv.  Its result is the descriptive panel
+(src.panels.error_panel) of those records -- validity and catastrophe rate
+over all of them; mean / sd / median / q25 / q75 / p90 error over the valid
+ones, labelled "conditional on validity"; n_valid / n_total; win rate vs the
+last value.  An invalid choice stays invalid: there is no fallback of any
+kind.  The ``oracle`` selector picks, per cell, the candidate with the
+lowest cell-median error (a hindsight reference, labelled as such).  After
+the evaluation a warning is printed when the validity rate differs between
+selectors by more than VALIDITY_WARN_TOL at any horizon; the comparison is
+written regardless.
+
+Selectors
+---------
+fixed_last        always use last_value      (the trivial floor)
+fixed_richardson  always use richardson_1    (Phase 2 reference)
+fixed_rational    always use rational_fit    (short-horizon Phase 1 winner)
+fixed_single_exp  always use single_exp_fit  (long-horizon Phase 1 winner)
 phase2_cascade    Rules 1+2 from Phase 2, default = richardson_1
 enhanced_cascade  Rules 1-4, horizon-aware default (Phase 3 contribution)
-oracle            best available method at each grid point (upper bound)
+oracle            lowest cell-median error among the candidates (hindsight)
 
-Enhanced cascade logic
-----------------------
-Step 1. Horizon-aware default:
-    horizon <= 300  ->  rational_fit
-    horizon >  300  ->  single_exp_fit
-
-Step 2. Rule A  (flat trajectory):
-    log_log_slope > -0.10  ->  rational_fit   (precision 85.8 %)
-
-Step 3. Rule B  (poor power-law fit):
-    richardson_r2  < 0.50  ->  rational_fit   (recall   77.2 %)
-
-Step 4. Rule C  (step/staircase signature):
-    curvature_idx  > 0.50  AND
-    diff_ratio_cv  < 0.05  ->  weniger_d2
-
-Step 5. Rule D  (oscillatory with high ratio variation):
-    oscillation_idx > 0.30  AND
-    diff_ratio_cv   > 0.20  ->  log_linear
-
-Step 6. Return default from Step 1.
+Redesign v2
+-----------
+  * Cells are keyed by target_g (gap stratum); each carries n_f, achieved_g
+    and capped.  Capped cells are excluded from every pooled comparison;
+    they are listed in phase3_capped_cells.csv.
+  * Selector candidates are the Phase-2 pool (src.pipeline.PHASE2_POOL;
+    Report-2 review, decision 4).  constant_assumed and constant_oracle are
+    evaluated in Phase 2, never a candidate, never in the oracle selector.
+  * The enhanced cascade's horizon-aware default uses the cell's actual
+    n_f (rational_fit when n_f <= 300, single_exp_fit otherwise).
+  * Training data are the core regimes only (Phase 2 output).
 
 Input files (from results/phase2/)
 -----------------------------------
-    phase2_sweep_aggregated.csv
-    phase2_features.csv
+    phase2_sweep_aggregated.csv     per-cell panels (the candidates' cell-median errors)
+    phase2_features.csv             window features per seed
+    phase2_records.csv              per-record errors (git-ignored; regenerated by Phase 2)
 
 Output files (to results/phase3/)
 ----------------------------------
-    phase3_selector_comparison.csv  selector x horizon mean stability
-    phase3_regime_results.csv       per-regime achieved stability
-    phase3_cv_results.csv           leave-one-regime-out CV
+    phase3_selector_comparison.csv  selector x stratum: the panel of the chosen records
+    phase3_regime_results.csv       selector x regime x stratum: the same (the per-family evidence)
     phase3_regime_classifier.csv    regime classification accuracy
-    figure_p3_01_selector_comparison.png
-    figure_p3_02_improvement_map.png
-    figure_p3_03_classifier_accuracy.png
-    figure_p3_04_obs_depth.png
-    figure_p3_05_cv_summary.png
+    phase3_capped_cells.csv         capped cells (excluded above) with the chosen method
+    figure_p3_01 ... figure_p3_04
 
 Author : Kian Maleki
-Date   : 2026-05-24
+Date   : 2026-05-24 (v1), 2026-09-19 (redesign v2), 2026-09-27 (descriptive reporting)
 """
 
 import os, math, warnings
@@ -86,38 +74,37 @@ from typing import Dict, List, Tuple, Optional
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-import matplotlib.colors as mcolors
-from matplotlib.gridspec import GridSpec
 
 warnings.filterwarnings('ignore')
 
+import src.config as CFG_MOD
+from src.panels import PANEL_COLS, error_panel
+from src.pipeline import exclude_capped
+from phases.phase2 import FEATURE_COLS, RANK_POOL, WINDOW_KEYS
+
 # ── Constants ──────────────────────────────────────────────────────────────────
 
-PHASE2_METHODS = [
-    'current_value', 'richardson_1', 'richardson_a10',
-    'single_exp_fit', 'rational_fit', 'pade_22',
-    'log_linear', 'weniger_d2', 'anderson_1',
-]
-
-FEATURE_COLS = [
-    'log_log_slope', 'curvature_idx', 'oscillation_idx',
-    'noise_var', 'richardson_r2', 'diff_ratio_cv',
-]
+CANDIDATES = list(RANK_POOL)          # oracle comparator never a candidate
+GRID_KEYS  = ['regime', 'obs_idx', 'noise', 'target_g']
+ERR_PREFIX = 'med_error__'            # grid column of a candidate's cell-median error
+VALIDITY_WARN_TOL = 0.001             # validity-rate spread across selectors that triggers the warning
+RATE_COLS = ('valid_rate', 'cat_rate', 'win_rate_vs_last')
 
 METHOD_COLOURS = {
-    'current_value':  '#888888',
-    'richardson_1':   '#f4a261',
-    'richardson_a10': '#e76f51',
-    'single_exp_fit': '#2196f3',
-    'rational_fit':   '#1565c0',
-    'pade_22':        '#e91e63',
-    'log_linear':     '#00897b',
-    'weniger_d2':     '#9c27b0',
-    'anderson_1':     '#795548',
+    'last_value':       '#888888',
+    'richardson_1':     '#f4a261',
+    'richardson_a10':   '#e76f51',
+    'single_exp_fit':   '#2196f3',
+    'rational_fit':     '#1565c0',
+    'pade_22':          '#e91e63',
+    'log_linear':       '#00897b',
+    'levin_t2':         '#9c27b0',
+    'anderson_1':       '#795548',
+    'constant_assumed': '#212121',
 }
 
 SELECTOR_COLOURS = {
-    'fixed_current':    '#bbbbbb',
+    'fixed_last':       '#bbbbbb',
     'fixed_richardson': '#f4a261',
     'fixed_rational':   '#1565c0',
     'fixed_single_exp': '#2196f3',
@@ -133,50 +120,59 @@ FIG_DPI = 150
 # 1.  DATA LOADING
 # =============================================================================
 
-def load_phase2(phase2_dir: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """Load Phase 2 sweep_aggregated and features CSVs."""
+def load_phase2(phase2_dir: str) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Load the Phase 2 aggregate, features and per-record CSVs."""
     agg  = pd.read_csv(os.path.join(phase2_dir, 'phase2_sweep_aggregated.csv'))
     feat = pd.read_csv(os.path.join(phase2_dir, 'phase2_features.csv'))
-    return agg, feat
+    rec_path = os.path.join(phase2_dir, 'phase2_records.csv')
+    if not os.path.exists(rec_path):
+        raise FileNotFoundError(f'{rec_path} not found (git-ignored); re-run scripts/run_phase2.py')
+    rec = pd.read_csv(rec_path)
+    if 'target_g' not in agg.columns or 'E_last' not in rec.columns:
+        raise ValueError('Phase 2 output predates the descriptive schema; re-run scripts/run_phase2.py')
+    return agg, feat, rec
 
 
 def build_grid(df_agg: pd.DataFrame,
                df_feat: pd.DataFrame) -> pd.DataFrame:
     """
-    Build the evaluation grid: one row per (regime, obs_idx, noise, future_idx).
+    Build the evaluation grid: one row per cell (regime, obs_idx, noise, target_g).
     Each row contains:
-      - stability of every PHASE2_METHODS method (as columns)
-      - mean feature values (averaged across seeds)
-      - best_method  : method with highest stability at this grid point
-      - best_stability: that method's stability
+      - n_f, achieved_g, capped for the cell
+      - mean feature values (averaged across the cell's seeds)
+      - med_error__<candidate>: every candidate's cell-median error over its
+        valid records (used only by the oracle selector)
+      - oracle_method: the candidate with the lowest cell-median error (ties
+        by name); when no candidate has a valid record the pick is immaterial
+        (every choice is invalid) and the first candidate is recorded
     """
-    # Pivot stability to wide format
-    pivot = (df_agg.pivot_table(
-                 index=['regime', 'obs_idx', 'noise', 'future_idx'],
-                 columns='method',
-                 values='stability')
-              .reset_index())
+    sub = df_agg[df_agg['method'].isin(CANDIDATES)]
+    pivot = (sub.pivot_table(index=GRID_KEYS, columns='method', values='med_error')
+                .reset_index())
     pivot.columns.name = None
+    pivot = pivot.rename(columns={m: ERR_PREFIX + m for m in CANDIDATES if m in pivot.columns})
+    for m in CANDIDATES:
+        if ERR_PREFIX + m not in pivot.columns:
+            pivot[ERR_PREFIX + m] = float('nan')
 
-    # Ensure all PHASE2_METHODS columns exist
-    for m in PHASE2_METHODS:
-        if m not in pivot.columns:
-            pivot[m] = float('nan')
+    meta = (sub.groupby(GRID_KEYS)
+               .agg(n_f=('n_f', 'first'), achieved_g=('achieved_g', 'first'),
+                    capped=('capped', 'max'))
+               .reset_index())
+    grid = pivot.merge(meta, on=GRID_KEYS, how='left')
 
-    # Identify best method at each grid point
-    method_cols = [m for m in PHASE2_METHODS if m in pivot.columns]
-    pivot['best_stability'] = pivot[method_cols].max(axis=1)
-    pivot['best_method']    = pivot[method_cols].idxmax(axis=1)
-
-    # Mean features across seeds
     feat_avg = (df_feat.drop(columns=['seed'])
-                        .groupby(['regime', 'obs_idx', 'noise'])
+                        .groupby(WINDOW_KEYS)
                         .mean()
                         .reset_index())
+    grid = grid.merge(feat_avg, on=WINDOW_KEYS, how='left')
 
-    grid = pivot.merge(feat_avg,
-                       on=['regime', 'obs_idx', 'noise'],
-                       how='left')
+    def _oracle(row) -> str:
+        errs = [(float(row[ERR_PREFIX + m]), m) for m in CANDIDATES]
+        finite = sorted((e, m) for e, m in errs if math.isfinite(e))
+        return finite[0][1] if finite else CANDIDATES[0]
+
+    grid['oracle_method'] = grid.apply(_oracle, axis=1)
     return grid
 
 
@@ -204,15 +200,20 @@ def _apply_phase2_cascade(row: pd.Series) -> str:
 def _apply_enhanced_cascade(row: pd.Series) -> str:
     """
     Phase 3 enhanced cascade.
-    Step 1: horizon-aware default.
+    Step 1: horizon-aware default (cell n_f <= 300 -> rational_fit,
+            otherwise single_exp_fit).
     Step 2: Rule A  (flat trajectory)
     Step 3: Rule B  (poor power-law fit)
     Step 4: Rule C  (staircase signature)
     Step 5: Rule D  (oscillatory + high ratio variation)
     Step 6: horizon-aware default.
     """
-    horizon = int(row.get('future_idx', 5000))
-    default = 'rational_fit' if horizon <= 300 else 'single_exp_fit'
+    n_f = row.get('n_f', float('nan'))
+    try:
+        n_f = float(n_f)
+    except (TypeError, ValueError):
+        n_f = float('nan')
+    default = 'rational_fit' if (math.isfinite(n_f) and n_f <= 300) else 'single_exp_fit'
 
     slope   = row.get('log_log_slope',   float('nan'))
     r2      = row.get('richardson_r2',   float('nan'))
@@ -220,35 +221,27 @@ def _apply_enhanced_cascade(row: pd.Series) -> str:
     osc     = row.get('oscillation_idx', float('nan'))
     d_cv    = row.get('diff_ratio_cv',   float('nan'))
 
-    # Rule A
     if math.isfinite(slope) and slope > -0.10:
         return 'rational_fit'
-
-    # Rule B
     if math.isfinite(r2) and r2 < 0.50:
         return 'rational_fit'
-
-    # Rule C — staircase signature
     if (math.isfinite(curv) and curv > 0.50
             and math.isfinite(d_cv) and d_cv < 0.05):
-        return 'weniger_d2'
-
-    # Rule D — oscillatory with high ratio variation
+        return 'levin_t2'
     if (math.isfinite(osc) and osc > 0.30
             and math.isfinite(d_cv) and d_cv > 0.20):
         return 'log_linear'
-
     return default
 
 
 SELECTORS = {
-    'fixed_current':    lambda row: 'current_value',
+    'fixed_last':       lambda row: 'last_value',
     'fixed_richardson': lambda row: 'richardson_1',
     'fixed_rational':   lambda row: 'rational_fit',
     'fixed_single_exp': lambda row: 'single_exp_fit',
     'phase2_cascade':   _apply_phase2_cascade,
     'enhanced_cascade': _apply_enhanced_cascade,
-    'oracle':           lambda row: row.get('best_method', 'richardson_1'),
+    'oracle':           lambda row: row['oracle_method'],
 }
 
 
@@ -256,197 +249,245 @@ SELECTORS = {
 # 3.  SELECTOR EVALUATION
 # =============================================================================
 
+def chosen_records(grid: pd.DataFrame, df_rec: pd.DataFrame, sel_fn) -> pd.DataFrame:
+    """
+    The chosen method's records for every cell of ``grid``: one row per
+    (cell, seed), taken from the per-record frame.  Every candidate has a
+    record on every cell, so the frame holds len(grid) x seeds rows; an
+    invalid chosen record stays invalid (no fallback).
+    """
+    choice = grid[GRID_KEYS].copy()
+    choice['method'] = [sel_fn(row) for _, row in grid.iterrows()]
+    recs = choice.merge(df_rec, on=GRID_KEYS + ['method'], how='left')
+    if recs['valid'].isna().any():
+        missing = recs.loc[recs['valid'].isna(), GRID_KEYS + ['method']].drop_duplicates()
+        raise ValueError(f'chosen method has no records on {len(missing)} cell(s):\n{missing.head()}')
+    return recs
+
+
+def _round_panel(panel: Dict[str, float]) -> Dict[str, float]:
+    """The written form of a panel: rates rounded to four decimals, errors as computed."""
+    return {k: (round(v, 4) if k in RATE_COLS and math.isfinite(v) else v) for k, v in panel.items()}
+
+
+def _panel_row(recs: pd.DataFrame) -> Dict[str, float]:
+    return _round_panel(error_panel(recs['error'], recs['valid'], recs['catastrophic'], recs['E_last']))
+
+
 def evaluate_selectors(grid: pd.DataFrame,
-                       out_dir: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
+                       df_rec: pd.DataFrame,
+                       out_dir: str) -> Tuple[pd.DataFrame, pd.DataFrame, bool]:
     """
-    Apply every selector to every grid point.
-    Returns:
-      df_comparison : mean stability per (selector, future_idx)
-      df_per_regime : mean stability per (selector, regime, future_idx)
+    Apply every selector to every cell and evaluate it per record.  Pooled
+    panels use the non-capped cells only; capped cells are written to a
+    separate file.  Returns (df_comparison, df_per_regime, validity_warned):
+      df_comparison : panel of the chosen records per (selector, target_g)
+      df_per_regime : panel of the chosen records per (selector, regime, target_g)
     """
-    comp_rows   = []
-    regime_rows = []
+    pooled = exclude_capped(grid)
+    comp_rows, regime_rows, capped_rows = [], [], []
+    raw_valid: Dict[float, Dict[str, float]] = {}      # unrounded valid_rate per (g, selector) for the warning
 
     for sel_name, sel_fn in SELECTORS.items():
-        grid_copy = grid.copy()
-        grid_copy['chosen_method'] = grid_copy.apply(sel_fn, axis=1)
+        recs = chosen_records(pooled, df_rec, sel_fn)
 
-        # Achieved stability = stability of the chosen method
-        def _achieved(row):
-            m = row['chosen_method']
-            return float(row[m]) if m in row and math.isfinite(row[m]) else float('nan')
+        for g, grp in recs.groupby('target_g'):
+            n_all = int((grid['target_g'] == g).sum())
+            n_cells = int(grp[GRID_KEYS].drop_duplicates().shape[0])
+            panel = error_panel(grp['error'], grp['valid'], grp['catastrophic'], grp['E_last'])
+            raw_valid.setdefault(float(g), {})[sel_name] = float(panel['valid_rate'])
+            comp_rows.append({'selector': sel_name, 'target_g': g, **_round_panel(panel),
+                              'n_cells': n_cells, 'n_capped_excluded': n_all - n_cells})
 
-        grid_copy['achieved_stability'] = grid_copy.apply(_achieved, axis=1)
+        for (regime, g), grp in recs.groupby(['regime', 'target_g']):
+            n_all = int(((grid['regime'] == regime) & (grid['target_g'] == g)).sum())
+            n_cells = int(grp[GRID_KEYS].drop_duplicates().shape[0])
+            regime_rows.append({'selector': sel_name, 'regime': regime, 'target_g': g,
+                                **_panel_row(grp),
+                                'n_cells': n_cells, 'n_capped_excluded': n_all - n_cells})
 
-        # Global per horizon
-        for fid, grp in grid_copy.groupby('future_idx'):
-            mean_stab = grp['achieved_stability'].mean()
-            comp_rows.append({
-                'selector':   sel_name,
-                'future_idx': fid,
-                'mean_stability': round(float(mean_stab), 4),
-                'n': len(grp),
-            })
-
-        # Per-regime per-horizon
-        for (regime, fid), grp in grid_copy.groupby(['regime', 'future_idx']):
-            ms = grp['achieved_stability'].mean()
-            regime_rows.append({
-                'selector':       sel_name,
-                'regime':         regime,
-                'future_idx':     fid,
-                'mean_stability': round(float(ms), 4),
+        cap = grid[grid['capped'] == 1]
+        for _, r in cap.iterrows():
+            chosen = sel_fn(r)
+            capped_rows.append({
+                'selector': sel_name, 'regime': r['regime'], 'obs_idx': r['obs_idx'],
+                'noise': r['noise'], 'target_g': r['target_g'], 'n_f': r['n_f'],
+                'achieved_g': r['achieved_g'], 'chosen_method': chosen,
+                'chosen_med_error': r.get(ERR_PREFIX + chosen, float('nan')),
             })
 
     df_comp   = pd.DataFrame(comp_rows)
     df_regime = pd.DataFrame(regime_rows)
+    df_capped = pd.DataFrame(capped_rows, columns=[
+        'selector', 'regime', 'obs_idx', 'noise', 'target_g', 'n_f', 'achieved_g',
+        'chosen_method', 'chosen_med_error'])
 
-    p = os.path.join(out_dir, 'phase3_selector_comparison.csv')
-    df_comp.to_csv(p, index=False)
-    print(f'  Saved: {p}  ({len(df_comp)} rows)')
+    # validity check: every selector's records are the same cells x seeds, so
+    # a validity gap between selectors is what the reader must weigh against
+    # the conditional error statistics.  The spread is taken on the unrounded
+    # rates; the table rounds only for writing.
+    warned = False
+    for g in sorted(raw_valid):
+        rates = raw_valid[g]
+        spread = max(rates.values()) - min(rates.values())
+        if spread > VALIDITY_WARN_TOL:
+            warned = True
+            detail = ', '.join(f"{sel} {vr:.4f}" for sel, vr in rates.items())
+            print(f'  WARNING: validity rate differs between selectors by {spread:.4f} at g = {g:g} '
+                  f'({detail}); the error statistics are conditional on validity -- read them '
+                  f'together with the validity rates')
 
-    p = os.path.join(out_dir, 'phase3_regime_results.csv')
-    df_regime.to_csv(p, index=False)
-    print(f'  Saved: {p}  ({len(df_regime)} rows)')
+    for df, name in ((df_comp, 'phase3_selector_comparison.csv'),
+                     (df_regime, 'phase3_regime_results.csv'),
+                     (df_capped, 'phase3_capped_cells.csv')):
+        p = os.path.join(out_dir, name)
+        df.to_csv(p, index=False)
+        print(f'  Saved: {p}  ({len(df)} rows)')
 
-    return df_comp, df_regime
-
-
-# =============================================================================
-# 4.  LEAVE-ONE-REGIME-OUT CROSS-VALIDATION
-# =============================================================================
-
-def cross_validate(grid: pd.DataFrame, out_dir: str) -> pd.DataFrame:
-    """
-    Leave-one-regime-out cross-validation for the Phase 2 cascade and the
-    enhanced cascade.
-
-    For each held-out regime:
-      - Compute the 'oracle choice' on the held-out regime.
-      - Apply the two cascades (rules fixed, not re-fitted — the thresholds
-        are interpretable constants, not data-driven fits).
-      - Report achieved stability on the held-out regime.
-
-    Because the cascade rules use fixed thresholds (not estimated from data),
-    this CV measures out-of-regime generalization rather than overfitting.
-    """
-    regimes = sorted(grid['regime'].unique())
-    cv_rows = []
-
-    for held_out in regimes:
-        test_grid = grid[grid['regime'] == held_out].copy()
-
-        for sel_name in ['phase2_cascade', 'enhanced_cascade', 'oracle',
-                          'fixed_richardson', 'fixed_single_exp']:
-            sel_fn = SELECTORS[sel_name]
-            test_grid['chosen'] = test_grid.apply(sel_fn, axis=1)
-
-            def _ach(row):
-                m = row['chosen']
-                return float(row[m]) if m in row and math.isfinite(row[m]) else float('nan')
-
-            achieved = test_grid.apply(_ach, axis=1).mean()
-            cv_rows.append({
-                'held_out_regime': held_out,
-                'selector':        sel_name,
-                'mean_stability':  round(float(achieved), 4),
-            })
-
-    df_cv = pd.DataFrame(cv_rows)
-    p = os.path.join(out_dir, 'phase3_cv_results.csv')
-    df_cv.to_csv(p, index=False)
-    print(f'  Saved: {p}  ({len(df_cv)} rows)')
-    return df_cv
+    return df_comp, df_regime, warned
 
 
 # =============================================================================
 # 5.  REGIME FINGERPRINTING CLASSIFIER
 # =============================================================================
 
-def regime_classifier(df_feat: pd.DataFrame, out_dir: str) -> pd.DataFrame:
-    """
-    Predict convergence regime from trajectory features using a decision tree.
-    Falls back to a k-nearest-neighbours implementation if scikit-learn is
-    unavailable.
+# One row of the classifier table is the seed-averaged feature vector of one
+# (regime, obs_idx, noise) cell, so seeds never straddle a fold boundary.  The
+# three protocols differ only in what a fold holds out; their accuracies are
+# reported side by side and never combined.
+CLASSIFIER_ROW = ('one row is the seed-averaged feature vector of one (regime, obs_idx, noise) cell '
+                  '(seeds never straddle a fold boundary)')
+CLASSIFIER_PROTOCOLS = {
+    'grouped_by_depth': dict(
+        group='obs_idx',
+        split_unit=(CLASSIFIER_ROW + '; GroupKFold with groups = obs_idx: every fold holds out all '
+                    'cells at one observation depth and trains on the cells at every other depth, so '
+                    'the same regime at adjacent depths remains in training and the protocol tests '
+                    'transfer across depth')),
+    'grouped_by_noise': dict(
+        group='noise',
+        split_unit=(CLASSIFIER_ROW + '; GroupKFold with groups = noise: every fold holds out all '
+                    'cells at one noise level and trains on the cells at every other noise level')),
+    'stratified_5fold_legacy': dict(
+        group=None,
+        split_unit=(CLASSIFIER_ROW + '; random stratified 5-fold over cells; cells of the same regime '
+                    'at adjacent depths may fall on both sides')),
+}
+PRIMARY_PROTOCOL = 'grouped_by_depth'
+CLASSIFIER_PARAMS = dict(max_depth=6, min_samples_leaf=3, random_state=42)
 
-    Reports per-regime accuracy and the top confusable pairs.
-    """
-    # Prepare feature matrix (averaged over seeds per grid point)
+
+def classifier_table(df_feat: pd.DataFrame) -> pd.DataFrame:
+    """The rows of the classifier: cell features averaged over seeds, cells
+    with any NaN feature dropped."""
     feat_avg = (df_feat.drop(columns=['seed'])
                         .groupby(['regime', 'obs_idx', 'noise'])
                         .mean()
                         .reset_index())
+    return feat_avg.dropna(subset=FEATURE_COLS).reset_index(drop=True)
 
-    valid = feat_avg.dropna(subset=FEATURE_COLS).copy()
-    if len(valid) < 20:
+
+def classifier_folds(table: pd.DataFrame, protocol: str) -> Tuple[List[Tuple[np.ndarray, np.ndarray]], str]:
+    """
+    The (train_idx, test_idx) folds of one protocol on a classifier table,
+    and a note.  Grouped protocols use GroupKFold with as many folds as there
+    are distinct group values (one group per fold); with fewer than three
+    distinct values the note says so, and with a single value the protocol
+    cannot be split (no folds).  The legacy protocol is the random stratified
+    split with min(5, smallest class count) folds, at least two.
+    """
+    try:
+        from sklearn.model_selection import GroupKFold, StratifiedKFold
+    except ImportError as exc:                     # scikit-learn is required
+        raise ImportError('phases.phase3.regime_classifier needs scikit-learn '
+                          '(pip install scikit-learn)') from exc
+    X = table[FEATURE_COLS].values
+    y = table['regime'].values
+    group = CLASSIFIER_PROTOCOLS[protocol]['group']
+    if group is None:
+        n_splits = max(2, min(5, int(pd.Series(y).value_counts().min())))
+        skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
+        return list(skf.split(X, y)), f'{n_splits} stratified folds'
+    groups = table[group].values
+    n_groups = int(pd.Series(groups).nunique())
+    if n_groups < 2:
+        return [], f'only {n_groups} distinct {group} value(s): the protocol cannot hold out a group'
+    folds = list(GroupKFold(n_splits=n_groups).split(X, y, groups))
+    note = (f'only {n_groups} distinct {group} values: {n_groups} folds'
+            if n_groups < 3 else f'{n_groups} folds, one per {group}')
+    return folds, note
+
+
+def regime_classifier(df_feat: pd.DataFrame, out_dir: str) -> pd.DataFrame:
+    """
+    Predict the convergence regime from the trajectory features with a
+    decision tree (CLASSIFIER_PARAMS) under the three CLASSIFIER_PROTOCOLS.
+    Writes phase3_regime_classifier.csv with a leading ``protocol`` column,
+    the per-regime rows (regime, n_samples, n_correct, accuracy,
+    top_confusion) and the ``__OVERALL__`` row of every protocol, the
+    ``split_unit`` sentence repeated on every row and a ``note`` column.
+    The overall accuracies are printed side by side.
+    """
+    from sklearn.tree import DecisionTreeClassifier
+
+    table = classifier_table(df_feat)
+    if len(table) < 20 or table['regime'].nunique() < 2:
         print('  Regime classifier: insufficient valid data, skipped.')
         return pd.DataFrame()
 
-    X = valid[FEATURE_COLS].values
-    y = valid['regime'].values
+    X = table[FEATURE_COLS].values
+    y = table['regime'].values
     regimes = sorted(set(y))
+    rows, overall = [], {}
 
-    # ── Try scikit-learn DecisionTree ─────────────────────────────────────────
-    clf_name = 'unknown'
-    try:
-        from sklearn.tree import DecisionTreeClassifier
-        from sklearn.model_selection import StratifiedKFold
-
-        clf = DecisionTreeClassifier(max_depth=6, min_samples_leaf=3,
-                                     random_state=42)
-        # 5-fold stratified CV
-        skf  = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-        preds = np.empty(len(y), dtype=object)
-        for train_idx, test_idx in skf.split(X, y):
-            clf.fit(X[train_idx], y[train_idx])
-            preds[test_idx] = clf.predict(X[test_idx])
-        clf_name = 'DecisionTree(depth=6, 5-fold CV)'
-
-    except ImportError:
-        # Fallback: 1-nearest-neighbour (no sklearn required)
-        from scipy.spatial.distance import cdist
-        preds = np.empty(len(y), dtype=object)
-        n = len(X)
-        for i in range(n):
-            X_train = np.delete(X, i, axis=0)
-            y_train = np.delete(y, i, axis=0)
-            dists   = cdist(X[[i]], X_train, metric='euclidean')[0]
-            preds[i] = y_train[np.argmin(dists)]
-        clf_name = '1-NN (leave-one-out, scipy fallback)'
-
-    # Per-regime accuracy
-    rows = []
-    for regime in regimes:
-        mask   = y == regime
-        n_tot  = int(mask.sum())
-        n_corr = int((preds[mask] == regime).sum())
-        acc    = n_corr / n_tot if n_tot > 0 else float('nan')
-        # Most common wrong prediction
-        wrong  = preds[mask & (preds != y)]
-        top_wrong = (pd.Series(wrong).value_counts().index[0]
-                     if len(wrong) > 0 else 'none')
+    for protocol, spec in CLASSIFIER_PROTOCOLS.items():
+        folds, note = classifier_folds(table, protocol)
+        preds = np.full(len(y), None, dtype=object)
+        if folds:
+            for train_idx, test_idx in folds:
+                clf = DecisionTreeClassifier(**CLASSIFIER_PARAMS)
+                clf.fit(X[train_idx], y[train_idx])
+                preds[test_idx] = clf.predict(X[test_idx])
+        scored = preds != None   # noqa: E711  (rows that received a prediction)
+        for regime in regimes:
+            mask = (y == regime) & scored
+            n_tot = int(mask.sum())
+            n_corr = int((preds[mask] == regime).sum())
+            wrong = preds[mask & (preds != y)]
+            rows.append({
+                'protocol':      protocol,
+                'regime':        regime,
+                'n_samples':     n_tot,
+                'n_correct':     n_corr,
+                'accuracy':      round(n_corr / n_tot, 3) if n_tot else float('nan'),
+                'top_confusion': (pd.Series(wrong).value_counts().index[0] if len(wrong) else 'none'),
+                'split_unit':    spec['split_unit'],
+                'note':          note,
+            })
+        n_scored = int(scored.sum())
+        acc = float((preds[scored] == y[scored]).mean()) if n_scored else float('nan')
+        overall[protocol] = acc
         rows.append({
-            'regime':        regime,
-            'n_samples':     n_tot,
-            'n_correct':     n_corr,
-            'accuracy':      round(acc, 3),
-            'top_confusion': top_wrong,
+            'protocol':      protocol,
+            'regime':        '__OVERALL__',
+            'n_samples':     n_scored,
+            'n_correct':     int((preds[scored] == y[scored]).sum()) if n_scored else 0,
+            'accuracy':      round(acc, 3) if math.isfinite(acc) else float('nan'),
+            'top_confusion': '-',
+            'split_unit':    spec['split_unit'],
+            'note':          note,
         })
 
-    overall_acc = float((preds == y).mean())
-    rows.append({
-        'regime':    '__OVERALL__',
-        'n_samples': len(y),
-        'n_correct': int((preds == y).sum()),
-        'accuracy':  round(overall_acc, 3),
-        'top_confusion': '-',
-    })
-
-    df_clf = pd.DataFrame(rows).sort_values('accuracy', ascending=True)
+    df_clf = pd.DataFrame(rows, columns=['protocol', 'regime', 'n_samples', 'n_correct', 'accuracy',
+                                         'top_confusion', 'split_unit', 'note'])
     p = os.path.join(out_dir, 'phase3_regime_classifier.csv')
     df_clf.to_csv(p, index=False)
-    print(f'  Saved: {p}  (classifier: {clf_name})')
-    print(f'  Overall regime classification accuracy: {overall_acc:.3f}')
+    print(f'  Saved: {p}  (DecisionTree {CLASSIFIER_PARAMS}; {len(table)} cells)')
+    print('  Overall regime classification accuracy, side by side (never combined):')
+    for protocol in CLASSIFIER_PROTOCOLS:
+        tag = '  <-- primary' if protocol == PRIMARY_PROTOCOL else ''
+        note = df_clf[(df_clf['protocol'] == protocol)]['note'].iloc[0]
+        print(f'    {protocol:<24} {overall[protocol]:.3f}   ({note}){tag}')
     return df_clf
 
 
@@ -460,48 +501,45 @@ def _save(fig, path: str):
     print(f'  Saved: {path}')
 
 
+COND = 'conditional on validity'
+
+
 def fig_p3_01_selector_comparison(df_comp: pd.DataFrame,
                                    out_dir: str) -> str:
-    """
-    Grouped bar chart: mean achieved stability per selector per horizon.
-    """
-    horizons   = sorted(df_comp['future_idx'].unique())
+    """Grouped bars: median error (conditional on validity) per selector per
+    stratum, the validity rate and n_valid/n_total printed on every bar."""
+    strata     = sorted(df_comp['target_g'].unique(), reverse=True)
     selectors  = list(SELECTORS.keys())
     n_sel      = len(selectors)
-    n_hor      = len(horizons)
+    n_hor      = len(strata)
 
-    fig, axes = plt.subplots(1, n_hor, figsize=(5 * n_hor, 7), sharey=True)
+    fig, axes = plt.subplots(1, n_hor, figsize=(5 * n_hor, 7), sharey=False)
     if n_hor == 1:
         axes = [axes]
 
-    for ax, fid in zip(axes, horizons):
-        sub = df_comp[df_comp['future_idx'] == fid].set_index('selector')
-        vals = [float(sub.loc[s, 'mean_stability'])
-                if s in sub.index else float('nan')
-                for s in selectors]
+    for ax, g in zip(axes, strata):
+        sub = df_comp[df_comp['target_g'] == g].set_index('selector')
+        vals = [float(sub.loc[s, 'med_error']) if s in sub.index else float('nan') for s in selectors]
         colours = [SELECTOR_COLOURS.get(s, '#999') for s in selectors]
-
-        bars = ax.bar(range(n_sel), vals, color=colours,
+        bars = ax.bar(range(n_sel), [v if math.isfinite(v) else 0.0 for v in vals], color=colours,
                       edgecolor='white', lw=0.5)
         ax.set_xticks(range(n_sel))
-        ax.set_xticklabels([s.replace('_', '\n') for s in selectors],
-                           fontsize=7.5, rotation=0)
-        ax.set_title(f'Horizon = {fid}', fontsize=10, fontweight='bold')
-        ax.set_ylabel('Mean achieved stability', fontsize=9)
-        ax.axhline(1.0, color='grey', lw=0.8, ls='--', alpha=0.5,
-                   label='Current-value floor')
-
-        for bar, v in zip(bars, vals):
-            if math.isfinite(v):
-                ax.text(bar.get_x() + bar.get_width() / 2,
-                        v + 0.005, f'{v:.3f}',
-                        ha='center', va='bottom', fontsize=7.5,
-                        fontweight='bold')
+        ax.set_xticklabels([s.replace('_', '\n') for s in selectors], fontsize=7.5, rotation=0)
+        ax.set_yscale('log')
+        ax.set_title(f'g = {g:g}', fontsize=10, fontweight='bold')
+        ax.set_ylabel(f'Median error of the chosen records ({COND}, log scale)', fontsize=8.5)
+        for bar, s, v in zip(bars, selectors, vals):
+            if s in sub.index:
+                r = sub.loc[s]
+                txt = (f"{v:.4f}\nV={r['valid_rate']:.3f}\n{int(r['n_valid'])}/{int(r['n_total'])}"
+                       if math.isfinite(v) else f"no valid\nV={r['valid_rate']:.3f}")
+                ax.text(bar.get_x() + bar.get_width() / 2, max(v if math.isfinite(v) else 1e-6, 1e-6) * 1.05,
+                        txt, ha='center', va='bottom', fontsize=6.5)
 
     fig.suptitle(
-        'Figure P3-1 — Mean Achieved Stability by Selector and Horizon\n'
-        'Green bar (enhanced_cascade) = Phase 3 contribution; '
-        'Black bar (oracle) = theoretical upper bound',
+        'Figure P3-1 — Selectors by gap stratum: median error of the chosen records\n'
+        f'({COND}; V = validity rate over all records, n_valid/n_total alongside; capped cells excluded; '
+        'the oracle is a hindsight reference)',
         fontsize=10, fontweight='bold')
     fig.tight_layout()
     path = os.path.join(out_dir, 'figure_p3_01_selector_comparison.png')
@@ -511,50 +549,45 @@ def fig_p3_01_selector_comparison(df_comp: pd.DataFrame,
 
 def fig_p3_02_improvement_map(df_regime: pd.DataFrame,
                                out_dir: str) -> str:
-    """
-    Heatmap: stability gain of enhanced_cascade over fixed_richardson,
-    per (regime, horizon).
-    """
-    rich = (df_regime[df_regime['selector'] == 'fixed_richardson']
-            .set_index(['regime', 'future_idx'])['mean_stability'])
-    enh  = (df_regime[df_regime['selector'] == 'enhanced_cascade']
-            .set_index(['regime', 'future_idx'])['mean_stability'])
+    """Heatmap: log10 ratio of the enhanced cascade's median error to fixed
+    richardson_1's, per (regime, stratum), both validity rates printed."""
+    rich = df_regime[df_regime['selector'] == 'fixed_richardson'].set_index(['regime', 'target_g'])
+    enh  = df_regime[df_regime['selector'] == 'enhanced_cascade'].set_index(['regime', 'target_g'])
+    idx = rich.index.intersection(enh.index)
+    if len(idx) == 0:
+        return ''
+    with np.errstate(divide='ignore', invalid='ignore'):
+        ratio = np.log10(enh.loc[idx, 'med_error'] / rich.loc[idx, 'med_error'])
+    frame = pd.DataFrame({'ratio': ratio,
+                          'v_enh': enh.loc[idx, 'valid_rate'], 'v_rich': rich.loc[idx, 'valid_rate']}).reset_index()
 
-    gain = (enh - rich).reset_index()
-    gain.columns = ['regime', 'future_idx', 'gain']
+    strata  = sorted(frame['target_g'].unique(), reverse=True)
+    regimes = sorted(frame['regime'].unique())
+    mat = np.full((len(regimes), len(strata)), np.nan)
+    ann = {}
+    for _, row in frame.iterrows():
+        i, j = regimes.index(row['regime']), strata.index(row['target_g'])
+        mat[i, j] = row['ratio']
+        ann[i, j] = (row['ratio'], row['v_enh'], row['v_rich'])
 
-    horizons = sorted(gain['future_idx'].unique())
-    regimes  = sorted(gain['regime'].unique())
-
-    mat = np.full((len(regimes), len(horizons)), np.nan)
-    for _, row in gain.iterrows():
-        i = regimes.index(row['regime'])
-        j = horizons.index(row['future_idx'])
-        mat[i, j] = row['gain']
-
-    vmax = max(abs(np.nanmax(mat)), abs(np.nanmin(mat)), 0.05)
-    fig, ax = plt.subplots(figsize=(max(7, len(horizons) * 2.5), 10))
-    im = ax.imshow(mat, cmap='RdYlGn', aspect='auto',
-                   vmin=-vmax, vmax=vmax)
-
-    ax.set_xticks(range(len(horizons)))
-    ax.set_xticklabels([f'n={h}' for h in horizons], fontsize=9)
+    finite = mat[np.isfinite(mat)]
+    vmax = max(abs(finite.max()), abs(finite.min()), 0.1) if finite.size else 0.1
+    fig, ax = plt.subplots(figsize=(max(7, len(strata) * 2.5), max(4, 0.5 * len(regimes))))
+    im = ax.imshow(mat, cmap='RdYlGn_r', aspect='auto', vmin=-vmax, vmax=vmax)
+    ax.set_xticks(range(len(strata)))
+    ax.set_xticklabels([f'g={h:g}' for h in strata], fontsize=9)
     ax.set_yticks(range(len(regimes)))
     ax.set_yticklabels([r.replace('_', '\n') for r in regimes], fontsize=8)
-
-    for i in range(len(regimes)):
-        for j in range(len(horizons)):
-            v = mat[i, j]
-            if np.isfinite(v):
-                ax.text(j, i, f'{v:+.3f}', ha='center', va='center',
-                        fontsize=7.5,
-                        color='white' if abs(v) > 0.5 * vmax else '#333')
-
-    plt.colorbar(im, ax=ax, label='Stability gain (enhanced − fixed_richardson)',
+    for (i, j), (v, ve, vr) in ann.items():
+        txt = (f'{v:+.2f}' if np.isfinite(v) else 'n/a') + f'\nV {ve:.2f}/{vr:.2f}'
+        ax.text(j, i, txt, ha='center', va='center', fontsize=6.5,
+                color='white' if (np.isfinite(v) and abs(v) > 0.5 * vmax) else '#333')
+    plt.colorbar(im, ax=ax, label='log10( enhanced cascade median error / fixed richardson_1 median error )',
                  shrink=0.5)
     ax.set_title(
-        'Figure P3-2 — Enhanced Cascade Gain over Fixed Richardson\n'
-        'Green = cascade improves; Red = cascade hurts',
+        'Figure P3-2 — Enhanced cascade vs fixed richardson_1, per regime and stratum\n'
+        f'Green = cascade lower error; Red = higher ({COND}; V = validity rates cascade/richardson; '
+        'capped cells excluded)',
         fontsize=10, fontweight='bold')
     fig.tight_layout()
     path = os.path.join(out_dir, 'figure_p3_02_improvement_map.png')
@@ -564,37 +597,44 @@ def fig_p3_02_improvement_map(df_regime: pd.DataFrame,
 
 def fig_p3_03_classifier_accuracy(df_clf: pd.DataFrame,
                                    out_dir: str) -> str:
-    """Horizontal bar chart of regime classification accuracy."""
+    """Per-regime accuracy under the primary protocol (grouped by depth), the
+    three overall accuracies side by side in the legend."""
     if df_clf.empty:
         return ''
 
-    sub = df_clf[df_clf['regime'] != '__OVERALL__'].sort_values('accuracy')
-    overall = df_clf[df_clf['regime'] == '__OVERALL__']['accuracy'].values
-    overall_acc = float(overall[0]) if len(overall) > 0 else float('nan')
+    prim = df_clf[df_clf['protocol'] == PRIMARY_PROTOCOL]
+    sub = prim[prim['regime'] != '__OVERALL__'].sort_values('accuracy')
+    overall = {p: float(df_clf[(df_clf['protocol'] == p) & (df_clf['regime'] == '__OVERALL__')]['accuracy'].iloc[0])
+               for p in CLASSIFIER_PROTOCOLS if ((df_clf['protocol'] == p) & (df_clf['regime'] == '__OVERALL__')).any()}
 
     colours = ['#2e7d32' if a >= 0.7 else
                '#f57f17' if a >= 0.4 else
                '#c62828' for a in sub['accuracy']]
 
     fig, ax = plt.subplots(figsize=(9, max(6, len(sub) * 0.35)))
-    ax.barh(range(len(sub)), sub['accuracy'], color=colours,
+    ax.barh(range(len(sub)), sub['accuracy'].fillna(0.0), color=colours,
             edgecolor='white', lw=0.4, height=0.7)
     ax.set_yticks(range(len(sub)))
     ax.set_yticklabels([r.replace('_', '\n') for r in sub['regime']],
                        fontsize=8)
 
     for i, (acc, wrong) in enumerate(zip(sub['accuracy'], sub['top_confusion'])):
-        ax.text(acc + 0.01, i, f'{acc:.2f}  ← {wrong}',
+        ax.text((acc if np.isfinite(acc) else 0.0) + 0.01, i, f'{acc:.2f}  ← {wrong}',
                 va='center', fontsize=7.5)
 
-    ax.axvline(overall_acc, color='black', lw=1.5, ls='--',
-               label=f'Overall accuracy = {overall_acc:.3f}')
-    ax.set_xlabel('Classification accuracy (5-fold CV)', fontsize=9)
+    styles = {'grouped_by_depth': ('black', '--'), 'grouped_by_noise': ('#1565c0', '-.'),
+              'stratified_5fold_legacy': ('#9e9e9e', ':')}
+    for p, acc in overall.items():
+        col, ls = styles.get(p, ('black', '--'))
+        ax.axvline(acc, color=col, lw=1.5, ls=ls, label=f'{p}: overall = {acc:.3f}')
+    ax.set_xlabel(f'Per-regime classification accuracy under {PRIMARY_PROTOCOL} '
+                  '(a fold holds out one observation depth)', fontsize=9)
     ax.set_title(
         'Figure P3-3 — Regime Classification Accuracy from Trajectory Features\n'
-        'Arrow shows most common misclassification target',
+        'Bars: grouped-by-depth protocol (primary); lines: the three protocols\' overall accuracy, '
+        'side by side; arrow = most common confusion',
         fontsize=10, fontweight='bold')
-    ax.legend(fontsize=9)
+    ax.legend(fontsize=8, loc='lower right')
     ax.set_xlim(0, 1.15)
     fig.tight_layout()
     path = os.path.join(out_dir, 'figure_p3_03_classifier_accuracy.png')
@@ -602,99 +642,48 @@ def fig_p3_03_classifier_accuracy(df_clf: pd.DataFrame,
     return path
 
 
-def fig_p3_04_obs_depth(df_regime: pd.DataFrame,
-                         grid: pd.DataFrame,
-                         default_fid: int,
+def fig_p3_04_obs_depth(grid: pd.DataFrame,
+                         df_rec: pd.DataFrame,
+                         default_g: float,
                          out_dir: str) -> str:
-    """
-    How does each selector's mean achieved stability change with obs_idx?
-    Shows whether more observations benefit the adaptive cascade more than
-    fixed methods.
-    """
-    sub  = grid[grid['future_idx'] == default_fid].copy()
+    """Per selector: median error of the chosen records vs obs_idx at the
+    headline stratum (solid, log scale) with the validity rate (dashed)."""
+    sub = exclude_capped(grid[grid['target_g'] == default_g])
+    if sub.empty:
+        print('  Fig P3-4 skipped: no non-capped cells at the headline stratum.')
+        return ''
     obs_vals = sorted(sub['obs_idx'].unique())
 
-    result_rows = []
-    for sel_name, sel_fn in SELECTORS.items():
-        sub['chosen'] = sub.apply(sel_fn, axis=1)
-
-        def _ach(row):
-            m = row['chosen']
-            return float(row[m]) if m in row and math.isfinite(row[m]) else float('nan')
-
-        sub['achieved'] = sub.apply(_ach, axis=1)
-
-        for obs in obs_vals:
-            ms = sub[sub['obs_idx'] == obs]['achieved'].mean()
-            result_rows.append({'selector': sel_name, 'obs_idx': obs,
-                                 'mean_stability': ms})
-
-    df_obs = pd.DataFrame(result_rows)
-
     fig, ax = plt.subplots(figsize=(10, 6))
-    for sel_name in SELECTORS:
-        s = df_obs[df_obs['selector'] == sel_name].sort_values('obs_idx')
-        if s.empty:
-            continue
+    ax2 = ax.twinx()
+    for sel_name, sel_fn in SELECTORS.items():
+        recs = chosen_records(sub, df_rec, sel_fn)
+        rows = []
+        for obs in obs_vals:
+            p = _panel_row(recs[recs['obs_idx'] == obs])
+            rows.append((obs, p['med_error'], p['valid_rate']))
         lw  = 2.5 if sel_name in ('enhanced_cascade', 'oracle') else 1.2
         ls  = '--' if sel_name == 'oracle' else '-'
-        ax.plot(s['obs_idx'], s['mean_stability'],
-                label=sel_name.replace('_', ' '),
-                color=SELECTOR_COLOURS.get(sel_name, '#999'),
-                lw=lw, ls=ls, alpha=0.9)
+        col = SELECTOR_COLOURS.get(sel_name, '#999')
+        ax.plot([r[0] for r in rows], [r[1] for r in rows], label=sel_name.replace('_', ' '),
+                color=col, lw=lw, ls=ls, alpha=0.9)
+        ax2.plot([r[0] for r in rows], [r[2] for r in rows], color=col, lw=0.8, ls=':', alpha=0.7)
 
+    ax.set_yscale('log')
     ax.set_xlabel('obs_idx (observation depth)', fontsize=10)
-    ax.set_ylabel('Mean achieved stability', fontsize=10)
+    ax.set_ylabel(f'Median error of the chosen records ({COND}, log scale)', fontsize=9)
+    ax2.set_ylabel('Validity rate (dotted lines)', fontsize=9)
+    ax2.set_ylim(0, 1.05)
     ax.set_title(
-        f'Figure P3-4 — Selector Performance vs Observation Depth\n'
-        f'(horizon = {default_fid}, all regimes, all noise levels)',
+        f'Figure P3-4 — Selector error vs observation depth\n'
+        f'(gap stratum g = {default_g:g}, all regimes, all noise levels, capped excluded; '
+        'solid = median error, dotted = validity rate)',
         fontsize=10, fontweight='bold')
-    ax.legend(fontsize=8, loc='lower right')
+    ax.legend(fontsize=8, loc='lower left')
     ax.set_xticks(obs_vals)
     ax.set_xticklabels(obs_vals, fontsize=8)
-    ax.axhline(1.0, color='grey', lw=0.7, ls=':', alpha=0.5)
     fig.tight_layout()
     path = os.path.join(out_dir, 'figure_p3_04_obs_depth.png')
-    _save(fig, path)
-    return path
-
-
-def fig_p3_05_cv_summary(df_cv: pd.DataFrame, out_dir: str) -> str:
-    """
-    Box plot: leave-one-regime-out mean stability distribution across
-    held-out regimes, for each selector.
-    """
-    sel_order = ['fixed_richardson', 'fixed_single_exp',
-                 'phase2_cascade', 'enhanced_cascade', 'oracle']
-    sel_order = [s for s in sel_order if s in df_cv['selector'].unique()]
-
-    data    = [df_cv[df_cv['selector'] == s]['mean_stability'].dropna().values
-               for s in sel_order]
-    colours = [SELECTOR_COLOURS.get(s, '#999') for s in sel_order]
-    labels  = [s.replace('_', '\n') for s in sel_order]
-
-    fig, ax = plt.subplots(figsize=(9, 6))
-    bps = ax.boxplot(data, positions=range(len(sel_order)), widths=0.5,
-                     patch_artist=True,
-                     medianprops=dict(color='white', lw=2),
-                     flierprops=dict(marker='.', markersize=4, alpha=0.5))
-    for patch, colour in zip(bps['boxes'], colours):
-        patch.set_facecolor(colour)
-        patch.set_alpha(0.8)
-
-    ax.set_xticks(range(len(sel_order)))
-    ax.set_xticklabels(labels, fontsize=9)
-    ax.set_ylabel('Mean achieved stability (held-out regime)', fontsize=10)
-    ax.set_title(
-        'Figure P3-5 — Leave-One-Regime-Out Cross-Validation\n'
-        'Box shows distribution across 18 held-out regimes; '
-        'median line = overall CV performance',
-        fontsize=10, fontweight='bold')
-    ax.axhline(1.0, color='grey', lw=0.7, ls=':', alpha=0.5,
-               label='Current-value floor')
-    ax.legend(fontsize=9)
-    fig.tight_layout()
-    path = os.path.join(out_dir, 'figure_p3_05_cv_summary.png')
     _save(fig, path)
     return path
 
@@ -704,7 +693,7 @@ def fig_p3_05_cv_summary(df_cv: pd.DataFrame, out_dir: str) -> str:
 # =============================================================================
 
 def run_phase3(phase2_dir: str, out_dir: str,
-               default_fid: int = 5000) -> dict:
+               default_g: Optional[float] = None) -> dict:
     """
     Full Phase 3 pipeline.
 
@@ -712,47 +701,43 @@ def run_phase3(phase2_dir: str, out_dir: str,
     ----------
     phase2_dir : path to results/phase2/
     out_dir    : path to results/phase3/
-    default_fid: primary horizon for per-grid analyses
+    default_g  : headline stratum for per-grid analyses (config.HEADLINE_G)
     """
     os.makedirs(out_dir, exist_ok=True)
+    default_g = CFG_MOD.HEADLINE_G if default_g is None else float(default_g)
 
-    # ── Load data ──────────────────────────────────────────────────────────────
     print('  Loading Phase 2 data ...')
-    df_agg, df_feat = load_phase2(phase2_dir)
+    df_agg, df_feat, df_rec = load_phase2(phase2_dir)
     grid = build_grid(df_agg, df_feat)
-    print(f'  Grid: {len(grid)} rows  '
+    if default_g not in set(grid['target_g'].unique()):
+        default_g = float(sorted(grid['target_g'].unique())[-1])
+    print(f'  Grid: {len(grid)} cells  '
           f'({grid["regime"].nunique()} regimes × '
           f'{grid["obs_idx"].nunique()} obs_idx × '
           f'{grid["noise"].nunique()} noise × '
-          f'{grid["future_idx"].nunique()} horizons)\n')
+          f'{grid["target_g"].nunique()} strata; '
+          f'{int(grid["capped"].sum())} capped cells); {len(df_rec)} records\n')
 
-    # ── Selector evaluation ────────────────────────────────────────────────────
-    print('  Evaluating selectors ...')
-    df_comp, df_regime = evaluate_selectors(grid, out_dir)
+    print('  Evaluating selectors (per record; no fallback for invalid choices) ...')
+    df_comp, df_regime, warned = evaluate_selectors(grid, df_rec, out_dir)
 
-    # ── Cross-validation ───────────────────────────────────────────────────────
-    print('\n  Running leave-one-regime-out cross-validation ...')
-    df_cv = cross_validate(grid, out_dir)
-
-    # ── Regime classifier ──────────────────────────────────────────────────────
     print('\n  Building regime fingerprinting classifier ...')
     df_clf = regime_classifier(df_feat, out_dir)
 
-    # ── Figures ────────────────────────────────────────────────────────────────
     print('\n  Generating figures ...')
     paths = [
         fig_p3_01_selector_comparison(df_comp, out_dir),
         fig_p3_02_improvement_map(df_regime, out_dir),
         fig_p3_03_classifier_accuracy(df_clf, out_dir),
-        fig_p3_04_obs_depth(df_regime, grid, default_fid, out_dir),
-        fig_p3_05_cv_summary(df_cv, out_dir),
+        fig_p3_04_obs_depth(grid, df_rec, default_g, out_dir),
     ]
 
     return {
         'grid':       grid,
         'comparison': df_comp,
         'regime':     df_regime,
-        'cv':         df_cv,
         'classifier': df_clf,
+        'validity_warned': warned,
+        'default_g':  default_g,
         'figures':    [p for p in paths if p],
     }

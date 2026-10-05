@@ -35,6 +35,7 @@ import os
 import sys
 import math
 import numpy as np
+import pytest
 import pandas as pd
 
 # Path setup: works when run as script or as module from project root
@@ -45,6 +46,7 @@ for _p in [_PACKAGE_DIR]:
         sys.path.insert(0, _p)
 
 from src.accelerators import METHODS, METHOD_NAMES  # noqa: E402
+from src.trivial import TRIVIAL_METHOD_NAMES         # noqa: E402
 import src.config as CFG_MOD                        # noqa: E402
 
 # ── Configuration ──────────────────────────────────────────────────────────────
@@ -64,7 +66,7 @@ PASS_THRESHOLDS = {
 }
 
 CFG = {
-    "L_inf":          TRUE_LIMIT,
+    "L_inf":          TRUE_LIMIT,   # assumed asymptote L_hat (= true limit here)
     "ridge":          CFG_MOD.RIDGE,
     "min_valid":      CFG_MOD.MIN_VALID,
     "max_valid":      CFG_MOD.MAX_VALID,
@@ -72,9 +74,11 @@ CFG = {
     "win_shifts":     CFG_MOD.WIN_SHIFTS,
     "perturb_trials": CFG_MOD.PERTURB_TRIALS,
     "perturb_scale":  CFG_MOD.PERTURB_SCALE,
-    "W_CAT":          CFG_MOD.W_CAT,
-    "W_BEATS":        CFG_MOD.W_BEATS,
 }
+
+# Trivial comparators are not accelerators: excluded from the analytic harness
+# (Report-1 review decision).  Phase 0 tests the accelerator roster only.
+PHASE0_METHODS = [m for m in METHOD_NAMES if m not in TRIVIAL_METHOD_NAMES]
 
 # ── Analytic sequences ─────────────────────────────────────────────────────────
 
@@ -113,7 +117,7 @@ def run_all_tests():
         curr_err  = abs(curr_val - true_val)
         threshold = PASS_THRESHOLDS[test_name]
 
-        for method_name in METHOD_NAMES:
+        for method_name in PHASE0_METHODS:
             fn = METHODS[method_name]
             try:
                 est = fn(seq_win, idx_win, float(FUTURE_X), CFG)
@@ -280,8 +284,9 @@ def write_report(df, out_dir):
 def test_all_methods_are_exercised():
     """Every registered method must appear in the Phase 0 report."""
     df = run_all_tests()
-    assert df["method"].nunique() == len(METHOD_NAMES)
-    assert len(df) == len(METHOD_NAMES) * len(TEST_CASES)
+    assert df["method"].nunique() == len(PHASE0_METHODS)
+    assert len(df) == len(PHASE0_METHODS) * len(TEST_CASES)
+    assert not set(df["method"]) & set(TRIVIAL_METHOD_NAMES)
 
 
 def test_every_method_produces_at_least_one_valid_estimate():
@@ -305,11 +310,57 @@ def test_every_test_case_is_solved_by_someone():
 
 
 def test_baseline_is_not_reported_as_an_improvement():
-    """current_value is the baseline; it cannot improve on itself."""
+    """The last observed value is the trivial floor, not an accelerator: it
+    is not in the roster and the analytic harness never scores it (nor any
+    other trivial comparator) as an improvement."""
+    from src.pipeline import ACCEL_METHODS
+    assert "last_value" not in ACCEL_METHODS
+    assert "last_value" in TRIVIAL_METHOD_NAMES
     df = run_all_tests()
-    baseline = df[df["method"] == "current_value"]
-    assert not baseline.empty
-    assert baseline["passed"].sum() == 0
+    assert set(df["method"]) == set(ACCEL_METHODS)
+    assert not set(df["method"]) & set(TRIVIAL_METHOD_NAMES)
+
+
+@pytest.mark.parametrize("method", ["weniger_d1", "weniger_d2"])
+def test_weniger_recovers_geometric_limit(method):
+    """Weniger delta (d-type remainder) is exact on s_n = 0.3 + 0.5 * 0.9**n.
+
+    Regression for the Prompt-5A correction: the previous implementation used
+    w_n = s_n and returned 0 for every input (it never saw the sequence).
+    """
+    from src.accelerators import RETIRED_METHODS
+    n = np.arange(31, 91)
+    seq = list(0.3 + 0.5 * 0.9 ** n)
+    cfg = {"L_inf": 0.0, "min_valid": -0.5, "max_valid": 500.0}
+    est = RETIRED_METHODS[method](seq, list(n), 1000.0, cfg)
+    assert np.isfinite(est)
+    assert abs(est - 0.3) <= 1e-12, f"{method}: {est}"
+
+
+@pytest.mark.parametrize("order", [1, 2])
+def test_weniger_equals_levin_t(order):
+    """The corrected Weniger delta of order k <= 2 IS this codebase's Levin 't'.
+
+    Both use the forward-difference remainder w_n = s_{n+1} - s_n; the
+    Pochhammer weight (n0+j+1)_{k-1} of the delta transform equals the power
+    weight (n0+j+1)^{k-1} of Levin for k = 1, 2.  Checked to machine precision
+    on the 96 audit windows of tests/test_input_dependence.py (NaN on the same
+    windows).  This is why weniger_d1 / weniger_d2 were retired from the
+    roster in Prompt 5B (RETIRED_METHODS): the pair duplicates levin_t1 / t2.
+    """
+    from src.accelerators import _levin_transform, _weniger_delta
+    from tests.test_input_dependence import windows
+    checked = 0
+    for regime, sigma, seed, seq, idx in windows():
+        a = _weniger_delta(list(seq), list(idx), order)
+        b = _levin_transform(list(seq), list(idx), order, "t")
+        if math.isnan(a) or math.isnan(b):
+            assert math.isnan(a) and math.isnan(b), (regime, sigma, seed, a, b)
+            continue
+        assert abs(a - b) <= 1e-12 * max(1.0, abs(a)), (regime, sigma, seed, order, a, b)
+        checked += 1
+    assert checked >= 90
+    assert "weniger_d1" not in METHOD_NAMES and "weniger_d2" not in METHOD_NAMES
 
 
 if __name__ == "__main__":

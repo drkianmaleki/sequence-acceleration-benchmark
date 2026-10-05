@@ -1,0 +1,4 @@
+target_g,n_records_zero_denominator,n_cells_affected,n_records_total,n_cells_total
+0.02,0,0,19200,960
+0.1,0,0,20400,1020
+0.5,0,0,23400,1170

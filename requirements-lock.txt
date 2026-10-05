@@ -1,0 +1,16 @@
+# requirements-lock.txt -- the tested environment.
+# The exact versions in which the reported results were produced (the versions recorded in
+# results/run_manifest.json and in the provenance files under results/real_data/) and in which
+# this release was tested.  requirements.txt gives the lower bounds; this file reproduces the
+# environment exactly: pip install -r requirements-lock.txt
+# python: 3.12.10
+# platform.platform(): Windows-11-10.0.26200-SP0
+# platform.system(): Windows
+numpy==2.5.1
+scipy==1.18.0
+pandas==3.0.3
+matplotlib==3.11.1
+scikit-learn==1.9.0
+xgboost==3.3.0
+openml==0.15.1
+pytest==9.1.1

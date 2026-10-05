@@ -1,6 +1,9 @@
 # ── Results & generated outputs (large raw files excluded) ────────────────────
 results/phase4/phase4_raw.csv
 results/phase5a/phase5a_raw.csv
+results/phase1/phase1_records.csv
+results/phase2/phase2_records.csv
+results/phase0b/order_ladders_records.csv
 
 # ── Downloaded datasets (generated at runtime via OpenML) ─────────────────────
 data/*
@@ -61,3 +64,11 @@ desktop.ini
 *.log
 tmp/
 temp/
+# Phase 5a per-block shards (concatenated into phase5a_raw.csv)
+results/phase5a/shards/
+
+# local project folders: not part of the public repository
+reports/
+documents/
+paper/
+archive/

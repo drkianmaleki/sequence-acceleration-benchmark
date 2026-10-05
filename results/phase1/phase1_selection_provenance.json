@@ -1,0 +1,317 @@
+{
+  "script": "scripts/derive_selection.py",
+  "git_head": {
+    "full": "b4d551866d6dbddf860a6197b6ea972063ec3996",
+    "short": "b4d5518"
+  },
+  "tracked_tree_clean": true,
+  "started": "2026-10-03T18:14:05",
+  "finished": "2026-10-03T18:14:10",
+  "seconds": 5.3,
+  "versions": {
+    "python": "3.12.10",
+    "numpy": "2.5.1",
+    "scipy": "1.18.0",
+    "pandas": "3.0.3",
+    "sklearn": "1.9.0",
+    "xgboost": "3.3.0"
+  },
+  "versions_equal_run_manifest": true,
+  "records_file": "phase1/phase1_records.csv",
+  "records_rows": 369360,
+  "records_sha256": "2fa1901b41440df6cc18f95d844d19ebd48d5833fbfaa3c0f5ebd8125af47717",
+  "population": "the (regime, noise, target_g) cells with capped == 0 in phase1_aggregated.csv, all three strata, core and held-out; runs = seeds; a method's error on a run is its error when valid == 1",
+  "pools": {
+    "lead": [
+      "log_linear",
+      "richardson_3",
+      "richardson_2",
+      "double_exp_fit",
+      "pade_34",
+      "rational_fit",
+      "richardson_1",
+      "pade_23",
+      "pade_12",
+      "pade_45",
+      "pade_33",
+      "pade_22",
+      "single_exp_fit"
+    ],
+    "named": [
+      "rational_fit",
+      "single_exp_fit"
+    ],
+    "classical": [
+      "shanks_1",
+      "shanks_2",
+      "shanks_3",
+      "shanks_4",
+      "wynn_eps_1",
+      "wynn_eps_2",
+      "wynn_eps_3",
+      "wynn_rho_1",
+      "wynn_rho_2",
+      "wynn_rho_3",
+      "levin_t1",
+      "levin_t2",
+      "levin_u1",
+      "levin_u2",
+      "levin_v1",
+      "levin_v2",
+      "brezinski_theta1",
+      "brezinski_theta2",
+      "anderson_1",
+      "anderson_2",
+      "anderson_3"
+    ],
+    "all": [
+      "linear",
+      "log_linear",
+      "geom_avg_diff",
+      "richardson_1",
+      "richardson_2",
+      "richardson_3",
+      "richardson_a05",
+      "richardson_a10",
+      "richardson_a20",
+      "single_exp_fit",
+      "double_exp_fit",
+      "rational_fit",
+      "log_fit",
+      "shanks_1",
+      "shanks_2",
+      "shanks_3",
+      "shanks_4",
+      "wynn_eps_1",
+      "wynn_eps_2",
+      "wynn_eps_3",
+      "wynn_rho_1",
+      "wynn_rho_2",
+      "wynn_rho_3",
+      "pade_11",
+      "pade_12",
+      "pade_13",
+      "pade_21",
+      "pade_22",
+      "pade_23",
+      "pade_31",
+      "pade_32",
+      "pade_33",
+      "pade_34",
+      "pade_44",
+      "pade_45",
+      "levin_t1",
+      "levin_t2",
+      "levin_u1",
+      "levin_u2",
+      "levin_v1",
+      "levin_v2",
+      "brezinski_theta1",
+      "brezinski_theta2",
+      "neville_2",
+      "neville_3",
+      "neville_4",
+      "anderson_1",
+      "anderson_2",
+      "anderson_3",
+      "median_ensemble",
+      "stability_weighted",
+      "best_shanks_wynn"
+    ]
+  },
+  "lead_rule": "the union of the 10 lowest core median errors, the 5 lowest held-out median errors, the 3 highest core win rates against the last value (rank-eligible accelerators at g = 0.1) and the recorded-curve methods richardson_1, rational_fit; ordered by core rank, then held-out rank",
+  "default_method": "rational_fit",
+  "rank_min_valid": 0.9,
+  "designs": {
+    "one_pilot": "every ordered pair of distinct seeds (pilot, final); chosen = the pool member with the lowest error on the pilot seed among those valid there (ties: registry order); its record on the final seed is taken as it is (an invalid record stays invalid, no fallback)",
+    "many_pilots": "every seed in turn is the final run and the other seeds are the pilots; chosen = the pool member with the lowest median error over its valid pilot records among the members valid on at least RANK_MIN_VALID of the pilot seeds (0.9; ties: registry order)"
+  },
+  "cells": {
+    "one_pilot": 195,
+    "many_pilots": 195
+  },
+  "trials": {
+    "one_pilot": 169650,
+    "many_pilots": 5850
+  },
+  "cells_by_set_and_stratum": [
+    {
+      "regime_set": "core",
+      "target_g": 0.5,
+      "families": 18,
+      "cells": 54
+    },
+    {
+      "regime_set": "core",
+      "target_g": 0.1,
+      "families": 16,
+      "cells": 48
+    },
+    {
+      "regime_set": "core",
+      "target_g": 0.02,
+      "families": 15,
+      "cells": 45
+    },
+    {
+      "regime_set": "holdout",
+      "target_g": 0.5,
+      "families": 6,
+      "cells": 18
+    },
+    {
+      "regime_set": "holdout",
+      "target_g": 0.1,
+      "families": 5,
+      "cells": 15
+    },
+    {
+      "regime_set": "holdout",
+      "target_g": 0.02,
+      "families": 5,
+      "cells": 15
+    }
+  ],
+  "phase1_agreement": [
+    {
+      "regime_set": "core",
+      "target_g": 0.5,
+      "rows": 8,
+      "families": 18,
+      "cells": 54,
+      "med_error_default_phase1": 0.0159076276768399,
+      "med_error_last_phase1": 0.0690480475394815,
+      "max_abs_diff_default": 2.42861286636753e-17,
+      "max_abs_diff_last": 2.7755575615628914e-17,
+      "agree": true
+    },
+    {
+      "regime_set": "core",
+      "target_g": 0.1,
+      "rows": 8,
+      "families": 16,
+      "cells": 48,
+      "med_error_default_phase1": 0.0295623391661765,
+      "med_error_last_phase1": 0.1030304874928428,
+      "max_abs_diff_default": 0.0,
+      "max_abs_diff_last": 2.7755575615628914e-17,
+      "agree": true
+    },
+    {
+      "regime_set": "core",
+      "target_g": 0.02,
+      "rows": 8,
+      "families": 15,
+      "cells": 45,
+      "med_error_default_phase1": 0.022823228542513,
+      "med_error_last_phase1": 0.0969942662309159,
+      "max_abs_diff_default": 0.0,
+      "max_abs_diff_last": 0.0,
+      "agree": true
+    },
+    {
+      "regime_set": "holdout",
+      "target_g": 0.5,
+      "rows": 8,
+      "families": 6,
+      "cells": 18,
+      "med_error_default_phase1": 0.0061751834354633,
+      "med_error_last_phase1": 0.0390754011506919,
+      "max_abs_diff_default": 2.5153490401663703e-17,
+      "max_abs_diff_last": 4.85722573273506e-17,
+      "agree": true
+    },
+    {
+      "regime_set": "holdout",
+      "target_g": 0.1,
+      "rows": 8,
+      "families": 5,
+      "cells": 15,
+      "med_error_default_phase1": 0.0074428514361496,
+      "med_error_last_phase1": 0.0861611706003244,
+      "max_abs_diff_default": 8.673617379884035e-19,
+      "max_abs_diff_last": 0.0,
+      "agree": true
+    },
+    {
+      "regime_set": "holdout",
+      "target_g": 0.02,
+      "rows": 8,
+      "families": 5,
+      "cells": 15,
+      "med_error_default_phase1": 0.0061267855413885,
+      "med_error_last_phase1": 0.0934698426684626,
+      "max_abs_diff_default": 0.0,
+      "max_abs_diff_last": 0.0,
+      "agree": true
+    }
+  ],
+  "catastrophe_rate": "cat_rate_chosen = the share of a cell's trials whose chosen record on the final seed carries the Phase 1 catastrophic flag as recorded (the estimate is invalid, or its error exceeds CAT_MULT = 5 times the error of the last observed value on the same sequence), a trial without a choice counted as catastrophic in the same way as it counts as invalid; cat_rate_default = the share of the cell's trials on which rational_fit's record on the same final seed is catastrophic; the pooled table carries the means over the cells of both",
+  "phase1_cat_agreement": [
+    {
+      "regime_set": "core",
+      "target_g": 0.5,
+      "cells": 432,
+      "rows": 8,
+      "cat_rate_default_phase1": 0.0123,
+      "max_abs_diff_cells": 3.333333333332966e-05,
+      "max_abs_diff_pooled": 4.567901234567816e-05,
+      "agree": true
+    },
+    {
+      "regime_set": "core",
+      "target_g": 0.1,
+      "cells": 384,
+      "rows": 8,
+      "cat_rate_default_phase1": 0.009,
+      "max_abs_diff_cells": 3.333333333332966e-05,
+      "max_abs_diff_pooled": 2.7777777777779344e-05,
+      "agree": true
+    },
+    {
+      "regime_set": "core",
+      "target_g": 0.02,
+      "cells": 360,
+      "rows": 8,
+      "cat_rate_default_phase1": 0.0119,
+      "max_abs_diff_cells": 3.333333333332966e-05,
+      "max_abs_diff_pooled": 4.814814814814959e-05,
+      "agree": true
+    },
+    {
+      "regime_set": "holdout",
+      "target_g": 0.5,
+      "cells": 144,
+      "rows": 8,
+      "cat_rate_default_phase1": 0.0,
+      "max_abs_diff_cells": 0.0,
+      "max_abs_diff_pooled": 0.0,
+      "agree": true
+    },
+    {
+      "regime_set": "holdout",
+      "target_g": 0.1,
+      "cells": 120,
+      "rows": 8,
+      "cat_rate_default_phase1": 0.0022,
+      "max_abs_diff_cells": 3.333333333332966e-05,
+      "max_abs_diff_pooled": 2.2222222222222088e-05,
+      "agree": true
+    },
+    {
+      "regime_set": "holdout",
+      "target_g": 0.02,
+      "cells": 120,
+      "rows": 8,
+      "cat_rate_default_phase1": 0.0022,
+      "max_abs_diff_cells": 3.333333333332966e-05,
+      "max_abs_diff_pooled": 2.2222222222222088e-05,
+      "agree": true
+    }
+  ],
+  "rows": {
+    "cells": 1560,
+    "global": 216
+  },
+  "note": "This analysis was added after the full run recorded in run_manifest.json and evaluates no method: it rereads the per-record file of that run and chooses among, and summarises, records already computed."
+}

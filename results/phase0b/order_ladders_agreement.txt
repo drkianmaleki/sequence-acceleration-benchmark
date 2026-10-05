@@ -1,0 +1,6 @@
+Order-ladder agreement check against results\phase1\phase1_records.csv at g = 0.1
+columns compared exactly (NaN == NaN): ['estimate', 'error', 'valid', 'catastrophic', 'n_f', 'capped']
+variants checked : 51 (every ladder variant that is a roster method, and the comparators)
+records compared : 110,160
+mismatches       : 0
+VERDICT: AGREE -- every roster-marked variant reproduces its Phase-1 records exactly

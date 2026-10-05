@@ -1,0 +1,86 @@
+{
+  "mode": "full",
+  "git_head": {
+    "full": "d82fd2698b6afb5be5da590259ee9b3095ebcaee",
+    "short": "d82fd26"
+  },
+  "started": "2026-10-01T22:16:39",
+  "finished": "2026-10-02T06:24:15",
+  "jobs": 7,
+  "steps": {
+    "Phase 0 \u2014 analytic unit tests": 2.5,
+    "Phase 1 \u2014 main benchmark": 2606.5,
+    "Phase 0b \u2014 order ladders": 660.6,
+    "Dangerous re-derivation (Phase 1 -> artifact)": 1.0,
+    "Phase 2 \u2014 failure detection": 1359.0,
+    "Phase 3 \u2014 adaptive selection": 8.1,
+    "Phase 4 \u2014 perturbation diagnostics": 3047.7,
+    "Phase 5a \u2014 ensemble ablation": 15552.3,
+    "Phase 5b \u2014 sensitivity sweeps": 5999.3,
+    "Real data \u2014 recorded-curve re-evaluation": 7.8,
+    "Paper tables and FACTS": 8.9,
+    "L_true terciles (FACTS section, f13)": 2.5
+  },
+  "failed_steps": [],
+  "total_seconds": 29256.4,
+  "plan": [
+    {
+      "step": "Phase 0",
+      "evaluations": 208,
+      "note": "52 accelerators x 4 analytic cases (trivials excluded)"
+    },
+    {
+      "step": "Phase 1",
+      "evaluations": 369360,
+      "note": "24 regimes x 30 seeds x 3 noise x 3 strata x 57 methods"
+    },
+    {
+      "step": "Phase 0b",
+      "evaluations": 257040,
+      "note": "114 ladder variants + 5 comparators x 24 regimes x 30 seeds x 3 noise at g = 0.1 (+ agreement check against phase1_records.csv)"
+    },
+    {
+      "step": "Dangerous derivation",
+      "evaluations": 0,
+      "note": "reads phase1_aggregated.csv"
+    },
+    {
+      "step": "Phase 2",
+      "evaluations": 772200,
+      "note": "13 depths x 5 noise x 20 seeds x 18 core regimes x 3 strata x 11 methods (+2 skill-reference calls per cell)"
+    },
+    {
+      "step": "Phase 3",
+      "evaluations": 0,
+      "note": "analysis of Phase 2 output"
+    },
+    {
+      "step": "Phase 4",
+      "evaluations": 207360,
+      "note": "central evaluations (24 regimes, 12 methods); + 1,555,200 diagnostic calls"
+    },
+    {
+      "step": "Phase 5a",
+      "evaluations": 984960,
+      "note": "central evaluations (24 regimes, 57 methods); + 4,579,200 perturbation calls"
+    },
+    {
+      "step": "Phase 5b",
+      "evaluations": 259200,
+      "note": "sweep1a 28,800 + sweep1b 201,600 + sweep2 28,800 (24 regimes, 2 strata)"
+    },
+    {
+      "step": "Real data",
+      "evaluations": 630,
+      "note": "6 datasets x 15 (depth, target) pairs x 7 methods"
+    }
+  ],
+  "versions": {
+    "python": "3.12.10",
+    "numpy": "2.5.1",
+    "scipy": "1.18.0",
+    "pandas": "3.0.3",
+    "sklearn": "1.9.0",
+    "xgboost": "3.3.0"
+  }
+}

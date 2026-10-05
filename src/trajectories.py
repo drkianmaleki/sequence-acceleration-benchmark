@@ -15,6 +15,10 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import curve_fit
 
+import src.config as C
+from src.asymptote import assumed_asymptote, resolve_mode
+from src.trivial import SKILL_REFERENCE_METHODS
+
 # ── Feature extraction (mirrors phase2._extract_features exactly) ──────────────
 
 FEATURE_COLS = [
@@ -23,7 +27,7 @@ FEATURE_COLS = [
 ]
 
 
-def extract_features(seq: np.ndarray, indices: np.ndarray, L_inf: float) -> dict:
+def extract_features(seq: np.ndarray, indices: np.ndarray, L_hat: float) -> dict:
     """
     Extract six scalar features from an observation window.
     Mirrors phase2._extract_features exactly so results are comparable.
@@ -32,7 +36,7 @@ def extract_features(seq: np.ndarray, indices: np.ndarray, L_inf: float) -> dict
     ----------
     seq     : observed values in the window
     indices : corresponding iteration indices (1-based)
-    L_inf   : assumed asymptotic floor
+    L_hat   : ASSUMED asymptote (src.asymptote.assumed_asymptote); never L_true
 
     Returns
     -------
@@ -45,7 +49,7 @@ def extract_features(seq: np.ndarray, indices: np.ndarray, L_inf: float) -> dict
 
     # Dynamic L0: guarantee shifted values are positive
     win_min = float(np.min(s))
-    L0      = max(0.0, min(L_inf, win_min * 0.5))
+    L0      = max(0.0, min(float(L_hat), win_min * 0.5))
     if win_min <= 0.0:
         L0 = 0.0
 
@@ -126,7 +130,7 @@ def apply_cascade(features: dict) -> str:
     """
     Apply the Phase 2 two-rule cascade to select a method.
 
-    Rules (from phase2_rules.csv, best precision):
+    Rules (the two Phase-2 threshold rules adopted for the cascade):
       1. if log_log_slope > -0.10  → use rational_fit
       2. if richardson_r2  < 0.50  → use rational_fit
       3. otherwise                 → use richardson_1
@@ -145,9 +149,9 @@ def apply_cascade(features: dict) -> str:
 
 # ── Accelerator application ────────────────────────────────────────────────────
 
-# Default cfg matches what evaluation.py uses
+# Default cfg (numerical settings only).  'L_inf' -- the ASSUMED asymptote
+# L_hat -- must be supplied per window; there is deliberately no default.
 _DEFAULT_CFG = dict(
-    L_inf      = 0.01,
     ridge      = 1e-6,
     denom_tol  = 1e-10,
     min_valid  = -0.5,
@@ -182,6 +186,8 @@ def apply_accelerator(
 
     if cfg is None:
         cfg = _DEFAULT_CFG.copy()
+    if 'L_inf' not in cfg:
+        raise ValueError("cfg['L_inf'] (the assumed asymptote L_hat) is required")
 
     fn = METHODS.get(method_name)
     if fn is None:
@@ -226,7 +232,7 @@ def process_curves(
     curves:               dict,
     obs_depths:           list  = [30, 60, 90],
     window_len:           int   = 60,
-    L_inf:                float = 0.01,
+    assumed_mode:         str   = None,
     phase2_features_path: str   = None,
     future_x:             int   = None,
 ) -> pd.DataFrame:
@@ -242,7 +248,9 @@ def process_curves(
     curves               : {dataset_name: np.ndarray of shape (n_rounds,)}
     obs_depths           : observation cutoff points (round indices, 1-based)
     window_len           : number of points in the observation window
-    L_inf                : assumed asymptotic floor
+    assumed_mode         : config.ASSUMED_L_MODES entry (default config value).
+                           L_true is unknown for real curves, so only the
+                           deployable modes 'zero' and 'winmin' are valid here.
     phase2_features_path : path to phase2_features.csv for regime mapping
     future_x             : target round to predict (defaults to n_rounds)
 
@@ -251,7 +259,7 @@ def process_curves(
     DataFrame with one row per (dataset, obs_depth), columns:
         dataset, obs_depth, true_final, current_val,
         predicted_val, cascade_err, current_err,
-        selected_method, nearest_regime,
+        selected_method, nearest_regime, assumed_mode, L_hat,
         log_log_slope, curvature_idx, oscillation_idx,
         noise_var, richardson_r2, diff_ratio_cv
     """
@@ -261,9 +269,8 @@ def process_curves(
         df_feat = pd.read_csv(phase2_features_path)
         regime_centroids = df_feat.groupby('regime')[FEATURE_COLS].mean()
 
-    # Default cfg using the provided L_inf
+    assumed_mode = resolve_mode(assumed_mode)
     cfg = _DEFAULT_CFG.copy()
-    cfg['L_inf'] = L_inf
 
     records = []
     for name, curve in curves.items():
@@ -280,8 +287,12 @@ def process_curves(
             window = curve[start:obs]
             idxs   = np.arange(start + 1, obs + 1, dtype=float)
 
+            # 0. Assumed asymptote for this window (no oracle on real curves)
+            L_hat = assumed_asymptote(None, window, assumed_mode)
+            cfg['L_inf'] = L_hat
+
             # 1. Features
-            feats = extract_features(window, idxs, L_inf)
+            feats = extract_features(window, idxs, L_hat)
 
             # 2. Cascade → method selection
             method = apply_cascade(feats)
@@ -315,8 +326,425 @@ def process_curves(
                 current_err      = current_err,
                 selected_method  = method,
                 nearest_regime   = regime,
+                assumed_mode     = assumed_mode,
+                L_hat            = L_hat,
                 **{f: feats.get(f, np.nan) for f in FEATURE_COLS},
             )
             records.append(row)
 
     return pd.DataFrame(records)
+
+
+# ── Redesign v2: re-evaluation of RECORDED curves (no retraining) ─────────────
+
+REAL_EVAL_METHODS = ['richardson_1', 'rational_fit']
+# Every method a real-data cell reports, in the order the rows are written:
+# the two accelerators, the deployable trivial references and the cascade's
+# choice; the per-cell row count of real_data_results_v2.csv is
+# len(REAL_DATA_METHODS).
+REAL_DATA_METHODS = [*REAL_EVAL_METHODS, *SKILL_REFERENCE_METHODS, 'cascade']
+
+
+def perturb_seed(dataset: str, depth: int) -> int:
+    """Deterministic perturbation seed, crc32 of "dataset:depth" (the seeding
+    of scripts/analyze_real_diagnostics_legacy.py).  The window is a property
+    of (dataset, depth), so every target round of a window shares its draws."""
+    import zlib
+    return zlib.crc32(f"{dataset}:{depth}".encode()) % 2 ** 31
+
+
+def perturb_iqr_real(window, idxs, method: str, future_x: float, cfg: dict,
+                     seed: int, n_trials: int = None, scale: float = None) -> float:
+    """
+    Perturbation IQR of one method on one real window: n_trials evaluations
+    on windows multiplied by 1 + scale * U(-1, 1) noise (config.PERTURB_TRIALS
+    = 5, config.PERTURB_SCALE = 0.02), seeded deterministically.  The IQR of
+    the finite estimates; NaN with fewer than three.  Identical draws and
+    rule to scripts/analyze_real_diagnostics_legacy.py.
+    """
+    n_trials = C.PERTURB_TRIALS if n_trials is None else int(n_trials)
+    scale = C.PERTURB_SCALE if scale is None else float(scale)
+    window = np.asarray(window, dtype=float)
+    rng = np.random.RandomState(seed)
+    ests = []
+    for _ in range(n_trials):
+        pert = window * (1.0 + scale * rng.uniform(-1, 1, size=len(window)))
+        e = apply_accelerator(method_name=method, seq=pert, indices=idxs,
+                              future_x=future_x, cfg=cfg)
+        if np.isfinite(e):
+            ests.append(e)
+    if len(ests) < 3:
+        return float('nan')
+    q75, q25 = np.percentile(ests, [75, 25])
+    return float(q75 - q25)
+
+
+def curve_minimum_table(curves: dict, last_round: int = 500) -> pd.DataFrame:
+    """
+    Per recorded curve: the argmin round (1-based), the minimum, the value at
+    ``last_round`` (or the last recorded round if shorter) and the relative
+    rise from the minimum to it.  A target round beyond the argmin is a
+    post-minimum target: the curve has turned up and any extrapolation of the
+    descent is chasing a minimum that has already passed.
+    """
+    rows = []
+    for name, curve in curves.items():
+        v = np.asarray(curve, dtype=float)
+        n = len(v)
+        i = int(np.nanargmin(v))
+        end = min(last_round, n)
+        v_end = float(v[end - 1])
+        rows.append(dict(dataset=name, n_rounds=n, argmin_round=i + 1,
+                         min_value=float(v[i]), value_at_round=v_end, at_round=end,
+                         rise_from_min=((v_end - float(v[i])) / float(v[i])
+                                        if abs(float(v[i])) > 1e-12 else float('nan'))))
+    return pd.DataFrame(rows)
+
+
+def _auc_fail_vs_succ(iqr: np.ndarray, fail: np.ndarray):
+    """AUC = P(IQR_fail > IQR_succ) from the Mann-Whitney U statistic (ties one
+    half) and the two-sided p-value; NaN when either group is empty."""
+    from scipy.stats import mannwhitneyu
+    iqr = np.asarray(iqr, dtype=float)
+    fail = np.asarray(fail, dtype=bool)
+    ok = np.isfinite(iqr)
+    f, s = iqr[ok & fail], iqr[ok & ~fail]
+    if len(f) == 0 or len(s) == 0:
+        return float('nan'), float('nan'), len(f), len(s)
+    u = mannwhitneyu(f, s, alternative='two-sided')
+    return float(u.statistic) / (len(f) * len(s)), float(u.pvalue), len(f), len(s)
+
+
+REAL_STRATA = (('all', None), ('pre_min', 0), ('post_min', 1))
+
+
+def real_data_strata(df_sum: pd.DataFrame) -> pd.DataFrame:
+    """
+    Every real-data summary statistic three ways: all cells, pre-minimum
+    targets (target_round <= argmin_round) and post-minimum targets.  One row
+    per stratum: cell and failure counts (failure = cascade_skill >= 1, which
+    on these curves coincides with improvement < 0), medians of cascade
+    error / skill / improvement, the cascade's win rates against each
+    deployable trivial, and the perturbation-diagnostic AUC (higher
+    perturb_iqr read as 'failure') with its Mann-Whitney p-value.
+    """
+    from src.trivial import REFERENCE_TAGS
+    rows = []
+    for label, flag in REAL_STRATA:
+        sub = df_sum if flag is None else df_sum[df_sum['post_min_target'] == flag]
+        fail = (sub['cascade_skill'] >= 1.0).to_numpy()
+        auc, p, n_f, n_s = _auc_fail_vs_succ(sub['perturb_iqr'].to_numpy(), fail)
+        row = dict(stratum=label, n_cells=int(len(sub)), n_fail=int(fail.sum()),
+                   fail_rate=(round(float(fail.mean()), 4) if len(sub) else float('nan')),
+                   n_neg_improvement=int((sub['improvement'] < 0).sum()),
+                   med_cascade_err=float(sub['cascade_err'].median()) if len(sub) else float('nan'),
+                   med_cascade_skill=float(sub['cascade_skill'].median()) if len(sub) else float('nan'),
+                   med_improvement=float(sub['improvement'].median()) if len(sub) else float('nan'),
+                   med_perturb_iqr_fail=(float(sub.loc[fail, 'perturb_iqr'].median()) if fail.any() else float('nan')),
+                   med_perturb_iqr_succ=(float(sub.loc[~fail, 'perturb_iqr'].median()) if (~fail).any() else float('nan')),
+                   perturb_auc=auc, perturb_p=p, n_fail_auc=n_f, n_succ_auc=n_s,
+                   perturb_ordering=('failing > succeeding' if auc > 0.5 else 'failing < succeeding' if auc < 0.5
+                                     else 'no ordering') if np.isfinite(auc) else '')
+        for _, tag in REFERENCE_TAGS:
+            col = f'cascade_win_vs_{tag}'
+            row[f'win_rate_vs_{tag}'] = (round(float(sub[col].mean()), 4) if (col in sub and len(sub)) else float('nan'))
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def evaluate_recorded_curves(
+    curves:               dict,
+    depths:               list,
+    targets:              list,
+    window_len:           int   = 60,
+    assumed_mode:         str   = None,
+    phase2_features_path: str   = None,
+):
+    """
+    Re-evaluate recorded real curves on a (depth, target-round) grid.
+
+    For every dataset, observation depth and target round with
+    depth < target <= n_rounds: build the window ending at the depth,
+    compute L_hat from the assumed-asymptote mode (no oracle on real
+    curves), extract features, apply the two-rule cascade, and predict the
+    loss at the target round with richardson_1, rational_fit, the cascade's
+    choice and the four trivial reference methods.  ``skill`` is
+    err / err(best of the four trivial references) -- the hindsight
+    best-of-four (strict) bar; ``skill_vs_*`` / ``win_vs_*`` are the
+    fixed-reference ratios and win flags against each trivial separately
+    (the summary carries them for the cascade as ``cascade_skill_vs_*`` /
+    ``cascade_win_vs_*``).
+
+    Report-2 review (decision 5): every cell also carries ``perturb_iqr``,
+    the perturbation IQR of the routed method (``selected_method``) at that
+    target round: config.PERTURB_TRIALS evaluations on 2%-perturbed windows,
+    crc32-seeded per (dataset, depth) (perturb_iqr_real).  It is a cell-level
+    quantity and is repeated on every row of the cell in df_long.  The
+    summary records the provenance of the regime centroids:
+    ``phase2_features_path``, ``phase2_features_rows`` (0 when the file was
+    absent and the mapping is 'unknown') and ``git_head``.
+
+    Prompt 5A: every cell also carries ``argmin_round`` (1-based round of the
+    curve's minimum), ``rise_from_min`` (relative rise from the minimum to
+    round 500) and ``post_min_target`` = (target_round > argmin_round), so
+    every summary can be split into pre- and post-minimum targets
+    (real_data_strata).
+
+    Returns
+    -------
+    (df_long, df_summary)
+        df_long    : one row per (dataset, obs_depth, target_round, method)
+        df_summary : one row per (dataset, obs_depth, target_round)
+    """
+    from src.accelerators import METHODS
+    from src.pipeline import git_head
+    from src.trivial import best_reference_error, skill_score, skill_vs_table
+
+    assumed_mode = resolve_mode(assumed_mode)
+    regime_centroids = None
+    feat_rows = 0
+    feat_path = str(phase2_features_path) if phase2_features_path else ''
+    if phase2_features_path and os.path.exists(phase2_features_path):
+        df_feat = pd.read_csv(phase2_features_path)
+        regime_centroids = df_feat.groupby('regime')[FEATURE_COLS].mean()
+        feat_rows = int(len(df_feat))
+    provenance = dict(phase2_features_path=feat_path,
+                      phase2_features_rows=feat_rows,
+                      git_head=git_head())
+
+    cfg = _DEFAULT_CFG.copy()
+    long_rows, summary_rows = [], []
+    minima = curve_minimum_table(curves).set_index('dataset')
+
+    for name, curve in curves.items():
+        curve    = np.asarray(curve, dtype=float)
+        n_rounds = len(curve)
+        argmin_round  = int(minima.loc[name, 'argmin_round'])
+        rise_from_min = float(minima.loc[name, 'rise_from_min'])
+
+        for depth in depths:
+            if depth >= n_rounds:
+                continue
+            start  = max(0, depth - window_len)
+            window = curve[start:depth]
+            idxs   = np.arange(start + 1, depth + 1, dtype=float)
+
+            L_hat = assumed_asymptote(None, window, assumed_mode)
+            cfg['L_inf'] = L_hat
+            feats    = extract_features(window, idxs, L_hat)
+            selected = apply_cascade(feats)
+            regime   = (map_to_regime(feats, regime_centroids)
+                        if regime_centroids is not None else 'unknown')
+            current_val = float(curve[depth - 1])
+
+            for target in targets:
+                if depth >= target or target > n_rounds:
+                    continue
+                true_val    = float(curve[target - 1])
+                fx          = float(target)
+                current_err = abs(current_val - true_val)
+
+                preds = {}
+                for m in REAL_EVAL_METHODS:
+                    preds[m] = apply_accelerator(m, window, idxs, fx, cfg)
+                for m in SKILL_REFERENCE_METHODS:
+                    try:
+                        preds[m] = float(METHODS[m](list(window), list(idxs), fx, cfg))
+                    except Exception:
+                        preds[m] = float('nan')
+                preds['cascade'] = preds[selected]
+                assert list(preds) == REAL_DATA_METHODS
+
+                errs = {m: (abs(p - true_val) if np.isfinite(p) else float('nan'))
+                        for m, p in preds.items()}
+                ref_err = best_reference_error(errs)
+                ref_best = min((m for m in SKILL_REFERENCE_METHODS
+                                if np.isfinite(errs[m])),
+                               key=lambda m: errs[m], default='')
+
+                # perturb_iqr of the routed method at this target (cell-level)
+                p_iqr = perturb_iqr_real(window, idxs, selected, fx, cfg,
+                                         perturb_seed(name, depth))
+
+                post_min = int(target > argmin_round)
+
+                for m, p in preds.items():
+                    e = errs[m]
+                    long_rows.append(dict(
+                        dataset=name, obs_depth=depth, target_round=target,
+                        argmin_round=argmin_round, post_min_target=post_min,
+                        method=m, selected_method=selected,
+                        is_cascade=int(m == 'cascade'),
+                        is_trivial=int(m in SKILL_REFERENCE_METHODS),
+                        prediction=p, true_val=true_val, error=e,
+                        current_err=current_err, ref_error=ref_err,
+                        skill=(skill_score(e, ref_err) if np.isfinite(e) else float('nan')),
+                        **skill_vs_table(e, errs),
+                        perturb_iqr=p_iqr,
+                        L_hat=L_hat, assumed_mode=assumed_mode,
+                        nearest_regime=regime,
+                    ))
+
+                casc_err = errs['cascade']
+                summary_rows.append(dict(
+                    dataset=name, obs_depth=depth, target_round=target,
+                    argmin_round=argmin_round, rise_from_min=rise_from_min,
+                    post_min_target=post_min,
+                    selected_method=selected, cascade_pred=preds['cascade'],
+                    true_val=true_val, cascade_err=casc_err,
+                    richardson_err=errs['richardson_1'],
+                    rational_err=errs['rational_fit'],
+                    current_err=current_err, ref_error=ref_err,
+                    ref_best_method=ref_best,
+                    cascade_skill=(skill_score(casc_err, ref_err)
+                                   if np.isfinite(casc_err) else float('nan')),
+                    improvement=((current_err - casc_err) / current_err
+                                 if (np.isfinite(casc_err) and current_err > 1e-10)
+                                 else float('nan')),
+                    **{f'cascade_{k}': v for k, v in skill_vs_table(casc_err, errs).items()},
+                    perturb_iqr=p_iqr,
+                    L_hat=L_hat, assumed_mode=assumed_mode, nearest_regime=regime,
+                    **{f: feats.get(f, np.nan) for f in FEATURE_COLS},
+                    **provenance,
+                ))
+
+    return pd.DataFrame(long_rows), pd.DataFrame(summary_rows)
+
+
+# ── Redesign v2, R9d Part B: the recorded curves under the benchmark's own protocol ──
+
+from src.pipeline import ACCEL_METHODS   # noqa: E402  (the accelerator roster; src.pipeline does not import this module)
+from src.trivial import REFERENCE_TAGS   # noqa: E402  (the (method, tag) pairs behind the skill_vs_* / win_vs_* columns)
+
+# The recorded-curve roster: every accelerator followed by the four deployable
+# trivial predictors.  The oracle is excluded: no asymptote is known on a
+# recorded curve.  The per-cell row count of real_data_roster_v2.csv is
+# len(ROSTER_REAL_METHODS).
+ROSTER_REAL_METHODS = [*ACCEL_METHODS, *SKILL_REFERENCE_METHODS]
+
+# Columns of the roster table, in this order (the eight fixed-reference
+# columns follow src.trivial.skill_vs_table, one skill / win pair per
+# deployable trivial).
+ROSTER_COLUMNS = [
+    'dataset', 'obs_depth', 'target_round', 'argmin_round', 'post_min_target',
+    'method', 'family', 'method_type', 'is_trivial',
+    'prediction_raw', 'valid', 'valid_strict', 'prediction', 'true_val', 'error',
+    'E_last', 'catastrophic', 'improve_ratio', 'ref_error', 'skill',
+    *[c for _, _tag in REFERENCE_TAGS for c in (f'skill_vs_{_tag}', f'win_vs_{_tag}')],
+    'window_max', 'L_hat', 'assumed_mode',
+]
+
+
+def evaluate_recorded_curves_roster(
+    curves:       dict,
+    depths:       list,
+    targets:      list,
+    window_len:   int = 60,
+    assumed_mode: str = None,
+) -> pd.DataFrame:
+    """
+    Every method of ROSTER_REAL_METHODS on the recorded curves, scored with
+    the benchmark's own configuration and per-record definitions.
+
+    Windows and indices are exactly those of evaluate_recorded_curves
+    (window = curve[start:depth], rounds start+1 ... depth, target
+    float(target), L_hat = assumed_asymptote(None, window, assumed_mode)).
+    Per cell the configuration is src.evaluation.build_cfg(target, L_hat)
+    (config.RIDGE, DENOM_TOL, MIN_VALID, MAX_VALID), not the legacy
+    _DEFAULT_CFG of apply_accelerator; every method is called as Phase 1
+    calls it (METHODS[m](...) in a try/except, an exception is NaN), and
+    every record follows the per-record definitions of the Phase-1 loop
+    (src.evaluation.run_phase1), with the same helpers and constants:
+
+        valid         = is_valid(est, cfg)  (finite and in [MIN_VALID, MAX_VALID])
+        error         = |est - true|  if valid else NaN
+        E_last        = the error of last_value
+        catastrophic  = (not valid) or (E_last > 1e-12 and error > CAT_MULT * E_last)
+        improve_ratio = E_last / error  if valid and error > 1e-12;  1.0 if valid otherwise;  NaN if invalid
+        ref_error, skill, skill_vs_* / win_vs_*  from best_reference_error, skill_score, skill_vs_table
+
+    ``prediction_raw`` is the method's return value (finite or NaN) before
+    any validity rule and ``prediction`` is NaN when invalid.
+    ``valid_strict`` = finite and 0 <= prediction_raw <= 2 * window_max, the
+    rule of the legacy recorded-curve path (apply_accelerator), recorded so
+    that both rules can be reported.
+
+    Returns one row per (dataset, obs_depth, target_round, method) with the
+    columns ROSTER_COLUMNS.
+    """
+    import math
+    from src.accelerators import METHODS
+    from src.evaluation import FAMILY, METHOD_TYPE, build_cfg, is_valid
+    from src.trivial import best_reference_error, skill_score, skill_vs_table
+
+    assumed_mode = resolve_mode(assumed_mode)
+    minima = curve_minimum_table(curves).set_index('dataset')
+    rows = []
+
+    for name, curve in curves.items():
+        curve    = np.asarray(curve, dtype=float)
+        n_rounds = len(curve)
+        argmin_round = int(minima.loc[name, 'argmin_round'])
+
+        for depth in depths:
+            if depth >= n_rounds:
+                continue
+            start  = max(0, depth - window_len)
+            window = curve[start:depth]
+            idxs   = np.arange(start + 1, depth + 1, dtype=float)
+            L_hat  = assumed_asymptote(None, window, assumed_mode)
+            window_max = float(np.max(window))
+
+            for target in targets:
+                if depth >= target or target > n_rounds:
+                    continue
+                true_val = float(curve[target - 1])
+                fx       = float(target)
+                cfg      = build_cfg(target, L_hat)
+
+                ests, errs = {}, {}
+                for m in ROSTER_REAL_METHODS:
+                    try:
+                        est = float(METHODS[m](window, idxs, fx, cfg))
+                    except Exception:
+                        est = float('nan')
+                    ests[m] = est
+                    errs[m] = (abs(est - true_val) if is_valid(est, cfg) else float('nan'))
+                ref_err  = best_reference_error(errs)
+                E_last   = errs['last_value']
+                post_min = int(target > argmin_round)
+
+                for m in ROSTER_REAL_METHODS:
+                    est, err = ests[m], errs[m]
+                    valid = math.isfinite(err)
+                    cat   = (not valid) or (E_last > 1e-12 and err > C.CAT_MULT * E_last)
+                    impv  = ((E_last / err) if (valid and err > 1e-12)
+                             else (1.0 if valid else float('nan')))
+                    strict = bool(math.isfinite(est) and 0.0 <= est <= 2.0 * window_max)
+                    row = {
+                        'dataset':         name,
+                        'obs_depth':       depth,
+                        'target_round':    target,
+                        'argmin_round':    argmin_round,
+                        'post_min_target': post_min,
+                        'method':          m,
+                        'family':          FAMILY.get(m, 'unknown'),
+                        'method_type':     METHOD_TYPE[m],
+                        'is_trivial':      int(m in SKILL_REFERENCE_METHODS),
+                        'prediction_raw':  est,
+                        'valid':           int(valid),
+                        'valid_strict':    int(strict),
+                        'prediction':      est if valid else float('nan'),
+                        'true_val':        true_val,
+                        'error':           err if valid else float('nan'),
+                        'E_last':          E_last,
+                        'catastrophic':    int(cat),
+                        'improve_ratio':   impv if math.isfinite(impv) else float('nan'),
+                        'ref_error':       ref_err,
+                        'skill':           skill_score(err, ref_err) if valid else float('nan'),
+                    }
+                    row.update(skill_vs_table(err if valid else float('nan'), errs))
+                    row.update(window_max=window_max, L_hat=L_hat, assumed_mode=assumed_mode)
+                    rows.append(row)
+
+    return pd.DataFrame(rows, columns=ROSTER_COLUMNS)

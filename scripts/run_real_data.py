@@ -1,41 +1,72 @@
 """
 run_real_data.py
 ================
-Real-data experiment entry point — Section 9 of the paper.
+Real-data experiment entry point (redesign v2).
 
-Downloads 6 OpenML CC-18 tabular classification datasets, trains XGBoost
-for 500 rounds on each, extracts Phase 2 features from the validation loss
-curves at obs in {30, 60, 90}, applies the two-rule cascade selector,
-calls the selected accelerator to predict the final loss, and compares
-cascade prediction error against the current_value baseline.
+Default mode re-evaluates the EXISTING recorded XGBoost validation-loss
+curves in results/real_data/real_data_curves.csv.  No retraining, no
+downloads.  Grid: observation depths {30, 60, 90, 120, 150} x target rounds
+{300, 400, 500} with depth < target, assumed-asymptote mode "zero",
+trivial comparators and skill included.  The original 18-cell results
+(real_data_results.csv and its three figures) are left untouched.
 
-Usage
------
-    python scripts/run_real_data.py
-
-Prerequisites
--------------
-    pip install xgboost openml scikit-learn
-
-    Phase 2 full run should have completed first for regime mapping:
-        results/phase2/phase2_features.csv
-    (If absent, regime mapping is skipped but all else runs fine.)
+    python scripts/run_real_data.py                 # re-evaluate recorded curves
+    python scripts/run_real_data.py --quick          # same (accepted for the pipeline)
+    python scripts/run_real_data.py --roster-only    # only the roster evaluation (two files below)
+    python scripts/run_real_data.py --retrain        # LEGACY: download + train
+                                                     # (writes the 18-cell files)
 
 Output directory: results/real_data/
 
-Key output files
-----------------
-    real_data_curves.csv            Raw loss curves (500 rounds x 6 datasets)
-    real_data_results.csv           Per (dataset, obs_depth): features,
-                                    selected method, predicted_val,
-                                    cascade_err, current_err
-    figure_rd_01_comparison.png     Cascade vs current_value error by dataset
-    figure_rd_02_regimes.png        Real curves in synthetic feature space
-    figure_rd_03_improvement.png    Per-dataset improvement ratio heatmap
+Roster evaluation (R9d Part B; written after the files below, or alone with
+--roster-only)
+---------------
+    real_data_roster_v2.csv     one row per (dataset, obs_depth, target_round, method) for
+                                every method of src.trajectories.ROSTER_REAL_METHODS (every
+                                accelerator and the four deployable trivial predictors; no
+                                oracle), scored under the benchmark's own configuration and
+                                per-record definitions (evaluate_recorded_curves_roster)
+    real_data_roster_provenance.json   script, commit, tree state, timing, library versions
+                                (and whether they equal the run manifest's), the numerical
+                                configuration, datasets, cells, methods, rows
+
+New files
+---------
+    real_data_results_v2.csv    one row per (dataset, obs_depth, target_round, method);
+                                perturb_iqr = perturbation IQR of the routed method
+                                for the cell (repeated on every row of the cell)
+    real_data_summary_v2.csv    one row per (dataset, obs_depth, target_round) with
+                                perturb_iqr and the provenance of the regime
+                                centroids (phase2_features_path,
+                                phase2_features_rows, git_head).  The columns
+                                current_val / current_err are schema names for
+                                the last observed value of the window (the
+                                value at the observation depth) and its error
+                                at the target round, i.e. the error of the
+                                last_value trivial comparator.
+    figure_rd_v2_01_skill.png   cascade skill heatmaps (dataset x depth, per target)
+    real_data_curve_minima_v2.csv   per dataset: argmin round of the recorded curve,
+                                its minimum, the value at round 500 and the relative
+                                rise from the minimum (Prompt 5A)
+    real_data_strata_v2.csv     every summary statistic three ways: all cells,
+                                pre-minimum targets, post-minimum targets
+                                (post_min_target = target_round > argmin_round),
+                                including the perturbation-diagnostic AUC per stratum
+
+Every row of the two per-cell files carries argmin_round and post_min_target;
+the summary also carries rise_from_min.  Skill columns: ``skill`` /
+``cascade_skill`` = hindsight best-of-four (strict); ``skill_vs_*`` /
+``win_vs_*`` (and ``cascade_skill_vs_*`` / ``cascade_win_vs_*``) against each
+deployable trivial.
+
+The legacy 18-cell diagnostics (perturb_IQR AUC, z-scored regime mapping) are
+verified by scripts/analyze_real_diagnostics_legacy.py against the stored
+pre-redesign run; they are not part of the v2 pipeline.
 """
 
 import os
 import sys
+import argparse
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.dirname(_HERE)
@@ -47,320 +78,358 @@ import pandas as pd
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-import matplotlib.colors as mcolors
 
-from src.datasets     import run_real_data_experiment, DATASET_IDS
-from src.trajectories import process_curves, FEATURE_COLS
-
-# ── Configuration ──────────────────────────────────────────────────────────────
+import src.config as CFG_MOD
+from src.trajectories import (FEATURE_COLS, REAL_DATA_METHODS, ROSTER_REAL_METHODS, curve_minimum_table,
+                              evaluate_recorded_curves, evaluate_recorded_curves_roster,
+                              process_curves, real_data_strata)
 
 OUT_DIR      = os.path.join('results', 'real_data')
 PHASE2_FEATS = os.path.join('results', 'phase2', 'phase2_features.csv')
-OBS_DEPTHS   = [30, 60, 90]
-WINDOW_LEN   = 60
-L_INF        = 0.01
+ASSUMED_MODE = CFG_MOD.ASSUMED_L_MODE   # "zero": real curves have no oracle
 N_ROUNDS     = 500
-
-METHOD_COLOURS = {
-    'richardson_1': '#f4a261',
-    'rational_fit': '#e91e63',
-}
+ROSTER_CSV   = 'real_data_roster_v2.csv'
+ROSTER_PROV  = 'real_data_roster_provenance.json'
 
 
-# ── Figures ────────────────────────────────────────────────────────────────────
+def n_evaluations(curves_csv: str = None) -> dict:
+    """Planned cells and method evaluations for the re-evaluation grid."""
+    cfg = CFG_MOD.REAL_DATA
+    csv = curves_csv or os.path.join(_ROOT, cfg['curves_csv'])
+    if os.path.exists(csv):
+        n_datasets = len([c for c in pd.read_csv(csv, nrows=1).columns if c != 'round'])
+    else:
+        from src.datasets import DATASET_IDS
+        n_datasets = len(DATASET_IDS)
+    pairs = [(d, t) for d in cfg['depths'] for t in cfg['targets'] if d < t]
+    cells = n_datasets * len(pairs)
+    n_methods = len(REAL_DATA_METHODS)
+    return {'datasets': n_datasets, 'pairs': len(pairs), 'cells': cells,
+            'methods': n_methods, 'evaluations': cells * n_methods}
 
-def fig_comparison(df: pd.DataFrame, out_dir: str):
-    """
-    Figure 1: cascade prediction error vs current_value error,
-    grouped by observation depth. One panel per obs depth.
-    """
-    obs_depths = sorted(df['obs_depth'].unique())
-    datasets   = sorted(df['dataset'].unique())
-    n_obs      = len(obs_depths)
-    x          = np.arange(len(datasets))
-    width      = 0.35
 
-    fig, axes = plt.subplots(1, n_obs, figsize=(5 * n_obs, 5), sharey=True)
-    if n_obs == 1:
+def load_recorded_curves(path: str) -> dict:
+    df = pd.read_csv(path)
+    return {c: df[c].to_numpy(dtype=float) for c in df.columns if c != 'round'}
+
+
+def fig_skill_heatmap(df_sum: pd.DataFrame, out_dir: str) -> str:
+    """Cascade skill per (dataset, depth), one panel per target round."""
+    targets  = sorted(df_sum['target_round'].unique())
+    datasets = sorted(df_sum['dataset'].unique())
+    depths   = sorted(df_sum['obs_depth'].unique())
+    fig, axes = plt.subplots(1, len(targets), figsize=(4.5 * len(targets), 4.5), sharey=True)
+    if len(targets) == 1:
         axes = [axes]
-
-    for ax, obs in zip(axes, obs_depths):
-        sub = df[df['obs_depth'] == obs].set_index('dataset')
-
-        curr_errs = [sub.loc[d, 'current_err']  if d in sub.index else np.nan
-                     for d in datasets]
-        casc_errs = [sub.loc[d, 'cascade_err']  if d in sub.index else np.nan
-                     for d in datasets]
-
-        bars1 = ax.bar(x - width/2, curr_errs, width,
-                       label='current_value', color='#888888', alpha=0.8)
-        bars2 = ax.bar(x + width/2, casc_errs, width,
-                       label='cascade', color='#2196f3', alpha=0.8)
-
-        # Colour cascade bars by selected method
-        for i, d in enumerate(datasets):
-            if d in sub.index:
-                method = sub.loc[d, 'selected_method']
-                bars2[i].set_color(METHOD_COLOURS.get(method, '#2196f3'))
-
-        ax.set_xticks(x)
-        ax.set_xticklabels(datasets, rotation=30, ha='right', fontsize=8)
-        ax.set_title(f'obs = {obs}', fontsize=10)
-        ax.set_xlabel('Dataset')
-        if ax is axes[0]:
-            ax.set_ylabel('|predicted − true final loss|')
-        ax.axhline(0, color='black', linewidth=0.5)
-
-    # Legend
-    from matplotlib.patches import Patch
-    legend_els = [
-        Patch(facecolor='#888888', alpha=0.8, label='current_value (baseline)'),
-        Patch(facecolor=METHOD_COLOURS['richardson_1'], alpha=0.8,
-              label='cascade → richardson_1'),
-        Patch(facecolor=METHOD_COLOURS['rational_fit'],  alpha=0.8,
-              label='cascade → rational_fit'),
-    ]
-    axes[-1].legend(handles=legend_els, fontsize=7, loc='upper right')
-
-    fig.suptitle(
-        'Real-Data Validation: Cascade vs Current-Value Error\n'
-        'by Dataset and Observation Depth',
-        fontsize=11)
-    fig.tight_layout()
-    path = os.path.join(out_dir, 'figure_rd_01_comparison.png')
+    for ax, t in zip(axes, targets):
+        mat = np.full((len(datasets), len(depths)), np.nan)
+        sub = df_sum[df_sum['target_round'] == t]
+        for _, r in sub.iterrows():
+            if r['obs_depth'] in depths:
+                mat[datasets.index(r['dataset']), depths.index(r['obs_depth'])] = r['cascade_skill']
+        im = ax.imshow(np.log10(np.clip(mat, 1e-3, 1e3)), cmap='RdYlGn_r', vmin=-1, vmax=1,
+                       aspect='auto')
+        ax.set_xticks(range(len(depths)))
+        ax.set_xticklabels([f'd={d}' for d in depths], fontsize=8)
+        ax.set_yticks(range(len(datasets)))
+        ax.set_yticklabels(datasets, fontsize=8)
+        ax.set_title(f'target round {t}', fontsize=10, fontweight='bold')
+        for i in range(len(datasets)):
+            for j in range(len(depths)):
+                v = mat[i, j]
+                if np.isfinite(v):
+                    ax.text(j, i, f'{v:.2f}', ha='center', va='center', fontsize=7,
+                            color='black' if 0.3 < v < 3 else 'white')
+    plt.colorbar(im, ax=axes, label='log10 cascade skill  (<0: beats best trivial)', shrink=0.8)
+    fig.suptitle('Recorded real curves: cascade skill vs best-of-four trivial reference '
+                 f'(mode = {ASSUMED_MODE})', fontsize=10, fontweight='bold')
+    path = os.path.join(out_dir, 'figure_rd_v2_01_skill.png')
     fig.savefig(path, dpi=150, bbox_inches='tight')
     plt.close(fig)
     print(f'  Saved: {path}')
+    return path
 
 
-def fig_regime_scatter(df: pd.DataFrame, out_dir: str):
-    """
-    Figure 2: Real curves overlaid on synthetic regime centroids
-    in (log_log_slope, richardson_r2) feature space.
-    """
-    if not os.path.exists(PHASE2_FEATS):
-        print('  Skipping regime scatter — phase2_features.csv not found.')
-        return
-
-    df_synth  = pd.read_csv(PHASE2_FEATS)
-    centroids = df_synth.groupby('regime')[FEATURE_COLS].mean().dropna()
-    fx, fy    = 'log_log_slope', 'richardson_r2'
-
-    fig, ax = plt.subplots(figsize=(9, 6))
-
-    # Synthetic regime centroids
-    cmap   = plt.get_cmap('tab20', len(centroids))
-    for i, (regime, row) in enumerate(centroids.iterrows()):
-        ax.scatter(row[fx], row[fy],
-                   marker='s', s=100, color=cmap(i), alpha=0.55, zorder=2)
-        ax.annotate(regime, (row[fx], row[fy]),
-                    fontsize=6, alpha=0.75,
-                    xytext=(3, 3), textcoords='offset points')
-
-    # Real curves — one point per (dataset, obs_depth)
-    markers = ['*', 'D', 'P', '^', 'v', 'X']
-    datasets = sorted(df['dataset'].unique())
-    for j, dataset in enumerate(datasets):
-        sub = df[df['dataset'] == dataset]
-        ax.scatter(sub[fx], sub[fy],
-                   marker=markers[j % len(markers)],
-                   s=160, zorder=5, edgecolors='black', linewidths=0.5,
-                   label=dataset)
-        for _, row in sub.iterrows():
-            ax.annotate(
-                f"obs={int(row['obs_depth'])}",
-                (row[fx], row[fy]),
-                fontsize=6, color='black',
-                xytext=(4, -8), textcoords='offset points')
-
-    ax.set_xlabel('log_log_slope', fontsize=10)
-    ax.set_ylabel('richardson_r2', fontsize=10)
-    ax.set_title('Real XGBoost Curves in Synthetic Feature Space', fontsize=11)
-    ax.legend(fontsize=7, ncol=2, loc='lower right',
-              title='Real datasets', title_fontsize=7)
-    fig.tight_layout()
-    path = os.path.join(out_dir, 'figure_rd_02_regimes.png')
-    fig.savefig(path, dpi=150, bbox_inches='tight')
-    plt.close(fig)
-    print(f'  Saved: {path}')
-
-
-def fig_improvement(df: pd.DataFrame, out_dir: str):
-    """
-    Figure 3: Improvement ratio heatmap.
-    improvement = (current_err - cascade_err) / current_err
-    Positive = cascade beats baseline. Negative = cascade worse.
-    """
-    datasets   = sorted(df['dataset'].unique())
-    obs_depths = sorted(df['obs_depth'].unique())
-
-    matrix = np.full((len(datasets), len(obs_depths)), np.nan)
-    for i, d in enumerate(datasets):
-        for j, obs in enumerate(obs_depths):
-            row = df[(df['dataset'] == d) & (df['obs_depth'] == obs)]
-            if row.empty:
-                continue
-            c_err = float(row['current_err'].values[0])
-            p_err = float(row['cascade_err'].values[0])
-            if np.isfinite(p_err) and c_err > 1e-10:
-                matrix[i, j] = (c_err - p_err) / c_err
-
-    fig, ax = plt.subplots(figsize=(6, 5))
-    vmax = max(abs(np.nanmax(matrix)), abs(np.nanmin(matrix)), 0.01)
-    im = ax.imshow(matrix, aspect='auto',
-                   cmap='RdYlGn', vmin=-vmax, vmax=vmax)
-
-    ax.set_xticks(range(len(obs_depths)))
-    ax.set_xticklabels([f'obs={o}' for o in obs_depths], fontsize=9)
-    ax.set_yticks(range(len(datasets)))
-    ax.set_yticklabels(datasets, fontsize=9)
-    ax.set_title('Cascade Improvement over Current-Value\n'
-                 '(green = cascade better, red = cascade worse)', fontsize=10)
-
-    # Annotate cells
-    for i in range(len(datasets)):
-        for j in range(len(obs_depths)):
-            v = matrix[i, j]
-            if np.isfinite(v):
-                ax.text(j, i, f'{v:+.1%}', ha='center', va='center',
-                        fontsize=8, color='black' if abs(v) < 0.5 else 'white')
-            else:
-                ax.text(j, i, 'N/A', ha='center', va='center',
-                        fontsize=8, color='grey')
-
-    plt.colorbar(im, ax=ax, label='Relative improvement')
-    fig.tight_layout()
-    path = os.path.join(out_dir, 'figure_rd_03_improvement.png')
-    fig.savefig(path, dpi=150, bbox_inches='tight')
-    plt.close(fig)
-    print(f'  Saved: {path}')
-
-
-# ── Console summary ────────────────────────────────────────────────────────────
-
-def print_summary(df: pd.DataFrame):
-    print('\n' + '=' * 80)
-    print('  REAL-DATA EXPERIMENT SUMMARY')
-    print('=' * 80)
-
-    print(f'\n  Datasets  : {sorted(df["dataset"].unique())}')
-    print(f'  Obs depths: {sorted(df["obs_depth"].unique())}')
-
-    # Per-row table
-    print(f'\n  {"Dataset":<18} {"Obs":>5} {"Method":<16} '
-          f'{"Predicted":>11} {"True final":>11} '
-          f'{"Cascade err":>12} {"Curr err":>10} {"Improv":>8}')
-    print('  ' + '─' * 95)
-
-    for _, row in df.sort_values(['dataset', 'obs_depth']).iterrows():
-        improv = ((row['current_err'] - row['cascade_err']) / row['current_err']
-                  if np.isfinite(row['cascade_err']) and row['current_err'] > 1e-10
-                  else float('nan'))
-        pred_str = (f"{row['predicted_val']:>11.6f}"
-                    if np.isfinite(row['predicted_val']) else '        NaN')
-        casc_str = (f"{row['cascade_err']:>12.6f}"
-                    if np.isfinite(row['cascade_err']) else '         NaN')
-        imp_str  = (f"{improv:>+8.1%}"
-                    if np.isfinite(improv) else '     N/A')
-        print(f"  {row['dataset']:<18} {int(row['obs_depth']):>5} "
-              f"{row['selected_method']:<16} "
-              f"{pred_str} {row['true_final']:>11.6f} "
-              f"{casc_str} {row['current_err']:>10.6f} {imp_str}")
-
-    # Aggregate by obs_depth
-    print(f'\n  Mean errors by observation depth:')
-    print(f"  {'Obs':>5} {'Cascade err':>13} {'Current err':>13} "
-          f"{'Mean improvement':>18}")
-    print('  ' + '─' * 55)
-    for obs in sorted(df['obs_depth'].unique()):
-        sub = df[df['obs_depth'] == obs]
-        c_mean = sub['cascade_err'].mean()
-        b_mean = sub['current_err'].mean()
-        improv = (b_mean - c_mean) / b_mean if b_mean > 1e-10 else float('nan')
-        print(f"  {obs:>5} {c_mean:>13.6f} {b_mean:>13.6f} {improv:>+18.1%}")
-
-    # Method selection
-    print(f'\n  Method selection:')
-    counts = df['selected_method'].value_counts()
-    for method, count in counts.items():
-        sub    = df[df['selected_method'] == method]
-        c_mean = sub['cascade_err'].mean()
-        pct    = 100 * count / len(df)
-        print(f"    {method:<20} {count:>4} ({pct:.1f}%)  "
-              f"mean cascade err = {c_mean:.6f}")
-
-    # Regime mapping
-    print(f'\n  Nearest synthetic regime:')
-    for regime, count in df['nearest_regime'].value_counts().items():
-        pct = 100 * count / len(df)
-        print(f"    {regime:<28} {count:>4} ({pct:.1f}%)")
-
+def print_strata_v2(df_min: pd.DataFrame, df_strata: pd.DataFrame, df_sum: pd.DataFrame):
+    """Curve minima per dataset and the three-way (all / pre-min / post-min) summary."""
+    print('  Recorded-curve minima (a target round beyond the argmin is a post-minimum target):')
+    print(f"  {'dataset':<16} {'rounds':>6} {'argmin':>7} {'min':>9} {'@round':>7} {'value':>9} {'rise':>8}")
+    print('  ' + '-' * 70)
+    for _, r in df_min.iterrows():
+        print(f"  {r['dataset']:<16} {int(r['n_rounds']):>6} {int(r['argmin_round']):>7} {r['min_value']:>9.5f} "
+              f"{int(r['at_round']):>7} {r['value_at_round']:>9.5f} {100 * r['rise_from_min']:>+7.2f}%")
+    print('\n  Three-way summary (failure = cascade skill >= 1; AUC: higher perturb_iqr read as failure):')
+    print(f"  {'stratum':<9} {'cells':>5} {'fail':>5} {'rate':>6} {'med err':>9} {'med skill':>10} {'med impr':>9} "
+          f"{'win/assumed':>11} {'win/last':>9} {'AUC':>6} {'p':>6}  ordering")
+    print('  ' + '-' * 110)
+    for _, r in df_strata.iterrows():
+        print(f"  {r['stratum']:<9} {int(r['n_cells']):>5} {int(r['n_fail']):>5} {r['fail_rate']:>6.3f} "
+              f"{r['med_cascade_err']:>9.5f} {r['med_cascade_skill']:>10.3f} {r['med_improvement']:>+9.3f} "
+              f"{r['win_rate_vs_assumed']:>11.3f} {r['win_rate_vs_last']:>9.3f} {r['perturb_auc']:>6.3f} "
+              f"{r['perturb_p']:>6.3f}  {r['perturb_ordering']}")
+    ct = pd.crosstab(df_sum['post_min_target'].map({0: 'pre-min', 1: 'post-min'}),
+                     (df_sum['cascade_skill'] >= 1).map({False: 'ok', True: 'fail'}), margins=True)
+    print('\n  Failure crosstab (rows: target vs the curve minimum):')
+    for line in ct.to_string().splitlines():
+        print('    ' + line)
     print()
 
 
-# ── Main ───────────────────────────────────────────────────────────────────────
+def print_summary_v2(df_long: pd.DataFrame, df_sum: pd.DataFrame):
+    print('\n' + '=' * 80)
+    print('  REAL-DATA RE-EVALUATION SUMMARY  (recorded curves, no retraining)')
+    print('=' * 80)
+    print(f'\n  Datasets   : {sorted(df_sum["dataset"].unique())}')
+    print(f'  Cells      : {len(df_sum)}  (depth < target)')
+    print(f'  L_hat mode : {ASSUMED_MODE}')
 
-def main():
-    os.makedirs(OUT_DIR, exist_ok=True)
+    print(f'\n  Per (depth, target): mean errors and median cascade skill')
+    print(f"  {'depth':>6} {'target':>7} {'cascade':>10} {'richardson':>11} {'rational':>10} "
+          f"{'current':>10} {'best-triv':>10} {'med skill':>10} {'beats triv':>11}")
+    print('  ' + '─' * 92)
+    for (d, t), sub in df_sum.groupby(['obs_depth', 'target_round']):
+        beats = float((sub['cascade_skill'] < 1).mean())
+        print(f"  {int(d):>6} {int(t):>7} {sub['cascade_err'].mean():>10.5f} "
+              f"{sub['richardson_err'].mean():>11.5f} {sub['rational_err'].mean():>10.5f} "
+              f"{sub['current_err'].mean():>10.5f} {sub['ref_error'].mean():>10.5f} "
+              f"{sub['cascade_skill'].median():>10.3f} {beats:>11.2f}")
+
+    print(f'\n  Method median skill over all cells (hindsight best-of-four, strict; skill < 1 beats the best trivial reference):')
+    for m, sub in df_long.groupby('method'):
+        print(f"    {m:<18} med skill = {sub['skill'].median():.3f}   "
+              f"finite = {int(sub['skill'].notna().sum())}/{len(sub)}")
+
+    print(f'\n  Cascade method selection: {dict(df_sum["selected_method"].value_counts())}')
+    print(f'  Best trivial reference:   {dict(df_sum["ref_best_method"].value_counts())}')
+
+    piqr = df_sum['perturb_iqr']
+    print(f'\n  perturb_iqr of the routed method ({CFG_MOD.PERTURB_TRIALS} trials, '
+          f'{100 * CFG_MOD.PERTURB_SCALE:g}% perturbation, crc32 seed per (dataset, depth)): '
+          f'finite = {int(piqr.notna().sum())}/{len(piqr)}, median = {piqr.median():.5f}, '
+          f'range = [{piqr.min():.5f}, {piqr.max():.5f}]')
+    for m, sub in df_sum.groupby('selected_method'):
+        print(f'    routed {m:<14} n = {len(sub):>3}  median perturb_iqr = '
+              f'{sub["perturb_iqr"].median():.5f}')
+
+    prov = df_sum.iloc[0]
+    print(f'\n  Provenance (recorded on every summary row):')
+    print(f'    phase2_features_path = {prov["phase2_features_path"]!r}')
+    print(f'    phase2_features_rows = {int(prov["phase2_features_rows"])}'
+          + ('   (file absent: regime mapping = unknown)'
+             if int(prov["phase2_features_rows"]) == 0 else ''))
+    print(f'    git_head             = {prov["git_head"]}')
+    print()
+
+
+def _git_head() -> dict:
+    """Full and short hash of the checked-out commit ("unknown" outside a git checkout)."""
+    import subprocess
+    out = {}
+    for key, cmd in (('full', ['rev-parse', 'HEAD']), ('short', ['rev-parse', '--short', 'HEAD'])):
+        try:
+            out[key] = subprocess.check_output(['git'] + cmd, cwd=_ROOT, stderr=subprocess.DEVNULL).decode().strip()
+        except Exception:
+            out[key] = 'unknown'
+    return out
+
+
+def _tracked_tree_clean():
+    """True when `git status --porcelain --untracked-files=no` prints nothing (None outside git)."""
+    import subprocess
+    try:
+        out = subprocess.check_output(['git', 'status', '--porcelain', '--untracked-files=no'],
+                                      cwd=_ROOT, stderr=subprocess.DEVNULL).decode()
+        return out.strip() == ''
+    except Exception:
+        return None
+
+
+def run_roster(args, curves: dict) -> tuple:
+    """
+    The roster evaluation of the recorded curves (R9d Part B): every method of
+    ROSTER_REAL_METHODS under the benchmark's own configuration and scoring
+    (src.trajectories.evaluate_recorded_curves_roster), written to
+    real_data_roster_v2.csv with its own provenance file
+    real_data_roster_provenance.json.  Touches nothing else.
+    """
+    import datetime as _dt
+    import json
+    import time
+    from reproduce_all import _versions
+    from scripts.analyze_by_ltrue import load_manifest
+
+    cfg = CFG_MOD.REAL_DATA
+    os.makedirs(args.out_dir, exist_ok=True)
+    t0 = time.time()
+    started = _dt.datetime.now().isoformat(timespec='seconds')
+    head = _git_head()
+    clean = _tracked_tree_clean()
+    df = evaluate_recorded_curves_roster(curves, depths=cfg['depths'], targets=cfg['targets'],
+                                         window_len=cfg['window_len'], assumed_mode=ASSUMED_MODE)
+    finished = _dt.datetime.now().isoformat(timespec='seconds')
+    seconds = round(time.time() - t0, 1)
+
+    p_csv = os.path.join(args.out_dir, ROSTER_CSV)
+    df.to_csv(p_csv, index=False)
+    cells = int(df.drop_duplicates(['dataset', 'obs_depth', 'target_round']).shape[0]) if len(df) else 0
+    versions = _versions()
+    M = load_manifest(os.path.join(_ROOT, 'results'))
+    run_versions = (M or {}).get('versions')
+    prov = {
+        'script': 'scripts/run_real_data.py' + (' --roster-only' if getattr(args, 'roster_only', False) else ''),
+        'output': os.path.relpath(p_csv, _ROOT).replace(os.sep, '/'),
+        'git_head': head,
+        'tracked_tree_clean': clean,
+        'started': started,
+        'finished': finished,
+        'seconds': seconds,
+        'versions': versions,
+        'versions_equal_run_manifest': (versions == run_versions) if run_versions is not None else None,
+        'configuration': {
+            'RIDGE': CFG_MOD.RIDGE, 'DENOM_TOL': CFG_MOD.DENOM_TOL,
+            'MIN_VALID': CFG_MOD.MIN_VALID, 'MAX_VALID': CFG_MOD.MAX_VALID,
+            'CAT_MULT': CFG_MOD.CAT_MULT,
+            'window_len': cfg['window_len'], 'assumed_mode': ASSUMED_MODE,
+            'depths': list(cfg['depths']), 'targets': list(cfg['targets']),
+            'validity': 'src.evaluation.is_valid: finite and MIN_VALID <= prediction <= MAX_VALID '
+                        '(valid_strict = the legacy rule, finite and 0 <= prediction <= 2 * window max, recorded alongside)',
+        },
+        'datasets': sorted(curves),
+        'cells': cells,
+        'methods': len(ROSTER_REAL_METHODS),
+        'method_names': list(ROSTER_REAL_METHODS),
+        'rows': int(len(df)),
+        'note': ('This evaluation was added after the full run recorded in results/run_manifest.json'
+                 + (f" (started {M.get('started')}, code {M.get('git_head', {}).get('short')})" if M else '')
+                 + '; it applies the benchmark\'s own protocol (src.evaluation: build_cfg, is_valid, the per-record '
+                   'definitions of run_phase1) to the recorded curves and changes no file of that run.'),
+    }
+    p_prov = os.path.join(args.out_dir, ROSTER_PROV)
+    with open(p_prov, 'w', encoding='utf-8', newline='\n') as fh:
+        json.dump(prov, fh, indent=2)
+        fh.write('\n')
+    print(f'  Saved: {p_csv}  ({len(df)} rows = {cells} cells x {len(ROSTER_REAL_METHODS)} methods; {seconds} s)')
+    print(f'  Saved: {p_prov}')
+    return p_csv, p_prov
+
+
+def parse_args():
+    p = argparse.ArgumentParser(description='Real-data experiment (redesign v2)')
+    p.add_argument('--quick', action='store_true', help='accepted for pipeline uniformity')
+    p.add_argument('--full', action='store_true', help='accepted for pipeline uniformity')
+    p.add_argument('--retrain', action='store_true',
+                   help='LEGACY path: download OpenML data, retrain XGBoost, write the '
+                        '18-cell files (requires internet, xgboost, openml)')
+    p.add_argument('--roster-only', action='store_true',
+                   help='write only real_data_roster_v2.csv and real_data_roster_provenance.json '
+                        '(every method under the benchmark protocol); no legacy CSV, no figure')
+    p.add_argument('--curves', default=os.path.join(_ROOT, CFG_MOD.REAL_DATA['curves_csv']))
+    p.add_argument('--out-dir', default=OUT_DIR)
+    return p.parse_args()
+
+
+def main_reevaluate(args):
+    cfg = CFG_MOD.REAL_DATA
+    os.makedirs(args.out_dir, exist_ok=True)
+    counts = n_evaluations(args.curves)
 
     print('=' * 72)
-    print('  REAL-DATA EXPERIMENT  (Section 9)')
+    print('  REAL DATA — RE-EVALUATION OF RECORDED CURVES  (redesign v2)')
+    print('=' * 72)
+    print(f'  Curves     : {args.curves}')
+    print(f'  Depths     : {cfg["depths"]}')
+    print(f'  Targets    : {cfg["targets"]}  (cells need depth < target)')
+    print(f'  Window len : {cfg["window_len"]}')
+    print(f'  L_hat mode : {ASSUMED_MODE}  (no oracle on real curves)')
+    print(f'  Methods    : {len(REAL_DATA_METHODS)}  {REAL_DATA_METHODS}')
+    print(f'  Cells      : {counts["cells"]}  ->  {counts["evaluations"]} evaluations')
+    print(f'  Output dir : {args.out_dir}')
+    print(f'  Legacy 18-cell results are preserved (real_data_results.csv untouched).')
+    print('=' * 72 + '\n')
+
+    if not os.path.exists(args.curves):
+        print(f'ERROR: {args.curves} not found; nothing to re-evaluate.')
+        return 1
+
+    curves = load_recorded_curves(args.curves)
+    df_long, df_sum = evaluate_recorded_curves(
+        curves, depths=cfg['depths'], targets=cfg['targets'],
+        window_len=cfg['window_len'], assumed_mode=ASSUMED_MODE,
+        phase2_features_path=PHASE2_FEATS)
+
+    p1 = os.path.join(args.out_dir, 'real_data_results_v2.csv')
+    p2 = os.path.join(args.out_dir, 'real_data_summary_v2.csv')
+    df_long.to_csv(p1, index=False)
+    df_sum.to_csv(p2, index=False)
+    print(f'  Saved: {p1}  ({len(df_long)} rows)')
+    print(f'  Saved: {p2}  ({len(df_sum)} rows)')
+
+    df_min = curve_minimum_table(curves, last_round=N_ROUNDS)
+    p3 = os.path.join(args.out_dir, 'real_data_curve_minima_v2.csv')
+    df_min.to_csv(p3, index=False)
+    print(f'  Saved: {p3}  ({len(df_min)} rows)')
+    df_strata = real_data_strata(df_sum)
+    p4 = os.path.join(args.out_dir, 'real_data_strata_v2.csv')
+    df_strata.to_csv(p4, index=False)
+    print(f'  Saved: {p4}  ({len(df_strata)} rows)')
+
+    fig_skill_heatmap(df_sum, args.out_dir)
+    print_summary_v2(df_long, df_sum)
+    print_strata_v2(df_min, df_strata, df_sum)
+    # R9d Part B: every method under the benchmark protocol, after the legacy outputs
+    print(f'  Roster evaluation: {len(ROSTER_REAL_METHODS)} methods x {counts["cells"]} cells '
+          f'under the benchmark configuration (src.evaluation)')
+    run_roster(args, curves)
+    print('=' * 72 + '\n')
+    return 0
+
+
+def main_roster_only(args):
+    """--roster-only: the two roster files and nothing else."""
+    if not os.path.exists(args.curves):
+        print(f'ERROR: {args.curves} not found; nothing to evaluate.')
+        return 1
+    curves = load_recorded_curves(args.curves)
+    print('=' * 72)
+    print('  REAL DATA — ROSTER EVALUATION OF THE RECORDED CURVES  (benchmark protocol)')
+    print('=' * 72)
+    print(f'  Curves     : {args.curves}')
+    print(f'  Methods    : {len(ROSTER_REAL_METHODS)}  (every accelerator + the four deployable trivials)')
+    print(f'  L_hat mode : {ASSUMED_MODE}')
+    run_roster(args, curves)
+    print('=' * 72 + '\n')
+    return 0
+
+
+def main_retrain(args):
+    """LEGACY path (not part of reproduce_all): download, retrain, 18-cell outputs."""
+    from src.datasets import run_real_data_experiment, DATASET_IDS
+    os.makedirs(args.out_dir, exist_ok=True)
+    print('=' * 72)
+    print('  REAL-DATA EXPERIMENT — LEGACY RETRAIN PATH')
     print('=' * 72)
     print(f'  Datasets   : {list(DATASET_IDS.keys())}')
     print(f'  Rounds     : {N_ROUNDS}')
-    print(f'  Obs depths : {OBS_DEPTHS}')
-    print(f'  Window len : {WINDOW_LEN}')
-    print(f'  L_inf      : {L_INF}')
-    print(f'  Output dir : {OUT_DIR}')
-
-    if not os.path.exists(PHASE2_FEATS):
-        print(f'\n  WARNING: {PHASE2_FEATS} not found.')
-        print('  Regime mapping skipped.')
-        print('  Run  python scripts/run_phase2.py --full  first.\n')
-
+    print(f'  L_hat mode : {ASSUMED_MODE}')
     print('=' * 72 + '\n')
+    curves = run_real_data_experiment(out_dir=args.out_dir, n_rounds=N_ROUNDS)
+    df = process_curves(curves=curves, obs_depths=[30, 60, 90], window_len=60,
+                        assumed_mode=ASSUMED_MODE, phase2_features_path=PHASE2_FEATS,
+                        future_x=N_ROUNDS)
+    p = os.path.join(args.out_dir, 'real_data_results.csv')
+    df.to_csv(p, index=False)
+    print(f'  Results saved to {p}')
+    return 0
 
-    # ── Step 1: Download datasets and train XGBoost ────────────────────────────
-    print('STEP 1 — Downloading datasets and training XGBoost ...\n')
-    curves = run_real_data_experiment(
-        out_dir  = OUT_DIR,
-        n_rounds = N_ROUNDS,
-    )
 
-    # ── Step 2: Features + cascade + accelerator predictions ──────────────────
-    print('\nSTEP 2 — Extracting features, selecting methods, predicting ...\n')
-    df = process_curves(
-        curves               = curves,
-        obs_depths           = OBS_DEPTHS,
-        window_len           = WINDOW_LEN,
-        L_inf                = L_INF,
-        phase2_features_path = PHASE2_FEATS,
-        future_x             = N_ROUNDS,
-    )
-
-    # Save full results table
-    results_path = os.path.join(OUT_DIR, 'real_data_results.csv')
-    df.to_csv(results_path, index=False)
-    print(f'  Results saved to {results_path}')
-
-    # ── Step 3: Figures ────────────────────────────────────────────────────────
-    print('\nSTEP 3 — Generating figures ...\n')
-    fig_comparison(df, OUT_DIR)
-    fig_regime_scatter(df, OUT_DIR)
-    fig_improvement(df, OUT_DIR)
-
-    # ── Step 4: Console summary ────────────────────────────────────────────────
-    print_summary(df)
-
-    print('=' * 72)
-    print('  Output files:')
-    print(f'    {OUT_DIR}/real_data_curves.csv')
-    print(f'    {OUT_DIR}/real_data_results.csv')
-    print(f'    {OUT_DIR}/figure_rd_01_comparison.png')
-    print(f'    {OUT_DIR}/figure_rd_02_regimes.png')
-    print(f'    {OUT_DIR}/figure_rd_03_improvement.png')
-    print('=' * 72 + '\n')
+def main():
+    args = parse_args()
+    if args.retrain:
+        return main_retrain(args)
+    if args.roster_only:
+        return main_roster_only(args)
+    return main_reevaluate(args)
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

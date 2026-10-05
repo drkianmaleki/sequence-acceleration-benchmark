@@ -1,0 +1,550 @@
+{
+  "schema": "dangerous_methods/v3",
+  "criterion": "pooled valid_rate < RANK_MIN_VALID on the core regimes at the Phase-1 depth, pooled over gap strata and noise, capped cells excluded, oracle excluded; accelerators only; the flag is computed on the unrounded pooled mean",
+  "legacy_name": "'dangerous' is the legacy implementation name for the exclusion condition (pooled validity below RANK_MIN_VALID); the paper calls it the excluded set",
+  "pool": "accelerators",
+  "n_pool": 52,
+  "rank_min_valid": 0.9,
+  "asymptote_mode": "hetero",
+  "assumed_mode": "zero",
+  "gap_fractions": [
+    0.5,
+    0.1,
+    0.02
+  ],
+  "source": "results/phase1/phase1_aggregated.csv",
+  "git_head": "d82fd26",
+  "created": "2026-10-01T23:11:09",
+  "dangerous_methods": [
+    "geom_avg_diff",
+    "linear",
+    "neville_2",
+    "neville_3",
+    "neville_4",
+    "pade_21",
+    "pade_31",
+    "pade_32"
+  ],
+  "table": [
+    {
+      "method": "neville_4",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 0.344897,
+      "cat_rate": 0.748299,
+      "med_error": 10.320859,
+      "n_cells": 147,
+      "dangerous": 1
+    },
+    {
+      "method": "neville_3",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 0.502039,
+      "cat_rate": 0.768481,
+      "med_error": 110.894684,
+      "n_cells": 147,
+      "dangerous": 1
+    },
+    {
+      "method": "linear",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 0.582541,
+      "cat_rate": 0.631067,
+      "med_error": 0.219786,
+      "n_cells": 147,
+      "dangerous": 1
+    },
+    {
+      "method": "geom_avg_diff",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 0.590939,
+      "cat_rate": 0.44943,
+      "med_error": 0.046084,
+      "n_cells": 147,
+      "dangerous": 1
+    },
+    {
+      "method": "neville_2",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 0.672801,
+      "cat_rate": 0.721318,
+      "med_error": 3.490449,
+      "n_cells": 147,
+      "dangerous": 1
+    },
+    {
+      "method": "pade_21",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 0.673015,
+      "cat_rate": 0.546034,
+      "med_error": 0.193879,
+      "n_cells": 147,
+      "dangerous": 1
+    },
+    {
+      "method": "pade_32",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 0.748753,
+      "cat_rate": 0.524489,
+      "med_error": 0.164487,
+      "n_cells": 147,
+      "dangerous": 1
+    },
+    {
+      "method": "pade_31",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 0.801588,
+      "cat_rate": 0.70272,
+      "med_error": 0.555379,
+      "n_cells": 147,
+      "dangerous": 1
+    },
+    {
+      "method": "pade_22",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 0.933787,
+      "cat_rate": 0.161679,
+      "med_error": 0.023297,
+      "n_cells": 147,
+      "dangerous": 0
+    },
+    {
+      "method": "wynn_eps_3",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 0.957371,
+      "cat_rate": 0.058048,
+      "med_error": 0.046971,
+      "n_cells": 147,
+      "dangerous": 0
+    },
+    {
+      "method": "wynn_eps_2",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 0.967802,
+      "cat_rate": 0.048299,
+      "med_error": 0.049563,
+      "n_cells": 147,
+      "dangerous": 0
+    },
+    {
+      "method": "log_linear",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 0.971431,
+      "cat_rate": 0.088888,
+      "med_error": 0.01947,
+      "n_cells": 147,
+      "dangerous": 0
+    },
+    {
+      "method": "wynn_rho_3",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 0.973247,
+      "cat_rate": 0.070517,
+      "med_error": 0.054923,
+      "n_cells": 147,
+      "dangerous": 0
+    },
+    {
+      "method": "brezinski_theta2",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 0.976873,
+      "cat_rate": 0.08866,
+      "med_error": 0.049554,
+      "n_cells": 147,
+      "dangerous": 0
+    },
+    {
+      "method": "wynn_rho_2",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 0.978233,
+      "cat_rate": 0.053516,
+      "med_error": 0.057143,
+      "n_cells": 147,
+      "dangerous": 0
+    },
+    {
+      "method": "levin_t2",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 0.978912,
+      "cat_rate": 0.040592,
+      "med_error": 0.049504,
+      "n_cells": 147,
+      "dangerous": 0
+    },
+    {
+      "method": "levin_v2",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 0.978912,
+      "cat_rate": 0.043083,
+      "med_error": 0.054663,
+      "n_cells": 147,
+      "dangerous": 0
+    },
+    {
+      "method": "wynn_rho_1",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 0.978912,
+      "cat_rate": 0.034468,
+      "med_error": 0.05181,
+      "n_cells": 147,
+      "dangerous": 0
+    },
+    {
+      "method": "double_exp_fit",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 0.979592,
+      "cat_rate": 0.028116,
+      "med_error": 0.024129,
+      "n_cells": 147,
+      "dangerous": 0
+    },
+    {
+      "method": "levin_t1",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 0.979592,
+      "cat_rate": 0.034468,
+      "med_error": 0.050724,
+      "n_cells": 147,
+      "dangerous": 0
+    },
+    {
+      "method": "levin_u1",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 0.979592,
+      "cat_rate": 0.074603,
+      "med_error": 0.071894,
+      "n_cells": 147,
+      "dangerous": 0
+    },
+    {
+      "method": "levin_u2",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 0.979592,
+      "cat_rate": 0.045809,
+      "med_error": 0.051341,
+      "n_cells": 147,
+      "dangerous": 0
+    },
+    {
+      "method": "levin_v1",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 0.979592,
+      "cat_rate": 0.049203,
+      "med_error": 0.052547,
+      "n_cells": 147,
+      "dangerous": 0
+    },
+    {
+      "method": "shanks_4",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 0.979592,
+      "cat_rate": 0.039681,
+      "med_error": 0.049637,
+      "n_cells": 147,
+      "dangerous": 0
+    },
+    {
+      "method": "wynn_eps_1",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 0.979592,
+      "cat_rate": 0.034468,
+      "med_error": 0.050724,
+      "n_cells": 147,
+      "dangerous": 0
+    },
+    {
+      "method": "pade_44",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 0.980497,
+      "cat_rate": 0.103631,
+      "med_error": 0.035225,
+      "n_cells": 147,
+      "dangerous": 0
+    },
+    {
+      "method": "pade_13",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 0.98118,
+      "cat_rate": 0.135378,
+      "med_error": 0.035276,
+      "n_cells": 147,
+      "dangerous": 0
+    },
+    {
+      "method": "richardson_3",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 0.982545,
+      "cat_rate": 0.071878,
+      "med_error": 0.018935,
+      "n_cells": 147,
+      "dangerous": 0
+    },
+    {
+      "method": "pade_12",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 0.984354,
+      "cat_rate": 0.105671,
+      "med_error": 0.028494,
+      "n_cells": 147,
+      "dangerous": 0
+    },
+    {
+      "method": "pade_33",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 0.988209,
+      "cat_rate": 0.151927,
+      "med_error": 0.021143,
+      "n_cells": 147,
+      "dangerous": 0
+    },
+    {
+      "method": "pade_34",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 0.989344,
+      "cat_rate": 0.11043,
+      "med_error": 0.027994,
+      "n_cells": 147,
+      "dangerous": 0
+    },
+    {
+      "method": "pade_23",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 0.990024,
+      "cat_rate": 0.106576,
+      "med_error": 0.029994,
+      "n_cells": 147,
+      "dangerous": 0
+    },
+    {
+      "method": "pade_45",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 0.992066,
+      "cat_rate": 0.094329,
+      "med_error": 0.029698,
+      "n_cells": 147,
+      "dangerous": 0
+    },
+    {
+      "method": "richardson_2",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 0.992516,
+      "cat_rate": 0.063946,
+      "med_error": 0.021081,
+      "n_cells": 147,
+      "dangerous": 0
+    },
+    {
+      "method": "pade_11",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 0.996146,
+      "cat_rate": 0.073017,
+      "med_error": 0.032892,
+      "n_cells": 147,
+      "dangerous": 0
+    },
+    {
+      "method": "shanks_2",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 0.99932,
+      "cat_rate": 0.020407,
+      "med_error": 0.051103,
+      "n_cells": 147,
+      "dangerous": 0
+    },
+    {
+      "method": "anderson_1",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 1.0,
+      "cat_rate": 0.01406,
+      "med_error": 0.075034,
+      "n_cells": 147,
+      "dangerous": 0
+    },
+    {
+      "method": "anderson_2",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 1.0,
+      "cat_rate": 0.010657,
+      "med_error": 0.073282,
+      "n_cells": 147,
+      "dangerous": 0
+    },
+    {
+      "method": "anderson_3",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 1.0,
+      "cat_rate": 0.010884,
+      "med_error": 0.072352,
+      "n_cells": 147,
+      "dangerous": 0
+    },
+    {
+      "method": "best_shanks_wynn",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 1.0,
+      "cat_rate": 0.01406,
+      "med_error": 0.051552,
+      "n_cells": 147,
+      "dangerous": 0
+    },
+    {
+      "method": "brezinski_theta1",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 1.0,
+      "cat_rate": 0.039456,
+      "med_error": 0.050847,
+      "n_cells": 147,
+      "dangerous": 0
+    },
+    {
+      "method": "log_fit",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 1.0,
+      "cat_rate": 0.024944,
+      "med_error": 0.0635,
+      "n_cells": 147,
+      "dangerous": 0
+    },
+    {
+      "method": "median_ensemble",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 1.0,
+      "cat_rate": 0.006802,
+      "med_error": 0.047312,
+      "n_cells": 147,
+      "dangerous": 0
+    },
+    {
+      "method": "rational_fit",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 1.0,
+      "cat_rate": 0.011112,
+      "med_error": 0.022823,
+      "n_cells": 147,
+      "dangerous": 0
+    },
+    {
+      "method": "richardson_1",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 1.0,
+      "cat_rate": 0.049887,
+      "med_error": 0.024657,
+      "n_cells": 147,
+      "dangerous": 0
+    },
+    {
+      "method": "richardson_a05",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 1.0,
+      "cat_rate": 0.011112,
+      "med_error": 0.025115,
+      "n_cells": 147,
+      "dangerous": 0
+    },
+    {
+      "method": "richardson_a10",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 1.0,
+      "cat_rate": 0.006123,
+      "med_error": 0.040007,
+      "n_cells": 147,
+      "dangerous": 0
+    },
+    {
+      "method": "richardson_a20",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 1.0,
+      "cat_rate": 0.004988,
+      "med_error": 0.079704,
+      "n_cells": 147,
+      "dangerous": 0
+    },
+    {
+      "method": "shanks_1",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 1.0,
+      "cat_rate": 0.01406,
+      "med_error": 0.051552,
+      "n_cells": 147,
+      "dangerous": 0
+    },
+    {
+      "method": "shanks_3",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 1.0,
+      "cat_rate": 0.018139,
+      "med_error": 0.050861,
+      "n_cells": 147,
+      "dangerous": 0
+    },
+    {
+      "method": "single_exp_fit",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 1.0,
+      "cat_rate": 0.007028,
+      "med_error": 0.032822,
+      "n_cells": 147,
+      "dangerous": 0
+    },
+    {
+      "method": "stability_weighted",
+      "is_trivial": 0,
+      "eligible": 1,
+      "valid_rate": 1.0,
+      "cat_rate": 0.020633,
+      "med_error": 0.046187,
+      "n_cells": 147,
+      "dangerous": 0
+    }
+  ]
+}

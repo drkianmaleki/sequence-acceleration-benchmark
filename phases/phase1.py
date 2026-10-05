@@ -21,6 +21,6 @@ Usage (via script)
 """
 
 from src.evaluation import run_phase1 as run      # re-export under canonical name
-from src.evaluation import build_cfg, stability_score, is_valid
+from src.evaluation import build_cfg, is_valid
 
-__all__ = ["run", "build_cfg", "stability_score", "is_valid"]
+__all__ = ["run", "build_cfg", "is_valid"]

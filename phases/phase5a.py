@@ -1,35 +1,70 @@
 """
-phase5a.py  (v3)
-================
-Phase 5A — Full 51-Method Ensemble with Ablation.
-
-v3 changes vs v2
-----------------
-  * Added threshold_ensemble variants: filter by perturb_IQR threshold,
-    then equal-weight median.  Avoids EPS calibration problems.
-  * Added capped_diag_ensemble: weight = 1/(IQR+EPS) but capped at
-    5× median weight to prevent any single method from dominating.
-  * SELECTORS list updated to include new variants.
-  * EPS kept at 0.01 for uncapped variants.
+phase5a.py  (v4, redesign v2)
+=============================
+Phase 5A — Full-Pool Ensemble with Ablation.
 
 Key ablation questions
 -----------------------
-Q1. Does 51 methods beat 9 methods?    diag_9 vs diag_51
-Q2. Does weighting beat equal?         equal_51 vs diag_51
-Q3. Does threshold filter beat equal?  equal_51 vs threshold_ens_010
-Q4. How much does oracle improve?      oracle_9 vs oracle_51
+Q1. Does the full accelerator pool beat the small pool?  diag_<P> vs diag_<N>
+Q2. Does weighting beat equal?         equal_<N> vs diag_<N>
+Q3. Does threshold filter beat equal?  equal_<N> vs threshold_ens_010
+Q4. How much does oracle improve?      oracle_<P> vs oracle_<N>
+    (<N> = the roster size len(src.pipeline.ACCEL_METHODS), <P> = the size of
+    the Phase-2 pool len(src.pipeline.PHASE2_POOL); the selector names
+    oracle_<N>, equal_ensemble_<N>, diag_ensemble_<N>, capped_diag_<N>,
+    oracle_<P>, equal_ensemble_<P>, diag_ensemble_<P> are built from these
+    lengths, never hard-coded)
 Q5. Where is the residual gap?         per-regime decomposition
 Q6. Are dangerous methods auto-IDed?   method weight ranking
 
+Redesign v2
+-----------
+  * Evaluation points are the three gap strata per (regime, obs_idx); every
+    raw record carries target_g, achieved_g, n_f, capped, L_true, L_hat,
+    skill (hindsight best-of-four, strict), skill_vs_* / win_vs_* against each
+    deployable trivial, is_trivial, is_oracle, is_holdout, is_dangerous.
+  * The ensemble / oracle pool is the accelerator roster (N_ACCEL).  The five trivial
+    comparators are evaluated and reported as fixed reference selectors
+    (constant_oracle labelled) but never mixed into an ensemble.
+  * The dangerous set is read from the Phase-1 artifact
+    (src.dangerous.load_dangerous); the phase refuses to run without it.
+  * Core and held-out regimes are evaluated; pooled comparisons use the core
+    regimes with capped cells excluded; held-out and capped blocks are
+    written separately.  Every selector row is the descriptive panel
+    (src.panels.error_panel) of the selector's records on that slice --
+    n_total, n_valid, valid_rate, cat_rate over all records; mean / sd /
+    median / q25 / q75 / p90 error over the valid ones, conditional on
+    validity and written next to the validity rate; win_rate_vs_last -- plus
+    a median skill (hindsight best-of-four, strict) and med_skill_vs_* /
+    win_rate_vs_* against each deployable trivial.  A selector's record on a
+    cell is the record of the method it chose (or the ensemble value); an
+    invalid choice is an invalid record and is never replaced.
+  * phase5a_validity_by_depth.csv (method x obs_idx x noise: valid rate, n)
+    is written as a committed aggregate of the raw records, so the depth
+    dependence of validity is on record without the git-ignored raw file.
+  * The evaluation grid is chunked over (obs_idx x noise) blocks
+    (evaluate_block) and can run in a process pool (run_phase5a(jobs=N),
+    scripts/run_phase5a.py --jobs N).  Blocks are independent by
+    construction (the noise stream is seeded per (obs_idx, sigma, seed); the
+    generated sequence length is fixed by the grid's largest obs_idx), so the
+    per-block shards concatenated in serial order give a phase5a_raw.csv
+    that is byte-identical for any job count.
+  * The perturbations are paired (src.diagnostics.perturbation_factors): one
+    factor array per (regime, obs_idx, noise, seed) window, keyed on those
+    four values, shared by every method (PERTURB_METHODS) and every horizon
+    of the window.  A method's perturb_iqr does not depend on which other
+    methods are evaluated or on the order of the regimes, and two methods on
+    the same window are compared on identical perturbed windows.
+
 Author : Kian Maleki
-Date   : 2026-05-24
+Date   : 2026-05-24 (v1), 2026-09-19 (redesign v2), 2026-09-27 (paired perturbations)
 """
 
-import os, math, warnings
+import os, math, shutil, time, warnings
 import numpy as np
 import pandas as pd
 from scipy.optimize import curve_fit
-from typing import List
+from typing import List, Optional
 
 import matplotlib
 matplotlib.use('Agg')
@@ -39,28 +74,59 @@ import matplotlib.patches as mpatches
 warnings.filterwarnings('ignore')
 
 import src.config as CFG_MOD
-from src.accelerators import METHODS, METHOD_NAMES
-from src.generators   import GENERATORS, REGIME_NAMES, TRUTH
+from src.accelerators import METHODS
+from src.generators   import regime_functions
+from src.asymptote    import assumed_asymptote
+from src.dangerous    import load_dangerous
+from src.diagnostics  import perturbation_factors, perturb_iqr_with_factors
+from src.panels       import PANEL_COLS, error_panel
+from src.pipeline     import (PHASE2_POOL, ACCEL_METHODS, capped_block, exclude_capped,
+                              horizon_meta, is_holdout, method_flags,
+                              resolve_regimes)
+from src.trivial      import (MED_SKILL_VS_COLS, REFERENCE_TAGS, TRIVIAL_METHOD_NAMES,
+                              WIN_RATE_VS_COLS, best_reference_error, skill_score,
+                              skill_vs_from_arrays, skill_vs_table)
 
-PHASE2_METHODS = [
-    'current_value', 'richardson_1', 'richardson_a10',
-    'single_exp_fit', 'rational_fit', 'pade_22',
-    'log_linear', 'weniger_d2', 'anderson_1',
-]
+PHASE2_METHODS = list(PHASE2_POOL)     # src.pipeline: the Phase-2 pool (eight accelerators + last_value)
 
-# Single definition lives in src/config.py; see the note there on re-deriving
-# it after any change that alters Phase 1 results.
-DANGEROUS = set(CFG_MOD.DANGEROUS_METHODS)
+POOL         = list(ACCEL_METHODS)                 # the accelerator roster (ensembles, oracles)
+N_POOL       = len(POOL)                           # selector names derive from it
+ORACLE_POOL  = f'oracle_{N_POOL}'
+EQUAL_POOL   = f'equal_ensemble_{N_POOL}'
+DIAG_POOL    = f'diag_ensemble_{N_POOL}'
+CAPPED_POOL  = f'capped_diag_{N_POOL}'
+ABL_THRESHOLD_VS_EQUAL = f'threshold_vs_equal_{N_POOL}'
+ABL_DIAG_VS_EQUAL      = f'diag_vs_equal_{N_POOL}'
+N_SMALL      = len(PHASE2_METHODS)                 # the Phase-2 pool size; small-pool selector names derive from it
+ORACLE_SMALL = f'oracle_{N_SMALL}'
+EQUAL_SMALL  = f'equal_ensemble_{N_SMALL}'
+DIAG_SMALL   = f'diag_ensemble_{N_SMALL}'
+ABL_WEIGHTING_SMALL = f'weighting_gain_{N_SMALL}'
+EVAL_METHODS = POOL + list(TRIVIAL_METHOD_NAMES)   # + the trivial comparators (reference rows)
+# perturb_iqr is computed for every ensemble / oracle pool member: the
+# accelerator roster and the Phase-2 pool (whose last_value member is a
+# trivial comparator but takes part in the small-pool ensembles).
+PERTURB_METHODS = [m for m in EVAL_METHODS if m in POOL or m in PHASE2_METHODS]
+TRIVIAL_SELECTORS = list(TRIVIAL_METHOD_NAMES)
+_SKILL_VS_RECORD  = [f'skill_vs_{t}' for _, t in REFERENCE_TAGS] + [f'win_vs_{t}' for _, t in REFERENCE_TAGS]
 
 EPS     = 0.01   # for continuous weighting
 FIG_DPI = 150
+CELL    = ['regime', 'obs_idx', 'noise', 'seed', 'target_g']
+RATE_COLS = ('valid_rate', 'cat_rate', 'win_rate_vs_last')                       # written with 4 decimals
+ERR_COLS  = ('mean_error', 'sd_error', 'med_error', 'q25_error', 'q75_error', 'p90_error')   # 6 decimals
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
-def _cfg(fid):
-    return {'L_inf': CFG_MOD.L_INF, 'ridge': CFG_MOD.RIDGE,
-            'min_valid': CFG_MOD.MIN_VALID, 'max_valid': CFG_MOD.MAX_VALID,
-            'denom_tol': CFG_MOD.DENOM_TOL}
+def _cfg(fid, L_hat, L_true=None):
+    # L_hat is the ASSUMED asymptote (src.asymptote); L_true only feeds the
+    # constant_oracle comparator through cfg['L_true'].
+    cfg = {'L_inf': float(L_hat), 'ridge': CFG_MOD.RIDGE,
+           'min_valid': CFG_MOD.MIN_VALID, 'max_valid': CFG_MOD.MAX_VALID,
+           'denom_tol': CFG_MOD.DENOM_TOL}
+    if L_true is not None:
+        cfg['L_true'] = float(L_true)
+    return cfg
 
 def _valid(v, cfg):
     return bool(math.isfinite(v) and cfg['min_valid'] <= v <= cfg['max_valid'])
@@ -75,28 +141,17 @@ def _save_csv(df, out_dir, fname):
     df.to_csv(p, index=False)
     print(f'  Saved: {p}  ({len(df)} rows)')
 
-
-# ── perturb IQR ───────────────────────────────────────────────────────────────
-def _perturb_iqr(seq_win, idx_win, future_x, method, cfg,
-                  n_trials, scale, rng):
-    fn   = METHODS[method]
-    arr  = np.asarray(seq_win, dtype=float)
-    ests = []
-    for _ in range(n_trials):
-        v = fn(list(arr * (1.0 + scale * rng.randn(len(arr)))),
-               idx_win, future_x, cfg)
-        if _valid(v, cfg):
-            ests.append(v)
-    if len(ests) < 2:
-        return float('nan')
-    return float(np.subtract(*np.percentile(ests, [75, 25])))
+def _headline(df, default_g):
+    gs = set(df['target_g'].unique())
+    g = CFG_MOD.HEADLINE_G if default_g is None else float(default_g)
+    return g if g in gs else float(max(gs))
 
 
 # ── Phase 2 cascade features ──────────────────────────────────────────────────
-def _cascade_features(seq_win, idx_win):
+def _cascade_features(seq_win, idx_win, L_hat):
     s  = np.asarray(seq_win, dtype=float)
     x  = np.asarray(idx_win, dtype=float)
-    L0 = max(0.0, min(CFG_MOD.L_INF, float(np.min(s)) * 0.5))
+    L0 = max(0.0, min(float(L_hat), float(np.min(s)) * 0.5))
 
     slope = float('nan')
     pos   = (s - L0) > 0
@@ -137,101 +192,224 @@ def _phase2_cascade(slope, r2):
 # 1.  MAIN EVALUATION LOOP
 # =============================================================================
 
-def run_phase5a(obs_idx_list, noise_list, future_list, n_seeds,
+def evaluate_block(obs_idx, sigma, n_max, n_seeds, regimes, gap_fractions,
+                   window_len, perturb_trials, perturb_scale, dangerous,
+                   methods=None, perturb_methods=None):
+    """
+    One (obs_idx, sigma) block of the grid: every seed x regime x stratum x
+    method, in the serial loop order.  Self-contained so it can run in a
+    worker process: the noise stream is created per (obs_idx, sigma, seed)
+    exactly as the serial loop did, and n_max (the largest obs_idx of the
+    whole grid) fixes the generated sequence length so the noise draws do
+    not depend on which blocks share the process.  The perturbation factors
+    of a window are drawn once (src.diagnostics.perturbation_factors, keyed
+    on regime, seed, obs_idx and sigma) and shared by every method and
+    horizon of that window.  ``methods`` / ``perturb_methods`` default to
+    EVAL_METHODS / PERTURB_METHODS (tests pass subsets).  Returns the block's
+    records as a DataFrame.
+    """
+    regimes       = list(regimes)
+    gap_fractions = [float(g) for g in gap_fractions]
+    dangerous     = set(dangerous)
+    methods       = list(EVAL_METHODS if methods is None else methods)
+    perturb_set   = set(PERTURB_METHODS if perturb_methods is None else perturb_methods)
+    n_arr   = np.arange(int(n_max) + 1, dtype=float)
+    wl      = min(window_len, obs_idx)
+    records = []
+
+    for seed in range(n_seeds):
+        rng   = np.random.RandomState(
+            seed * 137 + int(sigma * 1e6) % 9973 + obs_idx * 7)
+
+        for regime in regimes:
+            # Hidden per-(regime, seed) asymptote; methods never see L_true.
+            gen, truth_fn, L_true = regime_functions(regime, seed)
+            seq_full = gen(n_arr, rng, sigma)
+
+            w_start  = max(0, obs_idx - wl + 1)
+            seq_win  = list(seq_full[w_start : obs_idx + 1])
+            idx_win  = list(range(w_start, obs_idx + 1))
+            curr_val = float(seq_full[obs_idx])
+            L_hat    = assumed_asymptote(L_true, seq_win)
+            slope, r2 = _cascade_features(seq_win, idx_win, L_hat)
+            hold     = is_holdout(regime)
+            # paired perturbations: one factor array per window
+            factors  = perturbation_factors(regime, seed, obs_idx, sigma,
+                                            len(seq_win), perturb_trials, perturb_scale)
+
+            for g in gap_fractions:
+                hm       = horizon_meta(regime, obs_idx, g, seed)
+                n_f      = hm['n_f']
+                true_val = float(truth_fn(n_f))
+                curr_err = abs(curr_val - true_val)
+                cfg      = _cfg(n_f, L_hat, L_true)
+
+                ests, errs = {}, {}
+                for method in methods:
+                    try:
+                        est = float(METHODS[method](seq_win, idx_win, float(n_f), cfg))
+                    except Exception:
+                        est = float('nan')
+                    ests[method] = est
+                    errs[method] = abs(est - true_val) if _valid(est, cfg) else float('nan')
+                ref_err = best_reference_error(errs)
+
+                for method in methods:
+                    est, err = ests[method], errs[method]
+                    valid = math.isfinite(err)
+                    cat   = (not valid) or (
+                        curr_err > 1e-12 and err > CFG_MOD.CAT_MULT * curr_err)
+                    p_iqr = (perturb_iqr_with_factors(METHODS[method], seq_win, idx_win,
+                                                      float(n_f), cfg, factors)
+                             if method in perturb_set else float('nan'))
+                    rec = {
+                        'regime':       regime,
+                        'is_holdout':   hold,
+                        'obs_idx':      obs_idx,
+                        'noise':        sigma,
+                        'seed':         seed,
+                        'L_true':       L_true,
+                        'L_hat':        L_hat,
+                        'method':       method,
+                        'true_val':     true_val,
+                        'estimate':     est if valid else float('nan'),
+                        'error':        err,
+                        'valid':        int(valid),
+                        'catastrophic': int(cat),
+                        'curr_err':     curr_err,
+                        'ref_error':    ref_err,
+                        'skill':        skill_score(err, ref_err) if valid else float('nan'),
+                        'perturb_iqr':  p_iqr,
+                        'is_dangerous': int(method in dangerous),
+                        'casc_slope':   slope,
+                        'casc_r2':      r2,
+                    }
+                    rec.update(skill_vs_table(err if valid else float('nan'), errs))
+                    rec.update(hm)
+                    rec.update(method_flags(method))
+                    records.append(rec)
+
+    return pd.DataFrame(records)
+
+
+def _block_task(args):
+    """Worker entry point: evaluate one block, write its shard, return the frame."""
+    idx, obs_idx, sigma, kw, shard_path = args
+    t0 = time.perf_counter()
+    df = evaluate_block(obs_idx, sigma, **kw)
+    df.to_csv(shard_path, index=False)
+    return idx, df, time.perf_counter() - t0
+
+
+def default_jobs() -> int:
+    """cpu_count() - 1, at least 1."""
+    return max(1, (os.cpu_count() or 2) - 1)
+
+
+def _fmt_secs(t: float) -> str:
+    if t < 90:
+        return f'{t:.1f} s'
+    if t < 5400:
+        return f'{t / 60:.1f} min'
+    return f'{t / 3600:.2f} h'
+
+
+def run_phase5a(obs_idx_list, noise_list, gap_fractions, n_seeds,
                 window_len, perturb_trials, perturb_scale,
-                out_dir, verbose=True):
+                out_dir, dangerous, core_regimes=None, holdout_regimes=None,
+                verbose=True, jobs=1, keep_shards=False):
+    """
+    Evaluate the grid as (obs_idx x noise) blocks, serially (jobs=1) or in a
+    process pool (jobs>1).  Each block writes a shard to out_dir/shards/; the
+    shards are concatenated in serial block order into phase5a_raw.csv, so the
+    raw table is byte-identical for any job count.  Prints the first
+    completed block's timing and the projected wall time of the evaluation
+    stage at the chosen job count (equal-cost blocks assumed; the aggregation
+    and figures that follow are not included).
+    """
     os.makedirs(out_dir, exist_ok=True)
+    regimes = resolve_regimes(core_regimes, holdout_regimes, include_holdout=True)
+    gap_fractions = [float(g) for g in gap_fractions]
+    dangerous = set(dangerous)
+    jobs = int(jobs) if jobs else default_jobs()
 
-    all_methods = list(METHOD_NAMES)
-    n_arr       = np.arange(max(future_list) + 200, dtype=float)
-    n_total     = (len(obs_idx_list) * len(noise_list)
-                   * n_seeds * len(REGIME_NAMES))
-    done        = 0
-    records     = []
-
-    print(f'  Methods in pool : {len(all_methods)}  '
-          f'(including {len(DANGEROUS)} dangerous)')
-    print(f'  Progress updates: every {max(1, n_total // 20)} '
-          f'regime-groups  (~5% increments)\n')
-
-    for obs_idx in obs_idx_list:
-        wl = min(window_len, obs_idx)
-
-        for sigma in noise_list:
-            for seed in range(n_seeds):
-                rng   = np.random.RandomState(
-                    seed * 137 + int(sigma * 1e6) % 9973 + obs_idx * 7)
-                rng_p = np.random.RandomState(seed * 999 + obs_idx)
-
-                for regime in REGIME_NAMES:
-                    seq_full = GENERATORS[regime](n_arr, rng, sigma)
-                    truth_fn = TRUTH[regime]
-
-                    w_start  = max(0, obs_idx - wl + 1)
-                    seq_win  = list(seq_full[w_start : obs_idx + 1])
-                    idx_win  = list(range(w_start, obs_idx + 1))
-                    curr_val = float(seq_full[obs_idx])
-                    slope, r2 = _cascade_features(seq_win, idx_win)
-
-                    for fid in future_list:
-                        true_val = float(truth_fn(fid))
-                        curr_err = abs(curr_val - true_val)
-                        cfg      = _cfg(fid)
-
-                        for method in all_methods:
-                            fn = METHODS[method]
-                            try:
-                                est = fn(seq_win, idx_win, float(fid), cfg)
-                            except Exception:
-                                est = float('nan')
-
-                            valid = _valid(est, cfg)
-                            err   = abs(est - true_val) if valid else float('nan')
-                            cat   = (not valid) or (
-                                valid and curr_err > 1e-12
-                                and err > CFG_MOD.CAT_MULT * curr_err)
-
-                            p_iqr = _perturb_iqr(
-                                seq_win, idx_win, float(fid),
-                                method, cfg,
-                                perturb_trials, perturb_scale, rng_p)
-
-                            records.append({
-                                'regime':       regime,
-                                'obs_idx':      obs_idx,
-                                'noise':        sigma,
-                                'seed':         seed,
-                                'method':       method,
-                                'future_idx':   fid,
-                                'true_val':     true_val,
-                                'estimate':     est if valid else float('nan'),
-                                'error':        err,
-                                'valid':        int(valid),
-                                'catastrophic': int(cat),
-                                'curr_err':     curr_err,
-                                'perturb_iqr':  p_iqr,
-                                'is_dangerous': int(method in DANGEROUS),
-                                'casc_slope':   slope,
-                                'casc_r2':      r2,
-                            })
-
-                    # progress counter INSIDE regime loop
-                    done += 1
-                    if verbose and done % max(1, n_total // 20) == 0:
-                        print(f'  [{done:>6}/{n_total}]  '
-                              f'{100*done/n_total:5.1f}%  '
-                              f'regime={regime:<20}  '
-                              f'obs={obs_idx}  sigma={sigma:.3f}',
-                              flush=True)
+    blocks = [(obs_idx, sigma) for obs_idx in obs_idx_list for sigma in noise_list]
+    n_blocks = len(blocks)
+    jobs = max(1, min(jobs, n_blocks))
+    cells_per_block = n_seeds * len(regimes) * len(gap_fractions)
+    kw = dict(n_max=max(obs_idx_list), n_seeds=n_seeds, regimes=regimes,
+              gap_fractions=gap_fractions, window_len=window_len,
+              perturb_trials=perturb_trials, perturb_scale=perturb_scale,
+              dangerous=sorted(dangerous))
+    shard_dir = os.path.join(out_dir, 'shards')
+    os.makedirs(shard_dir, exist_ok=True)
+    tasks = [(i, obs_idx, sigma, kw,
+              os.path.join(shard_dir, f'phase5a_raw_part{i:03d}_obs{obs_idx}_sigma{sigma:g}.csv'))
+             for i, (obs_idx, sigma) in enumerate(blocks)]
 
     if verbose:
-        print(f'\n  [{n_total}/{n_total}] 100.0%  Done.\n')
+        print(f'  Pool (ensembles): {len(POOL)} accelerators  '
+              f'({len(dangerous & set(POOL))} dangerous per artifact); '
+              f'small pool {len(PHASE2_METHODS)} (perturb_iqr for {len(PERTURB_METHODS)} methods)')
+        print(f'  Reference rows  : {len(TRIVIAL_METHOD_NAMES)} trivial comparators '
+              f'(oracle labelled, never pooled)')
+        print(f'  Chunking        : {n_blocks} (obs_idx x noise) blocks of '
+              f'{cells_per_block:,} cells, {jobs} job(s); shards in {shard_dir}\n')
 
-    df = pd.DataFrame(records)
+    frames  = [None] * n_blocks
+    t_start = time.perf_counter()
+    n_done  = 0
+
+    def _on_result(idx, df, t_block):
+        nonlocal n_done
+        n_done += 1
+        frames[idx] = df
+        obs_idx, sigma = blocks[idx]
+        wall = time.perf_counter() - t_start
+        if verbose:
+            print(f'  [{n_done:>3}/{n_blocks}] block obs={obs_idx:<4} sigma={sigma:<6g} '
+                  f'{len(df):>8,} rows  compute {_fmt_secs(t_block):>9}  '
+                  f'wall {_fmt_secs(wall):>9}', flush=True)
+        if n_done == 1 and verbose:
+            rounds = math.ceil(n_blocks / jobs)
+            print(f'\n  FIRST CHUNK: obs={obs_idx} sigma={sigma:g}: {cells_per_block:,} cells, '
+                  f'{len(df):,} rows in {_fmt_secs(t_block)} compute '
+                  f'({1000 * t_block / cells_per_block:.1f} ms/cell), '
+                  f'{_fmt_secs(wall)} wall since start')
+            print(f'  PROJECTION  : {n_blocks} chunks / {jobs} jobs = {rounds} round(s) '
+                  f'x {_fmt_secs(wall)} = {_fmt_secs(rounds * wall)} evaluation wall time '
+                  f'at --jobs {jobs}  (serial equivalent {_fmt_secs(n_blocks * t_block)}; '
+                  f'equal-cost chunks assumed; aggregation and figures extra)\n',
+                  flush=True)
+
+    if jobs == 1:
+        for task in tasks:
+            _on_result(*_block_task(task))
+    else:
+        import multiprocessing as mp
+        ctx = mp.get_context('spawn')
+        with ctx.Pool(processes=jobs) as pool:
+            for idx, df, t_block in pool.imap_unordered(_block_task, tasks):
+                _on_result(idx, df, t_block)
+
+    if verbose:
+        print(f'\n  [{n_blocks}/{n_blocks}] 100.0%  Done in '
+              f'{_fmt_secs(time.perf_counter() - t_start)}.\n')
+
+    # Concatenate the shards in serial block order.
+    df = pd.concat(frames, ignore_index=True)
     p  = os.path.join(out_dir, 'phase5a_raw.csv')
     df.to_csv(p, index=False)
     sz = os.path.getsize(p) // 1024 // 1024
-    print(f'  Saved: {p}  ({len(df):,} rows,  {sz} MB)')
+    if verbose:
+        print(f'  Saved: {p}  ({len(df):,} rows,  {sz} MB; {n_blocks} shards concatenated)')
+    if not keep_shards:
+        # A file-sync client can hold the folder open briefly on Windows.
+        for _ in range(5):
+            shutil.rmtree(shard_dir, ignore_errors=True)
+            if not os.path.isdir(shard_dir):
+                break
+            time.sleep(0.5)
     return df
 
 
@@ -239,8 +417,7 @@ def run_phase5a(obs_idx_list, noise_list, future_list, n_seeds,
 # 2.  ENSEMBLE COMPUTATION
 # =============================================================================
 
-def _compute_ensembles(grp, true_val, all_methods, phase2_methods,
-                        slope, r2):
+def _compute_ensembles(grp, true_val, pool, phase2_methods, slope, r2, dangerous):
     mi = grp.set_index('method')
 
     def _err(m):
@@ -255,29 +432,33 @@ def _compute_ensembles(grp, true_val, all_methods, phase2_methods,
     # ── Fixed single methods ───────────────────────────────────────────────────
     out['fixed_rational']   = _err('rational_fit')
     out['fixed_richardson'] = _err('richardson_1')
-    out['current_value']    = _err('current_value')
     out['phase2_cascade']   = _err(_phase2_cascade(slope, r2))
 
+    # ── Trivial comparators as fixed reference selectors (oracle labelled) ─────
+    for m in TRIVIAL_SELECTORS:
+        out[m] = _err(m)
+
     # ── Oracles ───────────────────────────────────────────────────────────────
-    e9  = [_err(m) for m in phase2_methods if math.isfinite(_err(m))]
-    e51 = [_err(m) for m in all_methods    if math.isfinite(_err(m))]
-    out['oracle_9']  = min(e9)  if e9  else float('nan')
-    out['oracle_51'] = min(e51) if e51 else float('nan')
+    e_small = [_err(m) for m in phase2_methods if math.isfinite(_err(m))]
+    e_pool  = [_err(m) for m in pool           if math.isfinite(_err(m))]
+    out[ORACLE_SMALL] = min(e_small) if e_small else float('nan')
+    out[ORACLE_POOL]  = min(e_pool)  if e_pool  else float('nan')
+
+    safe = [m for m in pool if m not in dangerous]
 
     # ── Equal-weight ensembles (median) ────────────────────────────────────────
-    def _equal_ens(pool):
-        ests = [_est(m) for m in pool if math.isfinite(_est(m))]
+    def _equal_ens(p_):
+        ests = [_est(m) for m in p_ if math.isfinite(_est(m))]
         return abs(float(np.median(ests)) - true_val) if ests else float('nan')
 
-    out['equal_ensemble_51']   = _equal_ens(all_methods)
-    out['equal_ensemble_9']    = _equal_ens(phase2_methods)
-    out['equal_ensemble_safe'] = _equal_ens(
-        [m for m in all_methods if m not in DANGEROUS])
+    out[EQUAL_POOL]   = _equal_ens(pool)
+    out[EQUAL_SMALL]  = _equal_ens(phase2_methods)
+    out['equal_ensemble_safe'] = _equal_ens(safe)
 
     # ── Diagnostic-weighted ensemble (continuous 1/IQR, EPS=0.01) ─────────────
-    def _diag_ens(pool):
+    def _diag_ens(p_):
         ests, ws = [], []
-        for m in pool:
+        for m in p_:
             e = _est(m); q = _iqr(m)
             if math.isfinite(e) and math.isfinite(q):
                 ests.append(e); ws.append(1.0 / (q + EPS))
@@ -286,15 +467,14 @@ def _compute_ensembles(grp, true_val, all_methods, phase2_methods,
         w = np.array(ws); w /= w.sum()
         return abs(float(np.dot(w, ests)) - true_val)
 
-    out['diag_ensemble_51']   = _diag_ens(all_methods)
-    out['diag_ensemble_9']    = _diag_ens(phase2_methods)
-    out['diag_ensemble_safe'] = _diag_ens(
-        [m for m in all_methods if m not in DANGEROUS])
+    out[DIAG_POOL]   = _diag_ens(pool)
+    out[DIAG_SMALL]  = _diag_ens(phase2_methods)
+    out['diag_ensemble_safe'] = _diag_ens(safe)
 
     # ── Capped diagnostic ensemble (weight <= 5x median weight) ───────────────
-    def _capped_diag_ens(pool):
+    def _capped_diag_ens(p_):
         ests, ws = [], []
-        for m in pool:
+        for m in p_:
             e = _est(m); q = _iqr(m)
             if math.isfinite(e) and math.isfinite(q):
                 ests.append(e); ws.append(1.0 / (q + EPS))
@@ -306,80 +486,73 @@ def _compute_ensembles(grp, true_val, all_methods, phase2_methods,
         ws /= ws.sum()
         return abs(float(np.dot(ws, ests)) - true_val)
 
-    out['capped_diag_51']  = _capped_diag_ens(all_methods)
-    out['capped_diag_safe'] = _capped_diag_ens(
-        [m for m in all_methods if m not in DANGEROUS])
+    out[CAPPED_POOL]   = _capped_diag_ens(pool)
+    out['capped_diag_safe'] = _capped_diag_ens(safe)
 
     # ── Threshold ensemble: filter high-IQR, then equal weight ────────────────
-    # threshold_010 : exclude methods with perturb_IQR > 0.10
-    # threshold_050 : exclude methods with perturb_IQR > 0.50
-    # threshold_safe: exclude only DANGEROUS by name, keep all valid IQR
-    def _threshold_ens(pool, iqr_threshold, exclude_names=None):
+    def _threshold_ens(p_, iqr_threshold, exclude_names=None):
         if exclude_names is None:
             exclude_names = set()
         ests = []
-        for m in pool:
+        for m in p_:
             if m in exclude_names:
                 continue
             e = _est(m); q = _iqr(m)
             if not math.isfinite(e):
                 continue
-            # include if IQR is below threshold OR IQR is NaN
-            # (NaN-IQR methods like weniger are always stable-ish; include them
-            # only if not excluded by name and not dangerous)
             iqr_ok = (not math.isfinite(q)) or (q <= iqr_threshold)
             if iqr_ok:
                 ests.append(e)
         return abs(float(np.median(ests)) - true_val) if ests else float('nan')
 
-    out['threshold_ens_010'] = _threshold_ens(
-        all_methods, 0.10, exclude_names=DANGEROUS)
-    out['threshold_ens_050'] = _threshold_ens(
-        all_methods, 0.50, exclude_names=DANGEROUS)
-    out['threshold_ens_safe'] = _threshold_ens(
-        all_methods, 1e9, exclude_names=DANGEROUS)   # exclude dangerous only
+    out['threshold_ens_010']  = _threshold_ens(pool, 0.10, exclude_names=dangerous)
+    out['threshold_ens_050']  = _threshold_ens(pool, 0.50, exclude_names=dangerous)
+    out['threshold_ens_safe'] = _threshold_ens(pool, 1e9,  exclude_names=dangerous)
 
     return out
 
 
 SELECTORS = [
-    'oracle_51',
-    'oracle_9',
+    ORACLE_POOL,
+    ORACLE_SMALL,
     'threshold_ens_010',
     'threshold_ens_050',
     'threshold_ens_safe',
-    'capped_diag_51',
+    CAPPED_POOL,
     'capped_diag_safe',
-    'diag_ensemble_51',
+    DIAG_POOL,
     'diag_ensemble_safe',
-    'equal_ensemble_51',
+    EQUAL_POOL,
     'equal_ensemble_safe',
-    'diag_ensemble_9',
-    'equal_ensemble_9',
+    DIAG_SMALL,
+    EQUAL_SMALL,
     'phase2_cascade',
     'fixed_rational',
     'fixed_richardson',
-    'current_value',
-]
+] + TRIVIAL_SELECTORS
 
 SELECTOR_COLOURS = {
-    'oracle_51':          '#000000',
-    'oracle_9':           '#444444',
+    ORACLE_POOL:          '#000000',
+    ORACLE_SMALL:         '#444444',
     'threshold_ens_010':  '#2e7d32',
     'threshold_ens_050':  '#66bb6a',
     'threshold_ens_safe': '#a5d6a7',
-    'capped_diag_51':     '#1a237e',
+    CAPPED_POOL:          '#1a237e',
     'capped_diag_safe':   '#3949ab',
-    'diag_ensemble_51':   '#7986cb',
+    DIAG_POOL:            '#7986cb',
     'diag_ensemble_safe': '#9fa8da',
-    'equal_ensemble_51':  '#1565c0',
+    EQUAL_POOL:           '#1565c0',
     'equal_ensemble_safe':'#42a5f5',
-    'diag_ensemble_9':    '#ff9800',
-    'equal_ensemble_9':   '#ffc107',
+    DIAG_SMALL:           '#ff9800',
+    EQUAL_SMALL:          '#ffc107',
     'phase2_cascade':     '#e65100',
     'fixed_rational':     '#c62828',
     'fixed_richardson':   '#f4a261',
-    'current_value':      '#bbbbbb',
+    'constant_assumed':   '#212121',
+    'constant_oracle':    '#9e9e9e',
+    'window_mean':        '#616161',
+    'window_min':         '#757575',
+    'last_value':         '#bdbdbd',
 }
 
 
@@ -387,115 +560,158 @@ SELECTOR_COLOURS = {
 # 3.  AGGREGATION
 # =============================================================================
 
-def aggregate_results(df, out_dir):
-    all_methods    = list(METHOD_NAMES)
+def _selector_summary(sub: pd.DataFrame, extra: dict) -> List[dict]:
+    """
+    The descriptive panel (src.panels.error_panel) of every selector on one
+    slice of per-cell selector errors, plus the median skill.
+
+    A selector's record on a cell is the record of the method it chose (or
+    the ensemble value); an invalid choice is an invalid record, never
+    replaced.  The catastrophe flag follows the record rule (invalid, or
+    error above config.CAT_MULT times the cell's last-value error curr_err);
+    E_last is the last_value comparator's error on the cell, so
+    win_rate_vs_last counts every record.  The error statistics are
+    conditional on validity and are written next to valid_rate and
+    n_valid / n_total; a selector without a valid record on the slice keeps
+    its row (n_valid 0, conditional fields NaN).  med_skill is the median over
+    the valid records of the hindsight best-of-four (strict) skill;
+    med_skill_vs_* / win_rate_vs_* are the fixed-reference aggregates.
+    """
+    rows = []
+    refs = sub['ref_error'].to_numpy(dtype=float)
+    curr = sub['curr_err'].to_numpy(dtype=float)
+    e_last = sub['E_last'].to_numpy(dtype=float)
+    # the four deployable trivials are selectors themselves, so their
+    # per-record errors are columns of the frame
+    ref_arrays = {tag: (sub[name].to_numpy(dtype=float) if name in sub.columns
+                        else np.full(len(sub), np.nan))
+                  for name, tag in REFERENCE_TAGS}
+    for sel in SELECTORS:
+        if sel not in sub.columns:
+            continue
+        vals = sub[sel].to_numpy(dtype=float)
+        valid = np.isfinite(vals)
+        with np.errstate(invalid='ignore'):
+            cat = (~valid) | ((curr > 1e-12) & (vals > CFG_MOD.CAT_MULT * curr))
+        panel = error_panel(vals, valid, cat, e_last)
+        sk = np.array([skill_score(v, r) for v, r in zip(vals, refs)], dtype=float)
+        sk = sk[~np.isnan(sk)]
+        row = dict(extra)
+        row.update({'selector': sel,
+                    'is_trivial': int(sel in TRIVIAL_SELECTORS),
+                    'is_oracle': int(sel == 'constant_oracle')})
+        for k in PANEL_COLS:
+            v = panel[k]
+            if isinstance(v, float) and math.isfinite(v):
+                v = round(v, 4) if k in RATE_COLS else (round(v, 6) if k in ERR_COLS else v)
+            row[k] = v
+        row['med_skill'] = round(float(np.median(sk)), 4) if sk.size else float('nan')
+        svs = skill_vs_from_arrays(vals, ref_arrays)          # med_skill_vs_* / win_rate_vs_*
+        row.update({k: v for k, v in svs.items() if k not in row})   # the panel's win_rate_vs_last stands
+        rows.append(row)
+    return rows
+
+
+def aggregate_results(df, out_dir, dangerous, default_g=None):
+    pool           = POOL
     phase2_methods = PHASE2_METHODS
-    fid_default    = df['future_idx'].max()
+    dangerous      = set(dangerous)
+    g_head         = _headline(df, default_g)
 
     ens_rows, wgt_rows = [], []
 
-    for (regime, obs_idx, sigma, seed, fid), grp in df.groupby(
-            ['regime', 'obs_idx', 'noise', 'seed', 'future_idx']):
-
+    for (regime, obs_idx, sigma, seed, g), grp in df.groupby(CELL):
         true_val = float(grp['true_val'].iloc[0])
         slope    = float(grp['casc_slope'].iloc[0])
         r2       = float(grp['casc_r2'].iloc[0])
+        first    = grp.iloc[0]
 
-        out = _compute_ensembles(grp, true_val, all_methods,
-                                  phase2_methods, slope, r2)
-        row = {'regime': regime, 'obs_idx': obs_idx,
-               'noise': sigma, 'seed': seed, 'future_idx': fid}
+        out = _compute_ensembles(grp, true_val, pool, phase2_methods, slope, r2, dangerous)
+        mi = grp.set_index('method')
+        row = {'regime': regime, 'is_holdout': int(first['is_holdout']),
+               'obs_idx': obs_idx, 'noise': sigma, 'seed': seed, 'target_g': g,
+               'n_f': float(first['n_f']), 'achieved_g': float(first['achieved_g']),
+               'capped': int(first['capped']),
+               'L_true': float(first['L_true']), 'L_hat': float(first['L_hat']),
+               'ref_error': float(first['ref_error']),
+               # the cell's last-value error (the catastrophe reference of every record) and the
+               # last_value comparator's error (E_last of the descriptive panel)
+               'curr_err': float(first['curr_err']),
+               'E_last': (float(mi.loc['last_value', 'error']) if 'last_value' in mi.index
+                          else float('nan'))}
         row.update(out)
         ens_rows.append(row)
 
-        mi = grp.set_index('method')
-        for m in all_methods:
+        for m in pool:
             if m not in mi.index:
                 continue
             wgt_rows.append({
                 'method':       m,
                 'regime':       regime,
+                'is_holdout':   int(first['is_holdout']),
                 'obs_idx':      obs_idx,
                 'noise':        sigma,
                 'seed':         seed,
-                'future_idx':   fid,
+                'target_g':     g,
+                'capped':       int(first['capped']),
                 'perturb_iqr':  float(mi.loc[m, 'perturb_iqr']),
                 'error':        float(mi.loc[m, 'error']),
-                'is_dangerous': int(m in DANGEROUS),
+                'skill':        float(mi.loc[m, 'skill']),
+                'is_dangerous': int(m in dangerous),
+                **{c: float(mi.loc[m, c]) for c in _SKILL_VS_RECORD if c in mi.columns},
             })
 
     df_ens = pd.DataFrame(ens_rows)
     df_wgt = pd.DataFrame(wgt_rows)
 
-    # ── Global comparison ──────────────────────────────────────────────────────
+    core = exclude_capped(df_ens[df_ens['is_holdout'] == 0])
+    hold = exclude_capped(df_ens[df_ens['is_holdout'] == 1])
+
+    # ── Global comparison (core, capped excluded) ──────────────────────────────
     comp_rows = []
-    for fid in sorted(df_ens['future_idx'].unique()):
-        sub = df_ens[df_ens['future_idx'] == fid]
-        for sel in SELECTORS:
-            if sel not in sub.columns:
-                continue
-            vals = sub[sel].dropna()
-            if len(vals) == 0:
-                continue
-            comp_rows.append({
-                'selector':     sel,
-                'future_idx':   fid,
-                'mean_error':   round(float(vals.mean()),   6),
-                'median_error': round(float(vals.median()), 6),
-                'n':            len(vals),
-            })
+    for g in sorted(core['target_g'].unique()):
+        comp_rows += _selector_summary(core[core['target_g'] == g], {'target_g': g, 'regime_set': 'core'})
     df_comp = pd.DataFrame(comp_rows)
     _save_csv(df_comp, out_dir, 'phase5a_ensemble.csv')
 
-    # ── Per-sigma comparison (key for understanding diagnostic behaviour) ───────
+    hold_rows = []
+    for g in sorted(hold['target_g'].unique()):
+        hold_rows += _selector_summary(hold[hold['target_g'] == g], {'target_g': g, 'regime_set': 'holdout'})
+    df_hold = pd.DataFrame(hold_rows, columns=df_comp.columns if len(df_comp) else None)
+    _save_csv(df_hold, out_dir, 'phase5a_ensemble_holdout.csv')
+
+    # ── Per-sigma comparison (core) ────────────────────────────────────────────
     sigma_rows = []
-    for (sigma, fid), sub in df_ens.groupby(['noise', 'future_idx']):
-        for sel in SELECTORS:
-            if sel not in sub.columns:
-                continue
-            vals = sub[sel].dropna()
-            if len(vals) == 0:
-                continue
-            sigma_rows.append({
-                'noise': sigma, 'selector': sel, 'future_idx': fid,
-                'mean_error':   round(float(vals.mean()),   6),
-                'median_error': round(float(vals.median()), 6),
-                'n': len(vals),
-            })
+    for (sigma, g), sub in core.groupby(['noise', 'target_g']):
+        sigma_rows += _selector_summary(sub, {'noise': sigma, 'target_g': g})
     df_sigma = pd.DataFrame(sigma_rows)
     _save_csv(df_sigma, out_dir, 'phase5a_by_sigma.csv')
 
-    # ── Per-regime ─────────────────────────────────────────────────────────────
+    # ── Per-regime (all regimes, capped cells excluded per regime) ─────────────
     regime_rows = []
-    for (regime, fid), sub in df_ens.groupby(['regime', 'future_idx']):
-        for sel in SELECTORS:
-            if sel not in sub.columns:
-                continue
-            vals = sub[sel].dropna()
-            if len(vals) == 0:
-                continue
-            regime_rows.append({
-                'regime': regime, 'selector': sel, 'future_idx': fid,
-                'mean_error':   round(float(vals.mean()),   6),
-                'median_error': round(float(vals.median()), 6),
-                'n': len(vals),
-            })
+    pooled_all = exclude_capped(df_ens)
+    for (regime, g), sub in pooled_all.groupby(['regime', 'target_g']):
+        n_all = int(((df_ens['regime'] == regime) & (df_ens['target_g'] == g)).sum())
+        regime_rows += _selector_summary(sub, {
+            'regime': regime, 'is_holdout': int(sub['is_holdout'].iloc[0]),
+            'target_g': g, 'n_capped_excluded': n_all - int(len(sub))})
     df_regime = pd.DataFrame(regime_rows)
     _save_csv(df_regime, out_dir, 'phase5a_per_regime.csv')
 
-    # ── Ablation ───────────────────────────────────────────────────────────────
+    # ── Ablation (core) ────────────────────────────────────────────────────────
     abl_rows = []
-    for fid in sorted(df_ens['future_idx'].unique()):
-        sub = df_ens[df_ens['future_idx'] == fid]
+    for g in sorted(core['target_g'].unique()):
+        sub = core[core['target_g'] == g]
         comparisons = [
-            # (better_selector, baseline, label)
-            ('threshold_ens_010', 'equal_ensemble_51',  'threshold_vs_equal_51'),
+            ('threshold_ens_010', EQUAL_POOL,  ABL_THRESHOLD_VS_EQUAL),
             ('threshold_ens_010', 'fixed_rational',     'threshold_vs_rational'),
-            ('capped_diag_51',    'equal_ensemble_51',  'capped_diag_vs_equal'),
-            ('diag_ensemble_51',  'equal_ensemble_51',  'diag_vs_equal_51'),
-            ('diag_ensemble_9',   'equal_ensemble_9',   'weighting_gain_9'),
+            (CAPPED_POOL,    EQUAL_POOL,  'capped_diag_vs_equal'),
+            (DIAG_POOL,  EQUAL_POOL,  ABL_DIAG_VS_EQUAL),
+            (DIAG_SMALL,          EQUAL_SMALL,          ABL_WEIGHTING_SMALL),
             ('threshold_ens_010', 'threshold_ens_safe', 'filter_benefit'),
-            ('equal_ensemble_51', 'equal_ensemble_9',   'pool_expansion_gain'),
+            (EQUAL_POOL,          EQUAL_SMALL,          'pool_expansion_gain'),
+            ('threshold_ens_010', 'constant_assumed',   'threshold_vs_constant_assumed'),
+            ('fixed_rational',    'window_min',         'rational_vs_window_min'),
         ]
         for sel_a, sel_b, label in comparisons:
             if sel_a not in sub.columns or sel_b not in sub.columns:
@@ -503,47 +719,70 @@ def aggregate_results(df, out_dir):
             idx = sub[sel_a].notna() & sub[sel_b].notna()
             if idx.sum() == 0:
                 continue
-            # positive = sel_b - sel_a > 0 → sel_a has LOWER error → sel_a is BETTER
             gain = float((sub.loc[idx, sel_b] - sub.loc[idx, sel_a]).mean())
             abl_rows.append({
-                'comparison': label, 'future_idx': fid,
+                'comparison': label, 'target_g': g,
                 'mean_improvement': round(gain, 6),
-                'n': int(idx.sum()),
+                'n_both_valid': int(idx.sum()),      # records where both selectors are valid
+                'n_total': int(len(sub)),
             })
     df_abl = pd.DataFrame(abl_rows)
     _save_csv(df_abl, out_dir, 'phase5a_ablation.csv')
 
-    # ── Method reliability ─────────────────────────────────────────────────────
-    wgt_agg = (df_wgt[df_wgt['future_idx'] == fid_default]
-               .groupby('method')
-               .agg(mean_piqr=('perturb_iqr', 'mean'),
-                    med_piqr=('perturb_iqr',  'median'),
-                    mean_err=('error',          'mean'),
-                    is_dangerous=('is_dangerous','first'))
-               .reset_index()
-               .sort_values('mean_piqr'))
+    # ── Method reliability (core, headline stratum) ────────────────────────────
+    wsub = exclude_capped(df_wgt[(df_wgt['is_holdout'] == 0) & (df_wgt['target_g'] == g_head)])
+    wgt_agg = (wsub.groupby('method')
+                   .agg(mean_piqr=('perturb_iqr', 'mean'),
+                        med_piqr=('perturb_iqr',  'median'),
+                        mean_err=('error',          'mean'),
+                        med_skill=('skill',         'median'),
+                        is_dangerous=('is_dangerous','first'),
+                        **{f'med_skill_vs_{t}': (f'skill_vs_{t}', 'median') for _, t in REFERENCE_TAGS},
+                        **{f'win_rate_vs_{t}': (f'win_vs_{t}', 'mean') for _, t in REFERENCE_TAGS})
+                   .reset_index()
+                   .sort_values('mean_piqr'))
+    wgt_agg['target_g'] = g_head
     _save_csv(wgt_agg, out_dir, 'phase5a_method_weights.csv')
 
-    # ── Oracle gap by obs_idx ──────────────────────────────────────────────────
+    # ── Oracle gap by obs_idx (core) ───────────────────────────────────────────
     gap_rows = []
-    for (obs_idx, fid), sub in df_ens.groupby(['obs_idx', 'future_idx']):
+    for (obs_idx, g), sub in core.groupby(['obs_idx', 'target_g']):
         for sel in ['threshold_ens_010', 'threshold_ens_safe',
-                    'diag_ensemble_51', 'equal_ensemble_51', 'fixed_rational']:
+                    DIAG_POOL, EQUAL_POOL, 'fixed_rational',
+                    'constant_assumed']:
             if sel not in sub.columns:
                 continue
-            idx = sub[sel].notna() & sub['oracle_51'].notna()
+            idx = sub[sel].notna() & sub[ORACLE_POOL].notna()
             if idx.sum() == 0:
                 continue
-            gap = float((sub.loc[idx, sel] - sub.loc[idx, 'oracle_51']).mean())
+            gap = float((sub.loc[idx, sel] - sub.loc[idx, ORACLE_POOL]).mean())
             gap_rows.append({
-                'obs_idx': obs_idx, 'future_idx': fid,
+                'obs_idx': obs_idx, 'target_g': g,
                 'selector': sel, 'mean_gap_vs_oracle': round(gap, 6),
-                'n': int(idx.sum()),
+                'n_both_valid': int(idx.sum()),      # records where the selector and the oracle are valid
+                'n_total': int(len(sub)),
             })
     df_gap = pd.DataFrame(gap_rows)
     _save_csv(df_gap, out_dir, 'phase5a_oracle_gap.csv')
 
-    return df_ens, df_comp, df_sigma, df_regime, df_abl, wgt_agg, df_gap
+    # ── Capped block ───────────────────────────────────────────────────────────
+    df_cap = capped_block(df, keys=['regime', 'is_holdout', 'obs_idx', 'target_g', 'method'],
+                          value_cols=['error', 'skill'])
+    _save_csv(df_cap, out_dir, 'phase5a_capped.csv')
+
+    # ── Validity by depth (committed aggregate; Prompt 5A item 6) ─────────────
+    # method x obs_idx x noise over every regime, seed and stratum: the depth
+    # dependence that the obs-90 dangerous derivation cannot see (e.g.
+    # richardson_3 is ~50 % valid at obs 30 and 98 % at obs 90).
+    df_val = (df.groupby(['method', 'obs_idx', 'noise'])
+                .agg(valid_rate=('valid', 'mean'), n=('valid', 'size'),
+                     is_trivial=('is_trivial', 'first'), is_oracle=('is_oracle', 'first'),
+                     is_dangerous=('is_dangerous', 'first'))
+                .reset_index())
+    df_val['valid_rate'] = df_val['valid_rate'].round(4)
+    _save_csv(df_val, out_dir, 'phase5a_validity_by_depth.csv')
+
+    return df_ens, df_comp, df_sigma, df_regime, df_abl, wgt_agg, df_gap, df_cap, df_val
 
 
 # =============================================================================
@@ -551,37 +790,36 @@ def aggregate_results(df, out_dir):
 # =============================================================================
 
 def fig_p5a_01_comparison(df_comp, out_dir):
-    """Horizontal bar chart of mean error per selector per horizon."""
-    horizons = sorted(df_comp['future_idx'].unique())
-    fig, axes = plt.subplots(1, len(horizons),
-                              figsize=(6*len(horizons), 10), sharey=False)
-    if len(horizons) == 1:
+    """Horizontal bar chart of mean error per selector per stratum."""
+    if df_comp.empty:
+        return ''
+    strata = sorted(df_comp['target_g'].unique(), reverse=True)
+    fig, axes = plt.subplots(1, len(strata), figsize=(6*len(strata), 10), sharey=False)
+    if len(strata) == 1:
         axes = [axes]
 
-    for ax, fid in zip(axes, horizons):
-        sub  = df_comp[df_comp['future_idx'] == fid].set_index('selector')
+    for ax, g in zip(axes, strata):
+        sub  = df_comp[df_comp['target_g'] == g].set_index('selector')
         sels = [s for s in SELECTORS if s in sub.index]
         vals = [float(sub.loc[s, 'mean_error']) for s in sels]
         cols = [SELECTOR_COLOURS.get(s, '#999') for s in sels]
 
-        ax.barh(range(len(sels)), vals, color=cols,
-                edgecolor='white', lw=0.4, height=0.65)
+        ax.barh(range(len(sels)), vals, color=cols, edgecolor='white', lw=0.4, height=0.65)
         ax.set_yticks(range(len(sels)))
         ax.set_yticklabels([s.replace('_','\n') for s in sels], fontsize=6.5)
         ax.set_xlabel('Mean absolute error', fontsize=9)
-        ax.set_title(f'Horizon = {fid}', fontsize=10, fontweight='bold')
+        ax.set_title(f'g = {g:g}', fontsize=10, fontweight='bold')
 
         finite_vals = [v for v in vals if math.isfinite(v)]
         mx = max(finite_vals) if finite_vals else 1.0
         for i, v in enumerate(vals):
             if math.isfinite(v):
-                ax.text(v + mx*0.01, i, f'{v:.5f}',
-                        va='center', fontsize=6.5)
+                ax.text(v + mx*0.01, i, f'{v:.5f}', va='center', fontsize=6.5)
 
     fig.suptitle(
-        'Figure P5A-1 — Full 51-Method Ensemble: Selector Comparison\n'
-        'Dark green = threshold ensembles (Phase 5A);  '
-        'Black = oracle upper bounds',
+        'Figure P5A-1 — Full-Pool Ensemble: Selector Comparison (core, capped excluded)\n'
+        'Dark green = threshold ensembles;  Black = oracle upper bounds;  '
+        'greys = trivial reference selectors',
         fontsize=10, fontweight='bold')
     fig.tight_layout()
     path = os.path.join(out_dir, 'figure_p5a_01_comparison.png')
@@ -589,18 +827,16 @@ def fig_p5a_01_comparison(df_comp, out_dir):
     return path
 
 
-def fig_p5a_02_by_sigma(df_sigma, out_dir):
-    """
-    Key figure: mean error by sigma level for threshold_ens_010,
-    diag_ensemble_51, equal_ensemble_51, fixed_rational.
-    Shows whether diagnostic adds value at higher noise.
-    """
-    key_sels = ['oracle_51', 'threshold_ens_010', 'capped_diag_51',
-                 'equal_ensemble_51', 'fixed_rational', 'fixed_richardson']
+def fig_p5a_02_by_sigma(df_sigma, out_dir, default_g=None):
+    """Mean error by sigma level for key selectors at the headline stratum."""
+    if df_sigma.empty:
+        return ''
+    key_sels = [ORACLE_POOL, 'threshold_ens_010', CAPPED_POOL,
+                EQUAL_POOL, 'fixed_rational', 'fixed_richardson',
+                'constant_assumed']
     key_sels = [s for s in key_sels if s in df_sigma['selector'].unique()]
-    sigmas   = sorted(df_sigma['noise'].unique())
-    fid      = df_sigma['future_idx'].max()
-    sub      = df_sigma[df_sigma['future_idx'] == fid]
+    g        = _headline(df_sigma, default_g)
+    sub      = df_sigma[df_sigma['target_g'] == g]
 
     fig, ax = plt.subplots(figsize=(10, 6))
     for sel in key_sels:
@@ -615,8 +851,7 @@ def fig_p5a_02_by_sigma(df_sigma, out_dir):
     ax.set_xlabel('Noise level (sigma)', fontsize=10)
     ax.set_ylabel('Mean absolute error', fontsize=10)
     ax.set_title(
-        f'Figure P5A-2 — Selector Performance by Noise Level  '
-        f'(horizon = {fid})\n'
+        f'Figure P5A-2 — Selector Performance by Noise Level  (g = {g:g})\n'
         'Key question: does the diagnostic add value at higher sigma?',
         fontsize=10, fontweight='bold')
     ax.legend(fontsize=8, loc='upper left')
@@ -628,15 +863,16 @@ def fig_p5a_02_by_sigma(df_sigma, out_dir):
 
 def fig_p5a_03_method_weights(wgt_agg, out_dir):
     """Method reliability ranking by mean perturb_IQR."""
+    if wgt_agg.empty:
+        return ''
     df  = wgt_agg.copy().reset_index(drop=True)
-    max_iqr = df['mean_piqr'].replace([float('nan')], float('nan')).max(skipna=True)
-    plot_val = df['mean_piqr'].fillna(max_iqr * 1.1)
+    max_iqr = df['mean_piqr'].max(skipna=True)
+    plot_val = df['mean_piqr'].fillna(max_iqr * 1.1 if math.isfinite(max_iqr) else 1.0)
     colours  = ['#c62828' if row['is_dangerous'] else '#1565c0'
                 for _, row in df.iterrows()]
 
     fig, ax = plt.subplots(figsize=(14, max(8, len(df) * 0.22)))
-    ax.barh(range(len(df)), plot_val,
-            color=colours, edgecolor='white', lw=0.3, height=0.75)
+    ax.barh(range(len(df)), plot_val, color=colours, edgecolor='white', lw=0.3, height=0.75)
     ax.set_yticks(range(len(df)))
     ax.set_yticklabels(df['method'], fontsize=6.5)
     ax.set_xlabel(
@@ -645,11 +881,11 @@ def fig_p5a_03_method_weights(wgt_agg, out_dir):
         fontsize=9)
     ax.set_title(
         'Figure P5A-3 — Method Reliability Ranking\n'
-        'Red = Phase 1 dangerous methods.  '
-        'Validation: ALL dangerous methods should be at right (high IQR).',
+        'Red = dangerous per the Phase-1 artifact.  '
+        'Validation: dangerous methods should sit at the right (high IQR).',
         fontsize=10, fontweight='bold')
     ax.legend(handles=[
-        mpatches.Patch(color='#c62828', label='Dangerous (Phase 1)'),
+        mpatches.Patch(color='#c62828', label='Dangerous (Phase-1 artifact)'),
         mpatches.Patch(color='#1565c0', label='Safe'),
     ], fontsize=9, loc='lower right')
     fig.tight_layout()
@@ -658,14 +894,16 @@ def fig_p5a_03_method_weights(wgt_agg, out_dir):
     return path
 
 
-def fig_p5a_04_obs_gap(df_gap, out_dir):
+def fig_p5a_04_obs_gap(df_gap, out_dir, default_g=None):
     """Oracle gap vs obs_idx for key selectors."""
+    if df_gap.empty:
+        return ''
     obs_vals = sorted(df_gap['obs_idx'].unique())
     key_sels = ['threshold_ens_010', 'threshold_ens_safe',
-                 'equal_ensemble_51', 'fixed_rational']
+                EQUAL_POOL, 'fixed_rational', 'constant_assumed']
     key_sels = [s for s in key_sels if s in df_gap['selector'].unique()]
-    fid      = df_gap['future_idx'].max()
-    sub      = df_gap[df_gap['future_idx'] == fid]
+    g        = _headline(df_gap, default_g)
+    sub      = df_gap[df_gap['target_g'] == g]
 
     fig, ax = plt.subplots(figsize=(10, 6))
     for sel in key_sels:
@@ -677,13 +915,11 @@ def fig_p5a_04_obs_gap(df_gap, out_dir):
                 color=SELECTOR_COLOURS.get(sel, '#999'),
                 lw=2, markersize=6, alpha=0.9)
 
-    ax.axhline(0, color='black', lw=0.8, ls='--', alpha=0.4,
-               label='Oracle (gap = 0)')
+    ax.axhline(0, color='black', lw=0.8, ls='--', alpha=0.4, label='Oracle (gap = 0)')
     ax.set_xlabel('obs_idx  (observation depth)', fontsize=10)
-    ax.set_ylabel('Mean error gap vs oracle_51', fontsize=10)
-    ax.set_title(
-        f'Figure P5A-4 — Oracle Gap vs Observation Depth  (horizon = {fid})',
-        fontsize=10, fontweight='bold')
+    ax.set_ylabel(f'Mean error gap vs {ORACLE_POOL}', fontsize=10)
+    ax.set_title(f'Figure P5A-4 — Oracle Gap vs Observation Depth  (g = {g:g})',
+                 fontsize=10, fontweight='bold')
     ax.set_xticks(obs_vals)
     ax.legend(fontsize=9)
     fig.tight_layout()
@@ -696,31 +932,39 @@ def fig_p5a_04_obs_gap(df_gap, out_dir):
 # MASTER RUN FUNCTION
 # =============================================================================
 
-def run_all(obs_idx_list, noise_list, future_list, n_seeds,
+def run_all(obs_idx_list, noise_list, gap_fractions, n_seeds,
             window_len, perturb_trials, perturb_scale,
-            out_dir, verbose=True):
+            out_dir, core_regimes=None, holdout_regimes=None,
+            default_g=None, verbose=True, jobs=1, keep_shards=False):
     os.makedirs(out_dir, exist_ok=True)
-    default_fid = max(future_list)
 
-    df = run_phase5a(obs_idx_list, noise_list, future_list,
-                     n_seeds, window_len, perturb_trials,
-                     perturb_scale, out_dir, verbose)
+    # Ordering guard: the dangerous set comes from the Phase-1 artifact.
+    dangerous = load_dangerous()
+    print(f'  Dangerous set (Phase-1 artifact): {sorted(dangerous)}')
+
+    df = run_phase5a(obs_idx_list, noise_list, gap_fractions, n_seeds,
+                     window_len, perturb_trials, perturb_scale, out_dir,
+                     dangerous, core_regimes, holdout_regimes, verbose,
+                     jobs=jobs, keep_shards=keep_shards)
 
     print('\n  Aggregating ensemble results ...')
-    df_ens, df_comp, df_sigma, df_regime, df_abl, wgt_agg, df_gap = \
-        aggregate_results(df, out_dir)
+    (df_ens, df_comp, df_sigma, df_regime, df_abl,
+     wgt_agg, df_gap, df_cap, df_val) = aggregate_results(df, out_dir, dangerous, default_g)
+    g_head = _headline(df, default_g)
 
     print('\n  Generating figures ...')
     paths = [
         fig_p5a_01_comparison(df_comp, out_dir),
-        fig_p5a_02_by_sigma(df_sigma, out_dir),
+        fig_p5a_02_by_sigma(df_sigma, out_dir, g_head),
         fig_p5a_03_method_weights(wgt_agg, out_dir),
-        fig_p5a_04_obs_gap(df_gap, out_dir),
+        fig_p5a_04_obs_gap(df_gap, out_dir, g_head),
     ]
 
     return {
         'raw': df, 'ensemble': df_ens, 'comparison': df_comp,
         'by_sigma': df_sigma, 'regime': df_regime,
         'ablation': df_abl, 'weights': wgt_agg, 'gap': df_gap,
+        'capped': df_cap, 'validity_by_depth': df_val,
+        'dangerous': dangerous, 'default_g': g_head,
         'figures': [p for p in paths if p],
     }

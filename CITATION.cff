@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+message: "If you use this software or its results, please cite it as below."
+type: software
+title: "Sequence Acceleration versus Trajectory Fitting for Early Learning-Curve Prediction: benchmark code and results"
+authors:
+  - family-names: Maleki
+    given-names: Kian
+    affiliation: "Department of Physics, Creighton University"
+    orcid: "https://orcid.org/0000-0002-0317-8766"
+repository-code: "https://github.com/drkianmaleki/sequence-acceleration-benchmark"
+license: MIT
+version: "2.0"
+date-released: "2026-10-05"
+keywords:
+  - learning curves
+  - extrapolation
+  - sequence acceleration
+  - gradient boosting
+  - benchmark
